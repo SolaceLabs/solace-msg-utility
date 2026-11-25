@@ -1,0 +1,212 @@
+<article class="manual-chapter">
+    <h2>Queue Browser</h2>
+    <p class="manual-lead">Look at the messages waiting on a queue without taking them off it. Read each one, narrow the list with a filter, and forward, delete or download the messages you need.</p>
+    <p>Queue Browser needs the <strong>client connection</strong> from the Connections page. Until you connect, the page shows <strong>Connection Required</strong> in place of everything below.</p>
+
+    <h3>The page at a glance</h3>
+    <figure class="manual-figure">
+        <img src="help/page.svg" width="760" height="600" alt="The Queue Browser page: the QB Session card on top, then the message table with its counts and buttons, then the Message Details panel.">
+        <figcaption>The Queue Browser page, with one queue bound and two messages ticked.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Queue Name</strong> and <strong>Bind</strong>. Type the name of a queue and bind to it. The magnifier button, when it is shown, lets you pick the queue from a list instead.</li>
+        <li><strong>Bound Queues</strong> and <strong>Unbind</strong>. The queues you have bound. Choose one to show its messages; Unbind lets it go.</li>
+        <li>The Message VPN and the queue on show, with a <strong>Read-Write</strong> or <strong>Read-Only</strong> badge that says what you may do on it.</li>
+        <li>The <strong>filter</strong> button, which opens Filter Messages.</li>
+        <li>The counts: <strong>Total</strong>, <strong>Displayed</strong> and <strong>Selected</strong>.</li>
+        <li>The bulk buttons. They act on every message you have ticked.</li>
+        <li>The message table: one row for each message, with a tick box.</li>
+        <li>The row buttons. They act on that one message.</li>
+        <li><strong>Message Details</strong>: everything about the message you clicked.</li>
+    </ol>
+
+    <h3>Binding to a queue</h3>
+    <ol class="manual-steps">
+        <li>Type the name of the queue in <strong>Queue Name</strong>.</li>
+        <li>Press <strong>Bind</strong>, or press <kbd>Enter</kbd>.</li>
+        <li>A message confirms <code>Queue "&lt;name&gt;" bound</code>. The queue appears in <strong>Bound Queues</strong>, and its messages start to arrive in the table.</li>
+    </ol>
+    <p>You can bind up to <strong>3 queues at once</strong>. Switch between them in <strong>Bound Queues</strong>; each queue keeps its own messages. To stop receiving messages from a queue, select it and press <strong>Unbind</strong>. <strong>Unbind</strong> also discards the messages the page had read from that queue; bind it again to read them afresh.</p>
+    <aside class="manual-note">
+        <p>The table is a snapshot. Another application may have consumed a message since you bound the queue, so a message you see here may no longer be on the broker.</p>
+        <p>The page keeps the latest messages of each queue: as many as <strong>Max Messages per Queue</strong> allows (in Advanced Settings on the Connections page), and never more than 32 MiB. The oldest messages go first, at whichever limit is reached first.</p>
+    </aside>
+    <h4>When the broker ends a binding</h4>
+    <p>The broker can end a binding for good: the queue is deleted or its egress is disabled, your permissions change, or an administrator unbinds the client. A message then says <code>Queue "&lt;name&gt;" was disconnected: &lt;reason&gt;. Bind it again to continue.</code> The queue leaves <strong>Bound Queues</strong> and frees its place. If it was on show, the page moves to the next bound queue. Bind it again once the cause is fixed.</p>
+
+    <h3>The message table</h3>
+    <table>
+        <thead>
+            <tr><th>Column</th><th>What it holds</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Tick box</td><td>Ticks the message for the bulk buttons. The box in the header ticks or clears every message on show.</td></tr>
+            <tr><td>Message ID</td><td>The Guaranteed Message ID the broker gave the message.</td></tr>
+            <tr><td>Date</td><td>The sender's timestamp, or <code>(No Timestamp)</code> when the sender set none.</td></tr>
+            <tr><td>Size</td><td>The size of the message.</td></tr>
+            <tr><td>Actions</td><td>The row buttons: Download Content, Download Full, Forward and Delete.</td></tr>
+        </tbody>
+    </table>
+    <p>The bar above the table counts the messages: <strong>Total</strong> is every message the page holds for the queue, <strong>Displayed</strong> is how many of them pass the filter, and <strong>Selected</strong> is how many you have ticked.</p>
+
+    <h3>Message details</h3>
+    <p>Click a row to see that message in the <strong>Message Details</strong> panel under the table.</p>
+    <figure class="manual-figure">
+        <img src="help/details.svg" width="760" height="470" alt="The Message Details panel: the message type and Show Raw Content on top, then the identifiers, the properties and the Content Preview box.">
+        <figcaption>Message Details for a text message.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The type of the message: Text, Binary, Map or Stream.</li>
+        <li><strong>Show Raw Content</strong> opens the message as the Solace library dumps it: its header fields, then the bytes of the attachment in hex, sixteen to a line, with the printable ones beside them.</li>
+        <li>The <strong>Message ID</strong>, the <strong>Destination</strong> (a topic or queue name, with a badge for which) and, when the broker provides one, the <strong>Replication Group Message ID</strong>. The small buttons copy the Destination and the Repl Grp Msg Id.</li>
+        <li><strong>Message Properties</strong>: the standard Solace properties, such as Delivery Mode, TTL, Priority and Correlation ID.</li>
+        <li><strong>Application / User Properties</strong>: the keys and values the publisher set.</li>
+        <li><strong>Content Preview</strong>: the payload as text, with a button that copies it.</li>
+    </ol>
+    <h4>What Content Preview shows</h4>
+    <table>
+        <thead>
+            <tr><th>The payload is</th><th>You see</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Text, XML, or a binary attachment that holds UTF-8 text</td><td>The text.</td></tr>
+            <tr><td>A map or a stream</td><td>Its fields as YAML: strings, numbers, true and false, <code>null</code>, nested maps and lists, bytes as <code>!!binary</code> followed by base64, and a destination as <code>{ topic: name }</code> or <code>{ queue: name }</code>. The copy button copies that YAML.</td></tr>
+            <tr><td>Binary that is not text</td><td>What its first bytes say it is, and its size, for example <code>[Binary payload, looks like PNG image: 1,234 bytes]</code>. Other kinds include gzip-compressed data, a PDF document and an executable. When the bytes match no known kind you see only the size: <code>[Binary payload: 1,234 bytes]</code>. The copy button stays off.</td></tr>
+            <tr><td>A PNG, JPEG, GIF or WebP image</td><td>The same line as any binary payload, and a <strong>Show content</strong> button beside the copy button. It puts the image in place of the box; <strong>Hide content</strong> puts the box back.</td></tr>
+        </tbody>
+    </table>
+    <p>Nothing is decoded until you press <strong>Show content</strong>. An image whose header declares more than 40 megapixels, or no size at all, has no button, and a line under the box says why. The header can declare a size its bytes do not hold, so even a small file can be refused.</p>
+    <aside class="manual-note" data-kind="important">
+        <p>Nothing in a payload is ever opened or run. An SVG or HTML payload is only ever shown as text. To get the bytes, use <strong>Download Content</strong>; to see them in hex, use <strong>Show Raw Content</strong>.</p>
+    </aside>
+
+    <h3>Filtering messages</h3>
+    <p>Press the filter button (4 in Figure 1) to open <strong>Filter Messages</strong>. A filter changes only what the table shows. Every message stays in memory, and <strong>Clear Filter</strong> brings them all back.</p>
+    <figure class="manual-figure">
+        <img src="help/filter.svg" width="640" height="540" alt="The Filter Messages dialog: Search Criteria, then Message ID and type, Destination, Properties Filter, Body Content, Search Time Range, and the Clear Filter, Cancel and Apply Filter buttons.">
+        <figcaption>Filter Messages, set to find messages for one topic branch or one correlation ID.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Search Criteria</strong>, a switch with an answer on either side. <strong>Match ANY (OR)</strong>, where it starts, shows a message that passes at least one of the rules you filled in. <strong>Match ALL (AND)</strong> shows only a message that passes every one.</li>
+        <li><strong>Message ID</strong> and <strong>Message Type</strong> (Any, Text, Binary, Map or Stream).</li>
+        <li><strong>Destination Name</strong> and its <strong>Type</strong> (Any, Topic or Queue).</li>
+        <li><strong>Properties Filter</strong>. Press the small <strong>+ Add</strong> button beside the title for each property to test. The key is the name of a standard or an application property, in any letter case; the key box suggests the standard ones: App Msg Id, Cache Id, Corr Id, Delivery Count, Delivery Mode, HTTP Encoding, HTTP Type, Priority, Reply To, Sender Id, SeqNumber, TTL and TopicSeqNum.</li>
+        <li><strong>Body Content</strong>: text the payload must contain, in any letter case. A binary payload that is not text never matches.</li>
+        <li><strong>Search Time Range</strong>: the sender's timestamp must be at or after <strong>Newer than</strong>, and at or before <strong>Older than</strong>. Fill in either or both. A message without a timestamp is left out once either is set.</li>
+        <li><strong>Apply Filter</strong> filters the table. <strong>Clear Filter</strong> removes every rule and shows all messages. <strong>Cancel</strong> closes the dialog and changes nothing.</li>
+    </ol>
+    <h4>Using the * wildcard</h4>
+    <p><strong>Message ID</strong>, <strong>Destination Name</strong> and a property's value are compared whole, in any letter case: <code>orders/eu/new</code> finds only that destination. Put <code>*</code> wherever any run of characters may stand, spaces and symbols included:</p>
+    <table>
+        <thead>
+            <tr><th>You type</th><th>It finds</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>orders/eu/*</code></td><td>Every destination that starts with <code>orders/eu/</code>.</td></tr>
+            <tr><td><code>*/cancelled</code></td><td>Every destination that ends with <code>/cancelled</code>.</td></tr>
+            <tr><td><code>*eu*</code></td><td>Every destination with <code>eu</code> anywhere in it.</td></tr>
+        </tbody>
+    </table>
+    <p><strong>Body Content</strong> needs no wildcard: it always looks for your text anywhere in the payload.</p>
+    <aside class="manual-note" data-kind="tip">
+        <p>Every dialog in the app closes with <kbd>Esc</kbd> or a click outside its box.</p>
+    </aside>
+
+    <h3>Forwarding messages</h3>
+    <p>Forwarding sends a copy of one or more messages to another destination. The original stays on its queue.</p>
+    <ol class="manual-steps">
+        <li>Tick the messages and press <strong>Forward</strong> above the table, or press the forward button on one row.</li>
+        <li><strong>Forward Message</strong> opens and lists the messages to send.</li>
+        <li>Choose a <strong>Destination Type</strong> and, where it applies, type a <strong>Destination Name</strong>:
+            <ul>
+                <li><strong>Topic</strong>: the copy goes to every subscriber of the topic.</li>
+                <li><strong>Queue</strong>: the copy goes to the queue you name.</li>
+                <li><strong>Original Destination</strong>: each message goes back to the destination it was first sent to. The name box is off, because each message carries its own.</li>
+            </ul>
+        </li>
+        <li>Press <strong>Send</strong>.</li>
+    </ol>
+    <figure class="manual-figure">
+        <img src="help/forward.svg" width="640" height="400" alt="The Forward Message dialog: the destination type and name, a list of three messages with a mark beside each, and the Close and Resend failed messages buttons.">
+        <figcaption>Forward Message after a send in which one message failed.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>Where the copies go. Both boxes are locked while a send runs.</li>
+        <li>How many messages are done, out of how many.</li>
+        <li>The messages, each with a mark: a grey dot while it waits, a spinner while it is sent, a green tick once the broker has acknowledged it, and a red dot when it failed, with the reason under it.</li>
+        <li>While a send runs the button reads <strong>Sending...</strong>. If any message failed it becomes <strong>Resend failed messages (N)</strong>.</li>
+    </ol>
+    <p>A message fails when the broker rejects it, when the client disconnects during the send, or when the broker does not acknowledge it within 30 seconds (<code>Timed out waiting for broker acknowledgement.</code>).</p>
+    <p><strong>Resend failed messages</strong> sends only the failed ones again. A message with a green tick is never sent twice. You may change the destination before you resend, so a retry can go somewhere else.</p>
+    <aside class="manual-note" data-kind="important">
+        <p>A forwarded message is a new message, sent in <strong>persistent</strong> delivery mode so that the broker confirms it, even when the original was direct. It copies the properties of the original: application message ID, correlation ID, priority, TTL, reply-to, user properties and the rest.</p>
+    </aside>
+    <aside class="manual-note">
+        <p>Closing Forward Message discards its list. If you open it again, the messages are queued afresh: an acknowledgement that arrives late for the earlier attempt does not show in the new list.</p>
+    </aside>
+
+    <h3>Deleting messages</h3>
+    <aside class="manual-note" data-kind="warning">
+        <p>A deleted message is removed from the queue on the broker. It cannot be brought back.</p>
+    </aside>
+    <p>You can delete only on a queue whose badge reads <strong>Read-Write</strong>. It reads so when the queue's permission for other clients is Consume, Modify-Topic or Delete, or when you own the queue. When the broker lets your client do no more than read, the badge reads <strong>Read-Only</strong> and the rows have no delete button.</p>
+    <ul>
+        <li><strong>One message</strong>: press the delete button on its row. A dialog asks <code>Delete message &lt;id&gt;?</code></li>
+        <li><strong>Several messages</strong>: tick them and press <strong>Delete</strong> above the table. The dialog says how many.</li>
+    </ul>
+    <p><strong>Delete</strong> in the dialog sends the removal. <strong>Cancel</strong>, <kbd>Esc</kbd> or a click outside sends nothing.</p>
+    <p>A message then reports <code>Removal requested for N message(s).</code> and those rows leave the table. The broker does not confirm a removal: a message it did not remove shows up again the next time you bind the queue. If a removal could not be requested, the message is red and adds <code>M could not be requested: &lt;reason&gt;</code>; those rows stay in the table.</p>
+
+    <h3>Downloading messages</h3>
+    <p>Each download comes as a row button, for one message, and as a button above the table, for every message you ticked.</p>
+    <table>
+        <thead>
+            <tr><th>Button</th><th>What you get</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Download Content</strong></td><td>The payload only, byte for byte, in a file named <code>solace-message-{id}.{ext}</code>.</td></tr>
+            <tr><td><strong>Download Full</strong></td><td>The whole message as JSON, with its properties, destination, timestamp and payload, in <code>solace-message-{id}-full.json</code> inside a ZIP archive.</td></tr>
+        </tbody>
+    </table>
+    <h4>Download Content</h4>
+    <p>The file holds exactly the bytes of the payload: a binary attachment as it is, a text or XML message as UTF-8 text, and a map or stream as its raw wire bytes. Those wire bytes are in Solace's own encoding, which only a Solace API reads back; for a readable copy of a map or stream, use Download Full.</p>
+    <p>The extension follows the payload:</p>
+    <ul>
+        <li>A binary payload takes the extension of the kind its first bytes show (<code>.png</code>, <code>.jpg</code>, <code>.gz</code>, <code>.zip</code>, <code>.pdf</code>, <code>.mp4</code> and so on), or <code>.bin</code> when the kind is not recognised. An executable also gets <code>.bin</code>, never <code>.exe</code>.</li>
+        <li>Text takes <code>.json</code>, <code>.xml</code>, <code>.csv</code>, <code>.yaml</code> or <code>.txt</code>: from the publisher's HTTP Content-Type when it names one of those, otherwise from what the text looks like. HTML and SVG are saved as <code>.txt</code>.</li>
+        <li>A map or stream gets <code>.bin</code>.</li>
+    </ul>
+    <p>In Chrome and Edge the row button opens the browser's save dialog on that name, where you can change the name or the folder; Cancel saves nothing. Firefox and Safari save the file straight to your downloads. The button above the table puts each message into one ZIP archive under the same names.</p>
+    <aside class="manual-note">
+        <p>The file is always sent to the browser as plain data, so the browser never opens it.</p>
+    </aside>
+    <h4>Download Full</h4>
+    <p>Each message becomes one JSON file of this shape:</p>
+    <pre><code data-lang="json">{
+  "messageProperties":     { ... standard Solace properties + destination + messageType ... },
+  "applicationProperties": { ... user/custom properties ... },
+  "payload":               "..."
+}</code></pre>
+    <p>A text payload is carried as text. A binary payload that is not text is carried as base64, with <code>"payloadEncoding": "base64"</code> beside <code>"payload"</code>. A map or stream is carried the same way, as its raw wire bytes, with <code>"payloadDecoded"</code> beside them: its fields as plain JSON (a map as an object, a stream as an array, bytes as <code>{ "base64": ... }</code>, a destination as <code>{ "topic": ... }</code>, and a 64-bit integer too large for JSON's numbers as text).</p>
+    <aside class="manual-note" data-kind="important">
+        <p>This JSON shape belongs to this tool and may change in a later release. If you build automation on it, pin the version of the tool.</p>
+    </aside>
+    <aside class="manual-note">
+        <p>A ZIP archive needs the <code>jszip.min.js</code> file beside the app; the gateway image includes it. Without it the app still runs, and only the ZIP downloads are off. If an archive cannot be built, a red message says why. See <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/deployment.md#vendor-libraries">Vendor libraries</a> in the Deployment guide.</p>
+    </aside>
+
+    <h3>If your page shows no payloads</h3>
+    <p>An administrator may give you a build of the app that never shows what a message holds. In that build the message table, the properties, Forward and Delete work as this chapter says, and these parts are absent: Content Preview, Show Raw Content, the two download buttons and the Body Content rule of the filter.</p>
+
+    <h3>Keyboard shortcuts</h3>
+    <table>
+        <thead>
+            <tr><th>Key</th><th>Where</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><kbd>Enter</kbd></td><td>Queue Name</td><td>Binds to the queue.</td></tr>
+            <tr><td><kbd>Enter</kbd></td><td>Destination Name in Forward Message</td><td>Sends.</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>Any dialog</td><td>Closes it.</td></tr>
+        </tbody>
+    </table>
+</article>

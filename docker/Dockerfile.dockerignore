@@ -20,6 +20,20 @@ docs/
 .env
 .env.*
 
+# The dev-script logs (the e2e run's throwaway keys and passwords sit under
+# scripts/logs/e2e/ while it runs, and stay there if it is killed) and the e2e
+# broker details, which may hold broker passwords. COPY scripts/ would
+# otherwise carry the first into a build layer.
+scripts/logs/
+docker/e2e-broker.env
+
+# Local TLS material (cert/ is git-ignored and holds a private key). No COPY
+# names it; this keeps it out of the context sent to the builder, and out of
+# any broader COPY added later.
+cert/
+**/*.key
+**/*.pem
+
 # Editor scratch.
 *.swp
 *.swo

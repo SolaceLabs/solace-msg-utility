@@ -1,9 +1,18 @@
-import { DEFAULT_MAX_MESSAGES_PER_QUEUE } from './constants.js';
+import { DEFAULT_MAX_MESSAGES_PER_QUEUE, MAX_STORED_BYTES_PER_QUEUE } from './constants.js';
+
+/**
+ * A stored message as service-events.ts's ingest builds it: `id`, `content`
+ * (text, or a size placeholder when `binary`), `bytes` (payload flavor),
+ * `type`, `dateMs`, `msgProperties`, `appProperties` and `_originalMsg` (the
+ * SDK message). The shape is owned by that TypeScript ingest, so here it is
+ * an open record rather than a second declaration that could drift.
+ * @typedef {Record<string, any>} StoredMessage
+ */
 
 /**
  * Single source of truth for the activeFilters shape. Every reset site must
- * go through this factory so new fields can't be silently dropped by one of
- * three previously-divergent inline resets. `properties` is included in the
+ * go through this factory so a new field can't be silently dropped by an
+ * inline reset that forgot it. `properties` is included in the
  * default so readers don't have to defensively `&& properties.length > 0`.
  */
 export function defaultActiveFilters() {
@@ -29,6 +38,7 @@ export const state = {
     allMessages: [],
     displayedMessages: [],
     forwardQueue: [], // Array of messages to forward
+    selectedMessage: null, // The message open in the detail panel (ui-details.ts)
     activeFilters: defaultActiveFilters(),
     // Moving-window cap per queue. Updated on config:max-messages-changed.
     maxMessagesPerQueue: DEFAULT_MAX_MESSAGES_PER_QUEUE
@@ -36,26 +46,41 @@ export const state = {
 
 // No default export needed in closure scope
 
+/** @param {string} queueName */
 export function getBrowser(queueName) {
     return state.browserInstances.get(queueName);
 }
 
+/**
+ * @param {string} queueName
+ * @param {any} browser the SDK's QueueBrowser (the SDK ships no types)
+ */
 export function setBrowser(queueName, browser) {
     state.browserInstances.set(queueName, browser);
 }
 
+/** @param {string} queueName */
 export function deleteBrowser(queueName) {
     state.browserInstances.delete(queueName);
 }
 
+/** @param {string} queueName */
 export function getMessages(queueName) {
     return state.messageStore.get(queueName);
 }
 
+/**
+ * @param {string} queueName
+ * @param {StoredMessage[]} messages
+ */
 export function setMessages(queueName, messages) {
     state.messageStore.set(queueName, messages);
 }
 
+/**
+ * @param {string} queueName
+ * @param {StoredMessage} message
+ */
 export function addMessage(queueName, message) {
     const store = state.messageStore.get(queueName);
     if (store) {
@@ -66,7 +91,9 @@ export function addMessage(queueName, message) {
 // UI sync hook — set once by queue-browser/module.ts so state stays free of direct
 // ui-core coupling. ingestMessage() is the single authoritative entry point for
 // arriving messages and owns the full moving-window invariant atomically.
+/** @type {((id: string) => void) | null} */
 let _uiRemoveRow = null;
+/** @param {((id: string) => void) | null} removeRow null unhooks it (test reset) */
 export function wireIngestUi(removeRow) {
     _uiRemoveRow = removeRow;
 }
@@ -77,15 +104,26 @@ export function wireIngestUi(removeRow) {
  * in one synchronous pass so no intermediate state is observable between them.
  * Invoked from service-events.onMessage — must stay sync (no await) or the moving-
  * window invariant can interleave across arrivals.
+ *
+ * A browser the SDK re-binds starts again from the head of the queue, so the
+ * messages already shown arrive again with the same guaranteed id: one already
+ * in the window is kept once. A message with no id ('N/A') is always taken.
+ * @param {string} queueName
+ * @param {StoredMessage} message
+ * @returns {boolean} whether the message was taken (false: no such queue, or already held)
  */
 export function ingestMessage(queueName, message) {
-    const store = state.messageStore.get(queueName);
-    if (!store) return;
+    const store = /** @type {StoredMessage[] | undefined} */ (state.messageStore.get(queueName));
+    if (!store) return false;
+    if (message.id !== 'N/A' && store.some(m => m.id === message.id)) return false;
 
-    // Moving window: drop oldest when at cap. Cap is only changed between sessions
-    // (setting editable while disconnected), so a single shift per arrival is enough.
-    if (store.length >= state.maxMessagesPerQueue) {
-        const dropped = store.shift();
+    // Moving window: drop the oldest while the store is at the count cap, or the
+    // new message would take it past the byte cap. The newest is always kept,
+    // even one larger than the byte cap on its own.
+    let bytes = store.reduce((n, m) => n + (m.size || 0), 0);
+    while (store.length > 0 && (store.length >= state.maxMessagesPerQueue || bytes + (message.size || 0) > MAX_STORED_BYTES_PER_QUEUE)) {
+        const dropped = /** @type {StoredMessage} */ (store.shift()); // the loop runs only while the store holds one
+        bytes -= dropped.size || 0;
         if (state.currentQueue === queueName) {
             // state.allMessages points at `store` by reference — the shift() above
             // already dropped it there. Only displayedMessages (filtered view) and
@@ -98,6 +136,7 @@ export function ingestMessage(queueName, message) {
         }
     }
     store.push(message);
+    return true;
 }
 
 export function clearStore() {
@@ -109,6 +148,7 @@ import { matchString } from '../../core/utils';
 export { matchString };
 
 // Logic extracted from ui-events to be shared with service-events
+/** @param {StoredMessage} msg */
 export function shouldShowMessage(msg) {
     // Current Active Filters - DO NOT lower() here, let matchString handle casing
     const fContent = state.activeFilters.content;
@@ -123,10 +163,11 @@ export function shouldShowMessage(msg) {
 
     // 1. Content
     if (fContent) {
-        // Use 'Contains' matching for content/body as per user request
+        // Use 'Contains' matching for content/body as per user request. A true binary
+        // payload holds no text (its content is a size placeholder), so it never matches.
         //if (!fContent.includes('*')) {
-        const content = msg.content || '';
-        conditions.push({ active: true, match: content.toLowerCase().includes(fContent.toLowerCase()) });
+        const match = !msg.binary && msg.content.toLowerCase().includes(fContent.toLowerCase());
+        conditions.push({ active: true, match });
         //} else {
         // Fallback to matchString for wildcards
         //    conditions.push({ active: true, match: matchString(msg.content, fContent) });
@@ -149,14 +190,16 @@ export function shouldShowMessage(msg) {
 
         // _originalMsg is set by service-events.onMessage for every broker-delivered
         // message; shouldShowMessage only runs on messages from that pipeline.
-        // window.solace is a required SDK global loaded before module install.
+        // window.solace is a required SDK global loaded before any message arrives (a message needs a live session)
+        // (untyped: the SDK ships no declarations).
+        const sdk = /** @type {any} */ (window).solace;
         const dest = msg._originalMsg.getDestination();
-        const msgDestName = dest ? (dest.getName() || '') : '';
+        const msgDestName = dest ? dest.getName() : '';
         let msgDestType = '';
         if (dest) {
             const t = dest.getType();
-            if (t === window.solace.DestinationType.TOPIC) msgDestType = 'Topic';
-            else if (t === window.solace.DestinationType.QUEUE) msgDestType = 'Queue';
+            if (t === sdk.DestinationType.TOPIC) msgDestType = 'Topic';
+            else if (t === sdk.DestinationType.QUEUE) msgDestType = 'Queue';
         }
 
         if (fDest && !matchString(msgDestName, fDest)) matchDest = false;
@@ -167,7 +210,7 @@ export function shouldShowMessage(msg) {
 
     // 5. Properties (Multiple) — `properties` is always an array (see defaultActiveFilters)
     if (state.activeFilters.properties.length > 0) {
-        state.activeFilters.properties.forEach(prop => {
+        state.activeFilters.properties.forEach((/** @type {{ key: string, value: string }} */ prop) => {
             const fKey = prop.key.trim();
             // Key is case-insensitive exact match
             const fKeyLower = fKey.toLowerCase();
@@ -175,21 +218,23 @@ export function shouldShowMessage(msg) {
 
             let matchProp = false;
 
-            // Check Standard Properties
-            if (msg.msgProperties) {
-                // Find matching key (case-insensitive)
-                const foundKey = Object.keys(msg.msgProperties).find(k => k.toLowerCase() === fKeyLower);
-                if (foundKey) {
-                    const val = String(msg.msgProperties[foundKey] || '');
-                    if (matchString(val, fVal)) matchProp = true;
-                }
+            // Check Standard Properties. Ingest always sets msgProperties and
+            // appProperties (at least `{}`).
+            // Find matching key (case-insensitive)
+            const foundStdKey = Object.keys(msg.msgProperties).find(k => k.toLowerCase() === fKeyLower);
+            if (foundStdKey) {
+                // Ingest stores only non-null values and keeps Priority 0, so
+                // stringify as-is: '0' must stay matchable.
+                const val = String(msg.msgProperties[foundStdKey]);
+                if (matchString(val, fVal)) matchProp = true;
             }
 
             // Check App Properties
-            if (!matchProp && msg.appProperties) {
+            if (!matchProp) {
                 const foundKey = Object.keys(msg.appProperties).find(k => k.toLowerCase() === fKeyLower);
                 if (foundKey) {
-                    const val = String(msg.appProperties[foundKey] || '');
+                    // User-property values may be 0 or false (keep) or null (an SDT null field).
+                    const val = String(msg.appProperties[foundKey] ?? '');
                     if (matchString(val, fVal)) matchProp = true;
                 }
             }

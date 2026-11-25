@@ -8,6 +8,7 @@ import { createSolaceMock, createSessionMock, createBrowserMock, createMessageMo
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 import type { AppContext, AppState } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 function createTestContext(overrides: Partial<AppContext> = {}): AppContext {
     const eventBus = createEventBus();
@@ -15,7 +16,7 @@ function createTestContext(overrides: Partial<AppContext> = {}): AppContext {
         activeModuleId: null, isConnected: false, selectedVpn: null,
         solaceConnection: null, sempCredentials: null, isSempConnected: false
     };
-    return {
+    return completeContext({
         container: document.createElement('div'),
         appState,
         eventBus,
@@ -23,9 +24,8 @@ function createTestContext(overrides: Partial<AppContext> = {}): AppContext {
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
         copyToClipboard: vi.fn(),
-        config: { useMocks: false },
         ...overrides
-    };
+    });
 }
 
 function setupBrowserDOM() {
@@ -37,8 +37,8 @@ function setupBrowserDOM() {
  * Build a session that exposes both the ACK-listener surface the publisher
  * needs at construction (`session.on` / `session.removeListener` / `_handlers`)
  * AND lets us control which Browser instance is returned to createBrowser.
- * Replaces the historical inline `{ createQueueBrowser: vi.fn() }` shape —
- * those minimal objects no longer satisfy the publisher's session contract.
+ * A bare `{ createQueueBrowser: vi.fn() }` does not satisfy the publisher's
+ * session contract.
  */
 function sessionWithBrowser(browser: any = createBrowserMock()) {
     const session = createSessionMock();
@@ -136,7 +136,7 @@ describe('queue-browser/service', () => {
             expect(state.messageStore.has('test-queue')).toBe(true);
         });
 
-        it('enforces MAX_BROWSER_BINDINGS limit', () => {
+        it('refuses a binding past MAX_BROWSER_BINDINGS, leaves nothing behind, and binds once a slot is freed', () => {
             const service = createService(ctx, serviceEvents);
             const { session } = sessionWithBrowser();
             ctx.eventBus.emit('client:connected', { session });
@@ -146,22 +146,45 @@ describe('queue-browser/service', () => {
             service.createBrowser('q3');
             const result = service.createBrowser('q4');
 
-            expect(result.ok).toBe(false);
-            expect(result.error).toContain('Limit');
+            expect(result).toEqual({ ok: false, error: 'Connection Limit Reached: You can only bind to 3 queues at a time.' });
+            expect(session.createQueueBrowser).toHaveBeenCalledTimes(3);
+            expect(state.messageStore.has('q4')).toBe(false);
+            expect(state.browserInstances.has('q4')).toBe(false);
+
+            service.disconnectBrowser('q1');
+            expect(service.createBrowser('q4')).toEqual({ ok: true });
+            expect(session.createQueueBrowser).toHaveBeenCalledTimes(4);
+            expect([...state.browserInstances.keys()].sort()).toEqual(['q2', 'q3', 'q4']);
         });
 
-        it('attaches event listeners to browser', () => {
+        it('routes each QueueBrowser event to its serviceEvents handler with the queue name', () => {
             const service = createService(ctx, serviceEvents);
             const { session, browser } = sessionWithBrowser();
             ctx.eventBus.emit('client:connected', { session });
 
             service.createBrowser('test-queue');
 
-            expect(browser.on).toHaveBeenCalledWith('UP', expect.any(Function));
-            expect(browser.on).toHaveBeenCalledWith('CONNECT_FAILED_ERROR', expect.any(Function));
-            expect(browser.on).toHaveBeenCalledWith('DOWN_ERROR', expect.any(Function));
-            expect(browser.on).toHaveBeenCalledWith('GM_DISABLED', expect.any(Function));
-            expect(browser.on).toHaveBeenCalledWith('MESSAGE', expect.any(Function));
+            const handlers = (browser as any)._handlers;
+            const err = new Error('boom');
+            const msg = { id: 'm1' };
+
+            handlers.UP();
+            expect(serviceEvents.onBrowserUp).toHaveBeenCalledWith('test-queue');
+
+            handlers.CONNECT_FAILED_ERROR(err);
+            expect(serviceEvents.onConnectFailed).toHaveBeenCalledWith('test-queue', err);
+
+            handlers.DOWN_ERROR(err);
+            expect(serviceEvents.onBrowserDown).toHaveBeenCalledWith('test-queue', err);
+
+            handlers.GM_DISABLED();
+            expect(serviceEvents.onGmDisabled).toHaveBeenCalledWith('test-queue');
+
+            handlers.MESSAGE(msg);
+            expect(serviceEvents.onMessage).toHaveBeenCalledWith('test-queue', msg);
+
+            // Each event reached only its own handler, once.
+            for (const fn of Object.values(serviceEvents) as any[]) expect(fn).toHaveBeenCalledTimes(1);
         });
 
         it('cleans up on synchronous connect error', () => {
@@ -352,7 +375,9 @@ describe('queue-browser/service', () => {
             const { session } = sessionWithBrowser();
             ctx.eventBus.emit('client:connected', { session });
 
-            const binary = new Uint8Array([1, 2, 3]);
+            // The real SDK hands a binary attachment back as a Latin-1 string,
+            // one char per byte: high bytes must reach the copy unchanged.
+            const binary = '\x89PNG\r\n\x1a\n\x00\xff\xfe';
             const original = makeOriginal({
                 // Force null on the higher-priority paths so the cloner
                 // falls all the way through to setBinaryAttachment.
@@ -471,9 +496,31 @@ describe('queue-browser/service', () => {
     });
 
     describe('deleteMessages()', () => {
-        it('returns ok:true with count:0 for empty input', () => {
+        // A message as ingest stores it: `id` is the SDK id's toString() and
+        // `_originalMsg` the SDK message, whose getGuaranteedMessageId() returns
+        // the SDK's 64-bit Long object.
+        function stored(id: string) {
+            const sdk = createMessageMock();
+            sdk.getGuaranteedMessageId.mockReturnValue({ toString: () => id });
+            return { id, _originalMsg: sdk };
+        }
+
+        // Bind `queue` on a live session and make `msgs` its store and on-screen list.
+        function bindWith(queue: string, msgs: any[], browser = createBrowserMock()) {
             const service = createService(ctx, serviceEvents);
-            expect(service.deleteMessages('q', []).ok).toBe(true);
+            const { session } = sessionWithBrowser(browser);
+            ctx.eventBus.emit('client:connected', { session });
+            service.createBrowser(queue);
+            state.messageStore.set(queue, msgs);
+            state.allMessages = msgs;
+            state.displayedMessages = [...msgs];
+            state.currentQueue = queue;
+            return { service, browser };
+        }
+
+        it('returns ok with nothing requested for empty input', () => {
+            const service = createService(ctx, serviceEvents);
+            expect(service.deleteMessages('q', [])).toEqual({ ok: true, requested: 0, failed: 0 });
             expect(service.deleteMessages('q', null as any).ok).toBe(true);
             expect(service.deleteMessages('', []).ok).toBe(true);
         });
@@ -481,8 +528,7 @@ describe('queue-browser/service', () => {
         it('returns error when no session', () => {
             const service = createService(ctx, serviceEvents);
             const result = service.deleteMessages('q', ['1']);
-            expect(result.ok).toBe(false);
-            expect(result.error).toContain('No active session');
+            expect(result).toEqual({ ok: false, requested: 0, failed: 1, error: 'No active session.' });
         });
 
         it('returns error when no browser for queue', () => {
@@ -510,74 +556,66 @@ describe('queue-browser/service', () => {
             expect(state.messageStore.has('partial-q')).toBe(false);
         });
 
-        it('deletes messages and updates state', () => {
-            const service = createService(ctx, serviceEvents);
-            const { session } = sessionWithBrowser();
-            ctx.eventBus.emit('client:connected', { session });
-
-            service.createBrowser('q1');
-            state.allMessages = [{ id: '1' }, { id: '2' }, { id: '3' }];
-            state.displayedMessages = [{ id: '1' }, { id: '2' }, { id: '3' }];
-            state.currentQueue = 'q1';
+        it('requests removal of the selected messages and drops them from state', () => {
+            const { service, browser } = bindWith('q1', [stored('1'), stored('2'), stored('3')]);
 
             const result = service.deleteMessages('q1', ['1', '2']);
 
-            expect(result.ok).toBe(true);
-            expect(result.count).toBe(2);
-            expect(state.allMessages.length).toBe(1);
-            expect(state.displayedMessages.length).toBe(1);
+            expect(result).toEqual({ ok: true, requested: 2, failed: 0, error: undefined });
+            expect(browser.removeMessageFromQueue).toHaveBeenCalledTimes(2);
+            expect(state.allMessages.map((m: any) => m.id)).toEqual(['3']);
+            expect(state.displayedMessages.map((m: any) => m.id)).toEqual(['3']);
+            expect(state.messageStore.get('q1')).toBe(state.allMessages);
         });
 
-        it('handles removeMessageFromQueue error for individual messages', () => {
-            const service = createService(ctx, serviceEvents);
-            const browser = createBrowserMock();
-            browser.removeMessageFromQueue.mockImplementation(() => { throw new Error('remove failed'); });
-            const { session } = sessionWithBrowser(browser);
-            ctx.eventBus.emit('client:connected', { session });
+        it('acks by the stored SDK id object, so an id above 2^32 reaches the SDK exactly', () => {
+            // 2^32 + 5: as a JS Number the SDK's ack encoder would mangle it.
+            const big = stored('4294967301');
+            const long = { high: 1, low: 5, toString: () => '4294967301' };
+            big._originalMsg.getGuaranteedMessageId.mockReturnValue(long);
+            const { service, browser } = bindWith('q1', [big]);
+            const ack = createMessageMock();
+            solaceMock.SolclientFactory.createMessage.mockReturnValue(ack);
 
-            service.createBrowser('q1');
-            state.allMessages = [{ id: '1' }];
-            state.displayedMessages = [{ id: '1' }];
+            service.deleteMessages('q1', ['4294967301']);
 
-            const result = service.deleteMessages('q1', ['1']);
-            expect(result.ok).toBe(false);
-            expect(result.count).toBe(0);
+            expect(ack.setGuaranteedMessageId.mock.calls[0][0]).toBe(long);
+            expect(browser.removeMessageFromQueue).toHaveBeenCalledWith(ack);
         });
 
-        it('handles message prepare error', () => {
-            const service = createService(ctx, serviceEvents);
-            const { session } = sessionWithBrowser();
-            ctx.eventBus.emit('client:connected', { session });
-
-            service.createBrowser('q1');
-            state.allMessages = [{ id: 'bad' }];
-            state.displayedMessages = [{ id: 'bad' }];
-
-            solaceMock.SolclientFactory.createMessage.mockImplementation(() => { throw new Error('create failed'); });
-
-            const result = service.deleteMessages('q1', ['bad']);
-            expect(result.ok).toBe(false);
-        });
-
-        it('sorts message IDs numerically', () => {
-            const service = createService(ctx, serviceEvents);
-            const { session } = sessionWithBrowser();
-            ctx.eventBus.emit('client:connected', { session });
-
-            service.createBrowser('q1');
-            state.allMessages = [{ id: '10' }, { id: '2' }, { id: '1' }];
-            state.displayedMessages = [...state.allMessages];
-
-            const order: string[] = [];
-            const origCreateMsg = solaceMock.SolclientFactory.createMessage;
-            solaceMock.SolclientFactory.createMessage = vi.fn(() => {
-                const msg = origCreateMsg();
-                msg.setGuaranteedMessageId = vi.fn((id: number) => { order.push(id.toString()); });
-                return msg;
-            });
+        it('requests removal oldest first, in the order the browser delivered the messages', () => {
+            const { service, browser } = bindWith('q1', [stored('1'), stored('2'), stored('10')]);
 
             service.deleteMessages('q1', ['10', '2', '1']);
-            expect(order).toEqual(['1', '2', '10']);
+
+            const acked = browser.removeMessageFromQueue.mock.calls
+                .map((call: any[]) => String(call[0].setGuaranteedMessageId.mock.calls[0][0]));
+            expect(acked).toEqual(['1', '2', '10']);
+        });
+
+        it('counts a removal the browser refuses as failed, keeping the first SDK reason', () => {
+            vi.spyOn(console, 'error').mockImplementation(() => {});
+            const browser = createBrowserMock();
+            browser.removeMessageFromQueue
+                .mockImplementationOnce(() => { throw new Error('Invalid operation'); })
+                .mockImplementationOnce(() => { throw new Error('Second reason'); });
+            const { service } = bindWith('q1', [stored('1'), stored('2'), stored('3')], browser);
+
+            const result = service.deleteMessages('q1', ['1', '2', '3']);
+
+            expect(result).toEqual({ ok: false, requested: 1, failed: 2, error: 'Invalid operation' });
+            // The refused rows stay: nothing says they are gone.
+            expect(state.allMessages.map((m: any) => m.id)).toEqual(['1', '2']);
+        });
+
+        it('counts an id no longer in the list as failed, without acking anything', () => {
+            const { service, browser } = bindWith('q1', [stored('1')]);
+
+            const result = service.deleteMessages('q1', ['9']);
+
+            expect(result).toEqual({ ok: false, requested: 0, failed: 1, error: 'No longer in the message list' });
+            expect(browser.removeMessageFromQueue).not.toHaveBeenCalled();
+            expect(state.allMessages.map((m: any) => m.id)).toEqual(['1']);
         });
     });
 });

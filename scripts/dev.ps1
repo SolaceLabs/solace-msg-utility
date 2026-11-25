@@ -1,0 +1,489 @@
+#requires -Version 5.1
+# Dev tasks. Behaviourally identical to dev.sh -- same task names, same gating,
+# same footer format. CI calls task names only.
+[CmdletBinding()]
+param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Tasks)
+
+$ErrorActionPreference = 'Continue'
+$ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot    = Split-Path -Parent $ScriptDir
+$LogDir      = Join-Path $ScriptDir 'logs'
+$Dist        = Join-Path $RepoRoot 'dist'
+$GoDir       = Join-Path $RepoRoot 'go-web-proxy'
+$CovDir      = Join-Path $RepoRoot 'coverage'
+$ComposeFile = Join-Path $RepoRoot 'docker/docker-compose.yaml'
+$E2eCompose  = Join-Path $RepoRoot 'docker/docker-compose.e2e.yaml'
+$ImageRepo   = 'ghcr.io/solacelabs/solace-msg-utility'
+# The image scanner is pinned like any other dependency: a newer trivy can turn
+# the same image red on its own. The digest is the multi-arch index. Bump the
+# version and digest together with dev.sh and tag.yml's trivy-action
+# `version:` -- see docs/git.md, "Keeping the workflow pins current". A trivy on
+# PATH is deliberately not used: it cannot be pinned, and CI runners have none.
+$TrivyImage = 'aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c'
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+Set-Location $RepoRoot
+$env:NO_COLOR = '1'
+
+# --- version ----------------------------------------------------------------
+# The git tag is the single source of version truth. CI exports VERSION from
+# the tag ref, so the release path never depends on `git describe` seeing
+# history through a shallow checkout.
+$Version = if ($env:VERSION) { $env:VERSION }
+           else {
+             $d = (git describe --tags --always --dirty 2>$null)
+             if ($LASTEXITCODE -eq 0 -and $d) { "$d".Trim() } else { 'dev' }
+           }
+$ImageTag = $Version -replace '^v', ''
+# Reaches vite (__APP_VERSION__) and the Dockerfile build-arg. The gateway's
+# ldflags take $Version as-is; the PWA strips the leading `v` in vite.config.ts
+# because the kernel log line already prints one.
+$env:APP_VERSION = $Version
+
+# --- output helpers ---------------------------------------------------------
+function Step { param($m) Write-Host "==> $m" -ForegroundColor Cyan }
+function Ok   { param($m) Write-Host "ok: $m"    -ForegroundColor Green }
+function Warn { param($m) Write-Host "warn: $m"  -ForegroundColor Yellow }
+function Die  { param($m) Write-Host "error: $m" -ForegroundColor Red; exit 1 }
+
+# dev.sh uses `date +%z`, which renders +0800. PowerShell's zzz renders +08:00,
+# so the two scripts' footers would not match. Strip the colon to match.
+function Get-Now {
+  $d = Get-Date
+  $d.ToString('yyyy-MM-ddTHH:mm:ss') + ($d.ToString('zzz') -replace ':', '')
+}
+function Get-Log { param($Task) Join-Path $LogDir "$Task.log" }
+
+# Windows PowerShell 5.1's `-Encoding utf8` ALWAYS writes a BOM, so every log
+# opened with a leading U+FEFF that dev.sh never emits -- `head -1` showed it as
+# mojibake and it defeats a plain `grep '^==='`. Write BOM-less UTF-8 explicitly.
+# Set-/Add-Content also append a line terminator, so these do the same.
+$Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+
+function Set-LogText {
+  param([string]$Path, [string]$Text)
+  [System.IO.File]::WriteAllText($Path, $Text + [Environment]::NewLine, $Utf8NoBom)
+}
+
+function Add-LogText {
+  param([string]$Path, [string]$Text)
+  [System.IO.File]::AppendAllText($Path, $Text + [Environment]::NewLine, $Utf8NoBom)
+}
+
+function Start-TaskLog {
+  param($Task)
+  Set-LogText (Get-Log $Task) ("=== {0} | {1} | version {2} ===" -f (Get-Now), $Task, $Version)
+}
+
+function Write-Finish {
+  param([string]$Task, [int]$Code, [int]$Seconds)
+  $status = if ($Code -eq 0) { 'OK' } else { "FAILED (exit $Code)" }
+  $line = '{0} | {1} | {2}s | {3}' -f (Get-Now), $Task, $Seconds, $status
+  # Never Tee-Object: Tee doubles lines and writes UTF-16.
+  Add-LogText (Get-Log $Task) $line
+  Write-Host $line
+}
+
+# Stream each line as it arrives, to the console and the log. A long step shows
+# progress, and a cancelled run keeps what it printed. Never Tee-Object (5.1
+# doubles lines and writes UTF-16): one StreamWriter, BOM-less UTF-8, append,
+# flushed per line, closed in finally. "$_" flattens stderr ErrorRecords (not
+# terminating under 'Continue'); the CSI strip keeps the file plain text.
+function Invoke-Logged {
+  # NB: $CmdArgs, not $Args -- $Args is a PowerShell automatic variable, so a
+  # param named $Args binds empty and `& $Exe @Args` runs $Exe with no args.
+  param([string]$Task, [string]$Exe, [string[]]$CmdArgs)
+  $writer = New-Object System.IO.StreamWriter((Get-Log $Task), $true, $Utf8NoBom)
+  $writer.AutoFlush = $true
+  # PowerShell decodes a native tool's output with [Console]::OutputEncoding,
+  # the console's code page by default (437, 850, ...), which turns the UTF-8
+  # that node, go and npm write into mojibake (a check mark arrives as three
+  # characters). UTF-8 for the length of the command, then the caller's
+  # encoding again; a host with no console refuses the setter, so it is tried.
+  $prevEncoding = [Console]::OutputEncoding
+  try { [Console]::OutputEncoding = $Utf8NoBom } catch { }
+  try {
+    & $Exe @CmdArgs 2>&1 | ForEach-Object {
+      # A stderr line arrives as an ErrorRecord, and "$_" of an empty one is
+      # its exception's type name ("System.Management.Automation.
+      # RemoteException"). The message is the line as the tool wrote it.
+      $text = if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { "$_" }
+      $line = $text -replace "\x1b\[[0-9;?]*[a-zA-Z]", ""
+      $writer.WriteLine($line)
+      Write-Host $line
+    }
+    $code = $LASTEXITCODE
+  } finally {
+    $writer.Dispose()
+    try { [Console]::OutputEncoding = $prevEncoding } catch { }
+  }
+  return $code
+}
+
+# A line of our own onto the console and the log.
+function Write-Note {
+  param([string]$Task, [string]$Text)
+  Add-LogText (Get-Log $Task) $Text
+  Write-Host $Text
+}
+
+# --- target resolution ------------------------------------------------------
+# CI sets TARGET_OS/TARGET_ARCH; unset means host, named as dev.sh names it.
+# $IsWindows/$IsMacOS exist only from PowerShell 6, so the Desktop edition
+# (Windows PowerShell 5.1) is Windows by definition.
+function Get-HostOs {
+  if ($PSVersionTable.PSEdition -ne 'Core' -or $IsWindows) { 'windows' }
+  elseif ($IsMacOS) { 'darwin' }
+  else { 'linux' }
+}
+# PROCESSOR_ARCHITECTURE is Windows-only, and a 32-bit PowerShell on 64-bit
+# Windows sees x86 there with the host's own value in PROCESSOR_ARCHITEW6432;
+# elsewhere .NET reports it. An unknown value passes through, as in dev.sh, so
+# go rejects it by name instead of a silent amd64.
+function Get-HostArch {
+  $a = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 }
+       elseif ($env:PROCESSOR_ARCHITECTURE) { $env:PROCESSOR_ARCHITECTURE }
+       else { "$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)" }
+  switch ($a) {
+    'AMD64' { 'amd64' } 'X64' { 'amd64' } 'ARM64' { 'arm64' } default { $a.ToLower() }
+  }
+}
+$TOs   = if ($env:TARGET_OS)   { $env:TARGET_OS }   else { Get-HostOs }
+$TArch = if ($env:TARGET_ARCH) { $env:TARGET_ARCH } else { Get-HostArch }
+# The literal gateway name, never the repo directory name: the local clone and
+# the CI checkout differ, and the release job merges every leg into one
+# directory where a name collision overwrites silently.
+$BinBase   = 'go-web-proxy'
+$BinSuffix = "-$TOs-$TArch"
+if ($TOs -eq 'windows') { $BinSuffix = "$BinSuffix.exe" }
+
+# --- shared helpers ---------------------------------------------------------
+# npm ci when node_modules is absent or the lockfile has moved on.
+function Install-Deps {
+  param([string]$Task)
+  $stamp = Join-Path $RepoRoot 'node_modules/.package-lock.json'
+  $lock  = Join-Path $RepoRoot 'package-lock.json'
+  if ((Test-Path $stamp) -and
+      ((Get-Item $stamp).LastWriteTimeUtc -ge (Get-Item $lock).LastWriteTimeUtc)) {
+    return 0
+  }
+  return (Invoke-Logged $Task 'npm' @('ci','--no-audit','--no-fund','--no-progress'))
+}
+
+# Docker can only build this project's Linux images when the daemon is running
+# Linux containers. GitHub's windows runners are Windows-container only, and so
+# are plenty of laptops, so the image half of `image`/`scan` warn-skips there.
+# Same rule in both scripts -- this is not an OS special-case.
+function Test-LinuxDocker {
+  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { return $false }
+  $t = (docker info --format '{{.OSType}}' 2>$null)
+  return ("$t".Trim() -eq 'linux')
+}
+
+# Always the pinned container ($TrivyImage), never a trivy on PATH -- see the
+# pin for why. Docker is there: every caller sits behind Test-LinuxDocker.
+# --pull=missing, not always: a digest cannot move, so it is fetched once per
+# bump. The docker.sock mount is what lets the containerised trivy see the
+# image `image` just built locally; without it trivy falls back to pulling the
+# never-pushed tag from the registry and fails.
+# Docker Desktop on Windows accepts the same Linux socket path.
+function Invoke-TrivyImage {
+  param([string]$Task, [string]$Ref)
+  return (Invoke-Logged $Task 'docker' @(
+    'run','--rm','--pull=missing','-e','NO_COLOR=1',
+    '-v','/var/run/docker.sock:/var/run/docker.sock',$TrivyImage,'image',
+    '--quiet','--exit-code','1','--severity','HIGH,CRITICAL','--ignore-unfixed',$Ref))
+}
+
+# --- tasks ------------------------------------------------------------------
+# PowerShell returns EVERY uncaptured pipeline value, not just `return`: a bare
+# external command inside a task turns $code into an array. Route commands
+# through Invoke-Logged, or pipe anything you don't return to Out-Null.
+function Task-build {
+  New-Item -ItemType Directory -Force -Path $Dist | Out-Null
+  $c = Install-Deps 'build'; if ($c -ne 0) { return $c }
+
+  # The PWA bundles are target-independent, so every cross-compile leg emits an
+  # identical copy; merge-multiple in the release job collapses them.
+  $c = Invoke-Logged 'build' 'npm' @('run','build'); if ($c -ne 0) { return $c }
+  # Direct bundles carry no Provisioned UI, provisioned.html does, and
+  # provisioned-demo.html carries it with no network -- proven on the output
+  # just built, so a wrong import fails the gate, not a review.
+  $c = Invoke-Logged 'build' 'npm' @('run','check:bundles'); if ($c -ne 0) { return $c }
+
+  # The gateway: one binary for every container mode. A compile check -- it
+  # ships only inside the image.
+  $env:CGO_ENABLED = '0'; $env:GOOS = $TOs; $env:GOARCH = $TArch
+  try {
+    $out = Join-Path $Dist "$BinBase$BinSuffix"
+    $c = Invoke-Logged 'build' 'go' @('-C', $GoDir, 'build', '-trimpath',
+                                      '-ldflags', "-s -w -X main.version=$Version", '-o', $out, '.')
+    if ($c -ne 0) { return $c }
+    Write-Note 'build' "built $out"
+  } finally {
+    Remove-Item Env:CGO_ENABLED, Env:GOOS, Env:GOARCH -ErrorAction SilentlyContinue
+  }
+  return 0
+}
+
+function Task-vet {
+  $c = Install-Deps 'vet'; if ($c -ne 0) { return $c }
+  # The build strips types without checking them, so tsc is the only thing that
+  # catches a type error: src/ with its .js modules (checkJs), then tests/ and
+  # the vite/vitest configs (tsconfig.test.json).
+  $c = Invoke-Logged 'vet' 'npm' @('run','typecheck'); if ($c -ne 0) { return $c }
+  $c = Invoke-Logged 'vet' 'npm' @('run','typecheck:tests'); if ($c -ne 0) { return $c }
+  # The house rules a linter can hold (eslint.config.mjs).
+  $c = Invoke-Logged 'vet' 'npm' @('run','lint'); if ($c -ne 0) { return $c }
+  $c = Invoke-Logged 'vet' 'go' @('-C',$GoDir,'vet','./...'); if ($c -ne 0) { return $c }
+  # gofmt -l lists the files gofmt would rewrite and exits 0 either way, so a
+  # listed file is the failure. The selected toolchain's own gofmt (its
+  # GOROOT), like every other Go tool here.
+  $goroot = "$(& go -C $GoDir env GOROOT 2>$null)".Trim()
+  if ($LASTEXITCODE -ne 0 -or -not $goroot) { Write-Note 'vet' 'go env GOROOT failed'; return 1 }
+  $exe = if ((Get-HostOs) -eq 'windows') { 'gofmt.exe' } else { 'gofmt' }
+  $gofmt = Join-Path (Join-Path $goroot 'bin') $exe
+  $unformatted = (& $gofmt -l $GoDir 2>&1 | ForEach-Object { "$_" } | Out-String -Width 4096).Trim()
+  if ($LASTEXITCODE -ne 0) { Write-Note 'vet' $unformatted; return 1 }
+  if ($unformatted) {
+    Write-Note 'vet' 'gofmt would rewrite these (gofmt -w <file>):'
+    Write-Note 'vet' $unformatted
+    return 1
+  }
+  return 0
+}
+
+function Task-test {
+  $c = Install-Deps 'test'; if ($c -ne 0) { return $c }
+  # The web suite without tests/mock-broker/, which `mock` runs, then the Go
+  # suite. `cov` runs both with coverage on, so when it is queued in this
+  # invocation each suite runs once, there; a failure in it still fails the run.
+  if ($CovQueued) {
+    Write-Note 'test' 'web suite: skipped here, cov runs it in this invocation'
+    Write-Note 'test' 'go test: skipped here, cov runs it with -race in this invocation'
+    return 0
+  }
+  $c = Invoke-Logged 'test' 'npm' @('run','test:app'); if ($c -ne 0) { return $c }
+  return (Invoke-GoTest 'test')
+}
+
+# Invoke-GoTest runs the Go suite for a task with any extra flags. The race
+# detector needs cgo, so a C compiler: gcc is on both CI runners. Locally,
+# without one, the suite still runs without -race and the task's log says so.
+# In CI ($env:CI set) a missing gcc fails the task: the concurrency tests only
+# fail under -race, so a green run without it would prove nothing about them.
+function Invoke-GoTest([string]$Task, [string[]]$Extra = @()) {
+  $flags = @($Extra | Where-Object { $_ }) + @('./...')
+  if (Get-Command gcc -ErrorAction SilentlyContinue) {
+    $env:CGO_ENABLED = '1'
+    try {
+      return (Invoke-Logged $Task 'go' (@('-C',$GoDir,'test','-race','-count=1') + $flags))
+    } finally {
+      Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
+    }
+  }
+  if ($env:CI) {
+    Write-Note $Task 'error: go test: no gcc on PATH, and CI must run the race detector -- install gcc on the runner'
+    return 1
+  }
+  Write-Note $Task 'go test: -race skipped, no gcc on PATH'
+  return (Invoke-Logged $Task 'go' (@('-C',$GoDir,'test','-count=1') + $flags))
+}
+
+# The demo broker and the Provisioned demo's fake gateway (tests/mock-broker/):
+# the suites behind demo.html and provisioned-demo.html, the gateway contract
+# included.
+# Skipped, like test's web suite, when cov runs them in this invocation.
+function Task-mock {
+  $c = Install-Deps 'mock'; if ($c -ne 0) { return $c }
+  if ($CovQueued) {
+    Write-Note 'mock' 'mock suite: skipped here, cov runs it in this invocation'
+    return 0
+  }
+  # With coverage over src/mock-broker/ (vitest.mock.config.ts), reported and
+  # not gated: the demo tree has no threshold yet, but a drop is visible.
+  $c = Invoke-Logged 'mock' 'npm' @('run','test:mock:coverage'); if ($c -ne 0) { return $c }
+  $total = (Select-String -Path (Get-Log 'mock') -Pattern 'All files' | Select-Object -First 1)
+  $totalText = if ($total) { ($total.Line -replace '\s+',' ').Trim() } else { 'unavailable' }
+  Write-Note 'mock' "coverage total (src/mock-broker, no threshold): $totalText"
+  return 0
+}
+
+function Task-cov {
+  $c = Install-Deps 'cov'; if ($c -ne 0) { return $c }
+  $covProfile = Join-Path $CovDir 'go/coverage.out'
+
+  # vitest.config.ts sets 100% thresholds on all four metrics, so a slip fails
+  # the run here rather than needing a floor comparison.
+  $c = Invoke-Logged 'cov' 'npm' @('run','test:coverage'); if ($c -ne 0) { return $c }
+
+  # After vitest, not before: it empties coverage/ on every run. The one Go run
+  # of the invocation: the same -race suite test runs, with the profile on.
+  New-Item -ItemType Directory -Force -Path (Join-Path $CovDir 'go') | Out-Null
+  $c = Invoke-GoTest 'cov' @("-coverprofile=$covProfile")
+  if ($c -ne 0) { return $c }
+  $c = Invoke-Logged 'cov' 'go' @(
+    '-C',$GoDir,'tool','cover',"-html=$covProfile",'-o',(Join-Path $CovDir 'go/coverage.html'))
+  if ($c -ne 0) { return $c }
+  $c = Invoke-Logged 'cov' 'go' @('-C',$GoDir,'tool','cover',"-func=$covProfile")
+  if ($c -ne 0) { return $c }
+
+  # Print the totals last so the footer captures them: the previous run's
+  # numbers in logs/cov.log are the floor (local only -- CI is a fresh
+  # checkout with no prior log).
+  $log = Get-Log 'cov'
+  $web = (Select-String -Path $log -Pattern 'All files' | Select-Object -First 1)
+  $got = (Select-String -Path $log -Pattern '^total:'   | Select-Object -First 1)
+  $webText = if ($web) { ($web.Line -replace '\s+',' ').Trim() } else { 'unavailable' }
+  $gotText = if ($got) { ($got.Line -replace '\s+',' ').Trim() } else { 'unavailable' }
+  Write-Note 'cov' "coverage total (web):  $webText"
+  Write-Note 'cov' "coverage total (go):   $gotText"
+  return 0
+}
+
+# The actual build, logged under the calling task so a standalone `scan` never
+# appends to a stale image.log. Compose builds the one image, :latest (the
+# gateway service; the provisioned service runs the same image); we then tag
+# the versioned name the scan and the release refer to.
+function Build-Image {
+  param([string]$Task)
+  $c = Invoke-Logged $Task 'docker' @(
+    'compose','-f',$ComposeFile,'--progress','plain','build')
+  if ($c -ne 0) { return $c }
+  $c = Invoke-Logged $Task 'docker' @('tag',"${ImageRepo}:latest","${ImageRepo}:$ImageTag")
+  if ($c -ne 0) { return $c }
+  Write-Note $Task "tagged ${ImageRepo}:$ImageTag"
+  return 0
+}
+
+function Task-image {
+  if (-not (Test-LinuxDocker)) {
+    Warn 'no linux-container docker daemon; skipping image'; return 0
+  }
+  return (Build-Image 'image')
+}
+
+# One task, every applicable check. FATAL on fixable CVEs.
+function Task-scan {
+  $c = Install-Deps 'scan'; if ($c -ne 0) { return $c }
+
+  $c = Invoke-Logged 'scan' 'npm' @('run','audit:gate'); if ($c -ne 0) { return $c }
+
+  # The one binary and its one third-party dependency, gopkg.in/yaml.v3.
+  # `go tool`, never `go run pkg@version` -- the latter runs module-less and
+  # ignores go.mod's toolchain pin.
+  $c = Invoke-Logged 'scan' 'go' @('-C',$GoDir,'tool','govulncheck','./...')
+  if ($c -ne 0) { return $c }
+
+  # Image half: never against a stale image, so build first -- `image` is not
+  # part of `all`.
+  if (Test-LinuxDocker) {
+    $c = Build-Image 'scan'; if ($c -ne 0) { return $c }
+    return (Invoke-TrivyImage 'scan' "${ImageRepo}:$ImageTag")
+  }
+  Warn 'no linux-container docker daemon; skipping the image scan'
+  return 0
+}
+
+function Task-up   { Invoke-Logged 'up'   'docker' @('compose','-f',$ComposeFile,'up','-d') }
+function Task-down { Invoke-Logged 'down' 'docker' @('compose','-f',$ComposeFile,'down') }
+
+# Local only: the graph is a developer artifact, not a CI output.
+function Task-graphify {
+  if ($env:CI) { Warn 'graphify is local-only; skipping in CI'; return 0 }
+  if (-not (Get-Command graphify -ErrorAction SilentlyContinue)) {
+    Warn 'graphify not on PATH; skipping'; return 0
+  }
+  return (Invoke-Logged 'graphify' 'graphify' @('update','.'))
+}
+
+# Local only: docs/user-guide.md is written from the manual's chapters and
+# committed. A runner must not write it: tests/build/user-guide.test.ts holds
+# the committed guide to the chapters, and a rewrite there would hide a stale one.
+function Task-guide {
+  if ($env:CI) { Warn 'guide is local-only; skipping in CI'; return 0 }
+  $c = Install-Deps 'guide'; if ($c -ne 0) { return $c }
+  return (Invoke-Logged 'guide' 'npm' @('run','guide'))
+}
+
+# Local only, and standalone: not in `all` or `full`. The image in Gateway and
+# Provisioned mode against an existing broker, driven by scripts/e2e.mjs, which owns the stack's lifetime;
+# the down -v here is the backstop for a run that died before its own.
+function Task-e2e {
+  if ($env:CI) { Warn 'e2e is local-only; skipping in CI'; return 0 }
+  if (-not (Test-LinuxDocker)) {
+    Warn 'no linux-container docker daemon; skipping e2e'; return 0
+  }
+  # Never against a stale image, as in scan.
+  $c = Build-Image 'e2e'; if ($c -ne 0) { return $c }
+  # Not through Invoke-Logged: the harness may ask for the broker's details, so
+  # it needs the real console, and it appends its own (masked) output to the
+  # log. Start-Process, because `& node` inside a task would have its output
+  # captured into the task's return value.
+  $env:E2E_LOG = Get-Log 'e2e'
+  try {
+    $p = Start-Process -FilePath 'node' -ArgumentList 'scripts/e2e.mjs' -WorkingDirectory $RepoRoot -NoNewWindow -Wait -PassThru
+    $code = $p.ExitCode
+  } finally { Remove-Item Env:E2E_LOG -ErrorAction SilentlyContinue }
+  $null = Invoke-Logged 'e2e' 'docker' @('compose','-f',$E2eCompose,'down','-v','--remove-orphans')
+  return $code
+}
+
+# --- dispatch ---------------------------------------------------------------
+$All  = @('build','vet','test','mock')
+# guide comes first: test and cov read the guide it writes.
+$Full = @('guide','build','vet','test','mock','cov','image','scan','graphify')
+$KnownTasks = @('build','vet','test','mock','cov','scan','image','up','down','graphify','guide','e2e')
+
+function Show-Usage {
+  @"
+usage: dev.ps1 <task>...
+
+  build vet test mock cov scan image up down graphify guide e2e
+  all   = $($All -join ' ')       (what CI runs, as: all cov scan)
+  full  = $($Full -join ' ')      (pre-tag sweep)
+  mock  = the demo broker and fake-gateway suites (tests/mock-broker/)
+  guide = docs/user-guide.md, written from the manual's chapters (local only)
+  e2e   = the gateway in Gateway and Provisioned mode against an existing broker (local only, standalone)
+"@ | Write-Host
+}
+
+if (-not $Tasks -or $Tasks[0] -cin @('-h','--help','help')) { Show-Usage; exit 0 }
+
+$queue = @()
+foreach ($t in $Tasks) {
+  switch -CaseSensitive ($t) { 'all' { $queue += $All } 'full' { $queue += $Full } default { $queue += $t } }
+}
+
+# Every name is checked before anything runs, so a typo late in the list fails
+# at once rather than after the tasks ahead of it.
+# Exact and case-sensitive, as dev.sh: Get-Command takes wildcards (b*) and
+# ignores case (BUILD), so it is not used for this.
+foreach ($task in $queue) {
+  if ($KnownTasks -cnotcontains $task) { Die "unknown task: $task" }
+}
+$CovQueued = $queue -contains 'cov'
+
+$failed = 0
+$times = @()
+foreach ($task in $queue) {
+  Step $task
+  Start-TaskLog $task
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  $code = 0
+  # A task that throws (a tool missing from PATH, for one) says why on the
+  # console and in its log, as dev.sh's run() does, instead of a bare exit 1.
+  try { $code = & "Task-$task" } catch { Write-Note $task "error: $($_.Exception.Message)"; $code = 1 }
+  if ($null -eq $code) { $code = 0 }
+  $sw.Stop()
+  $secs = [int]$sw.Elapsed.TotalSeconds
+  Write-Finish -Task $task -Code $code -Seconds $secs
+  if ($code -ne 0) {
+    $times += "$task ${secs}s FAILED"
+    $failed = 1; Warn "$task failed; stopping"; break
+  }
+  $times += "$task ${secs}s"
+  Ok $task
+}
+# Console only: where a multi-task run spent its time, on one line.
+if ($queue.Count -gt 1) { Step ('timing: ' + ($times -join ' | ')) }
+exit $failed

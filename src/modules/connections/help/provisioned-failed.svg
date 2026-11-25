@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 250" width="760" height="250" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="250" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="20" width="720" height="210" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="52" font-size="15" font-weight="700">Connect to a broker</text>
+    <rect x="640" y="36" width="80" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="680" y="53" font-weight="700" text-anchor="middle">Refresh</text>
+    <text x="40" y="86" font-size="11" fill="#64748b" font-weight="700">Broker</text>
+    <rect x="40" y="94" width="332" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="112">east-prod</text>
+    <path d="M352 106 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <text x="388" y="86" font-size="11" fill="#64748b" font-weight="700">Message VPN</text>
+    <rect x="388" y="94" width="332" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="398" y="112">default</text>
+    <path d="M700 106 l4 4 l4 -4" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    <rect x="40" y="144" width="110" height="30" fill="#00C895" rx="5"/>
+    <text x="95" y="163" fill="#ffffff" font-weight="700" text-anchor="middle">Connect</text>
+    <circle cx="166" cy="159" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="166" y="163" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <text x="40" y="196" fill="#ef4444">SEMP (management): broker not reachable</text>
+    <text x="40" y="214" fill="#ef4444">Messaging (client): connected, closed because SEMP failed</text>
+    <circle cx="456" cy="205" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="456" y="209" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+</svg>

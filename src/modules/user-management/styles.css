@@ -1,0 +1,95 @@
+/* User Management module styles. Module-prefixed (.user-mgmt-*) so they never
+ * collide in the shared (inlined) cascade. Shipped only in the managed build
+ * (main-admin.css). */
+
+/* Only the top margin is set here, so a spacing class on the line (mb-3)
+ * still gives its own bottom margin. */
+.user-mgmt-hint {
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+}
+
+/* The account's switches sit side by side, and wrap on a narrow card. */
+.user-mgmt-switches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 2rem;
+}
+
+.user-mgmt-test-result {
+    margin-bottom: 0.75rem;
+}
+
+.user-mgmt-test-result > p {
+    margin: 0 0 0.25rem;
+}
+
+/* A user's modules: pills, and the Add module menu below them. */
+.user-mgmt-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.user-mgmt-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.2rem 0.6rem;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background-color: var(--bg-card);
+    font-size: 0.85rem;
+}
+
+.user-mgmt-pill-tag {
+    color: var(--status-warning);
+    font-size: 0.75rem;
+}
+
+.user-mgmt-pill-remove {
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0 0.2rem;
+    line-height: 1;
+}
+
+.user-mgmt-pill-remove:hover {
+    color: var(--text-primary);
+}
+
+.user-mgmt-menu-wrap {
+    position: relative;
+    display: inline-block;
+}
+
+.user-mgmt-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 10;
+    min-width: 12rem;
+    margin-top: 0.25rem;
+    padding: 0.25rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background-color: var(--bg-card);
+}
+
+.user-mgmt-menu-item {
+    display: block;
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    border: 0;
+    background: transparent;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+}
+
+.user-mgmt-menu-item:hover,
+.user-mgmt-menu-item:focus-visible {
+    background-color: var(--bg-hover, rgba(127, 127, 127, 0.15));
+}

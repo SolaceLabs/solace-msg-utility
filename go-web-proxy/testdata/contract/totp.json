@@ -1,0 +1,12 @@
+{
+  "_comment": "RFC 6238 SHA-1 test vectors (6 digits, 30 s step, T0 = 0) for the ASCII secret 12345678901234567890. Read by go-web-proxy/totp_test.go and by the e2e helper tests (tests/build/e2e-lib.test.ts). The code is the last 6 digits of the RFC's 8-digit value.",
+  "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+  "vectors": [
+    { "time": 59, "code": "287082" },
+    { "time": 1111111109, "code": "081804" },
+    { "time": 1111111111, "code": "050471" },
+    { "time": 1234567890, "code": "005924" },
+    { "time": 2000000000, "code": "279037" },
+    { "time": 20000000000, "code": "353130" }
+  ]
+}

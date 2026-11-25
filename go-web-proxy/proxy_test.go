@@ -1,32 +1,38 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ----- isProxyPath / firstSegment ----------------------------------------------
 
 func TestIsProxyPath(t *testing.T) {
 	cases := map[string]bool{
-		"/http/8080/host":     true,
-		"/https/443/host":     true,
-		"/ws/8008/host":       true,
-		"/wss/1443/host":      true,
-		"/hosted":             false,
-		"/index.html":         false,
-		"/assets/foo.js":      false,
-		"/":                   false,
-		"/httpish/8080/host":  false, // not exactly "http"
-		"/HTTP/8080/host":     false, // case-sensitive
+		"/http/8080/host":    true,
+		"/https/443/host":    true,
+		"/ws/8008/host":      true,
+		"/wss/1443/host":     true,
+		"/hosted":            false,
+		"/index.html":        false,
+		"/assets/foo.js":     false,
+		"/":                  false,
+		"/httpish/8080/host": false, // not exactly "http"
+		"/HTTP/8080/host":    false, // case-sensitive
 	}
 	for in, want := range cases {
 		if got := isProxyPath(in); got != want {
@@ -98,19 +104,55 @@ func TestParseProxyPath_IPv6(t *testing.T) {
 }
 
 func TestParseProxyPath_BadInput(t *testing.T) {
-	bad := []string{
-		"/http/abc/host/x",       // port not numeric
-		"/http/0/host/x",         // port out of range
-		"/http/70000/host/x",     // port out of range
-		"/http/-1/host/x",        // negative port
-		"/ftp/21/host/x",         // unknown scheme
-		"/http",                  // missing port + host
-		"/http/8080",             // missing host
-		"/http/8080/",            // empty host segment
+	const shape = "path must be /{scheme}/{port}/{host}[/rest]"
+	bad := []struct{ in, want string }{
+		{"/http/abc/host/x", `invalid port "abc"`},     // port not numeric
+		{"/http/0/host/x", `invalid port "0"`},         // port out of range
+		{"/http/70000/host/x", `invalid port "70000"`}, // port out of range
+		{"/http/-1/host/x", `invalid port "-1"`},       // negative port
+		{"/ftp/21/host/x", `unknown scheme "ftp"`},     // unknown scheme
+		{"/http", shape},                           // missing port + host
+		{"/http/8080", shape},                      // missing host
+		{"/http/8080/", "host segment empty"},      // empty host segment
+		{"/http/8080/   /x", "host segment empty"}, // whitespace-only host segment
+		{"/http/8080/user@evil.example/x", `invalid host "user@evil.example"`},
+		{"/http/8080/a b/x", `invalid host "a b"`},
+		{"/http/8080/host:9/x", `invalid host "host:9"`},
+		{"/http/8080/[example.com]/x", "brackets hold an IPv6 address only"},
+		{"/http/8080/[::1/x", `invalid host "[::1"`},
+		// An escaped "/" does not move the host's end: it is part of the host, and no host holds one.
+		{"/http/8080/a%2Fb/x", `invalid host "a/b"`},
+		{"/http/8080/h%zz/x", `invalid escape in "h%zz"`},
+		{"/http/8080/h/x%zz", "invalid escape in the path after the host"},
 	}
-	for _, in := range bad {
-		if _, err := parseProxyPath(in); err == nil {
-			t.Errorf("parseProxyPath(%q): want error, got nil", in)
+	for _, c := range bad {
+		if _, err := parseProxyPath(c.in); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("parseProxyPath(%q): want an error containing %q, got %v", c.in, c.want, err)
+		}
+	}
+}
+
+// The path after the host keeps the escapes it came with, so a name that holds
+// a "/" is still one segment at the broker. The scheme, port and host are read
+// decoded.
+func TestParseProxyPath_KeepsTheEscapesAfterTheHost(t *testing.T) {
+	cases := []struct{ in, wantHost, wantPath, wantEscaped string }{
+		{"/https/1943/h/SEMP/v2/monitor/msgVpns/a%2Fb/queues", "h:1943", "/SEMP/v2/monitor/msgVpns/a/b/queues", "/SEMP/v2/monitor/msgVpns/a%2Fb/queues"},
+		{"/https/1943/h/SEMP/v2/monitor/msgVpns/a%20b%3Fc/queues", "h:1943", "/SEMP/v2/monitor/msgVpns/a b?c/queues", "/SEMP/v2/monitor/msgVpns/a%20b%3Fc/queues"},
+		// A name that holds the text "%2F" keeps its own escape.
+		{"/https/1943/h/x%252Fy", "h:1943", "/x%2Fy", "/x%252Fy"},
+		{"/%68ttps/19%343/%68/x", "h:1943", "/x", "/x"},
+		{"/wss/1443/h", "h:1443", "/", "/"},
+	}
+	for _, c := range cases {
+		got, err := parseProxyPath(c.in)
+		if err != nil {
+			t.Errorf("parseProxyPath(%q): unexpected error %v", c.in, err)
+			continue
+		}
+		if got.Host != c.wantHost || got.Path != c.wantPath || got.EscapedPath() != c.wantEscaped {
+			t.Errorf("parseProxyPath(%q): got host %s, path %q, sent as %q; want %s, %q, %q",
+				c.in, got.Host, got.Path, got.EscapedPath(), c.wantHost, c.wantPath, c.wantEscaped)
 		}
 	}
 }
@@ -142,16 +184,23 @@ func TestJoinHostPort(t *testing.T) {
 func TestHostedHandler_Enabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
-	newHostedHandler(true).ServeHTTP(rec, r)
+	newHostedHandler(true, liveWith(func(c *config) { c.connModes, c.defaultConn = connBoth, connProvisioned }), bundleReady).ServeHTTP(rec, r)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: want 200, got %d", rec.Code)
 	}
-	if got := rec.Body.String(); got != "true" {
-		t.Errorf("body: want 'true' (no newline), got %q", got)
+	// The SPA reads its connection-mode config from this body — it is the only
+	// channel a statically-served page has for the gateway's container env.
+	var got hostedInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body is not JSON: %v (%q)", err, rec.Body.String())
 	}
-	if ct := rec.Header().Get("Content-Type"); ct != "text/html" {
-		t.Errorf("Content-Type: want text/html, got %q", ct)
+	want := hostedInfo{Hosted: true, ConnModes: connBoth, DefaultConn: connProvisioned}
+	if got != want {
+		t.Errorf("body: want %+v, got %+v", want, got)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type: want application/json, got %q", ct)
 	}
 	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Errorf("Cache-Control: want no-store, got %q", cc)
@@ -161,7 +210,7 @@ func TestHostedHandler_Enabled(t *testing.T) {
 func TestHostedHandler_Disabled(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/hosted", nil)
-	newHostedHandler(false).ServeHTTP(rec, r)
+	newHostedHandler(false, liveWith(nil), bundleReady).ServeHTTP(rec, r)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status: want 404, got %d", rec.Code)
@@ -171,73 +220,267 @@ func TestHostedHandler_Disabled(t *testing.T) {
 	}
 }
 
+// connModes and defaultConn apply without a restart: /hosted answers from the
+// live settings on every request.
+func TestHostedHandler_ReadsLiveSettings(t *testing.T) {
+	cfg := defaultConfig()
+	lv := newLive(cfg)
+	h := newHostedHandler(true, lv, bundleReady)
+	cfg.connModes, cfg.defaultConn = connBoth, connProvisioned
+	lv.apply(cfg)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/hosted", nil))
+	var got hostedInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ConnModes != connBoth || got.DefaultConn != connProvisioned {
+		t.Errorf("want the applied modes, got %+v", got)
+	}
+}
+
+// bundleReady is the app bundle check of a deployment whose bundle is there.
+func bundleReady() error { return nil }
+
+// /hosted is the health probe: once the app bundle cannot be served it
+// answers 503, so an orchestrator sees the gateway as unhealthy.
+func TestHostedHandler_UnusableBundleIs503(t *testing.T) {
+	dir := writeBundles(t)
+	pwa := mustPWA(t, dir, directIndexFile)
+	h := newHostedHandler(true, liveWith(nil), pwa.ready)
+	if err := os.Remove(filepath.Join(dir, directIndexFile)); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/hosted", nil))
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("want an uncached 503, got %d %v", rec.Code, rec.Header())
+	}
+}
+
+// ----- validateConnModes ------------------------------------------------------
+
+// Startup guard: Provisioned sign-in on a gateway the app cannot detect must
+// refuse to start rather than ship a tab that only fails at sign-in. Each
+// refusal names the key and the variable that seeds it.
+func TestValidateConnModes(t *testing.T) {
+	base := func(modes, def string, hosted bool) config {
+		return config{connModes: modes, defaultConn: def, hosted: hosted}
+	}
+	cases := []struct {
+		name    string
+		cfg     config
+		wantErr string
+	}{
+		{"Gateway mode", base(connDirect, connDirect, true), ""},
+		{"direct needs no gateway (SMU_HOSTED=false)", base(connDirect, connDirect, false), ""},
+		{"direct ignores an odd defaultConn", base(connDirect, connProvisioned, false), ""},
+		{"provisioned", base(connProvisioned, connProvisioned, true), ""},
+		{"both", base(connBoth, connDirect, true), ""},
+		{"invalid SMU_CONN_MODES", base("managed", connDirect, true), `connModes="managed" (config.yaml; seeded by SMU_CONN_MODES) must be one of "direct", "provisioned", "both"`},
+		{"invalid SMU_DEFAULT_CONN", base(connBoth, "bogus", true), `defaultConn="bogus" (config.yaml; seeded by SMU_DEFAULT_CONN) must be one of "direct", "provisioned"`},
+		{"provisioned without SMU_HOSTED", base(connProvisioned, connProvisioned, false), `offers Provisioned sign-in but hosted is false (config.yaml; seeded by SMU_HOSTED)`},
+		{"both without SMU_HOSTED", base(connBoth, connDirect, false), `hosted is false`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateConnModes(tc.cfg)
+			if tc.wantErr == "" && err != nil {
+				t.Fatalf("want no error, got %v", err)
+			}
+			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("want an error containing %q, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+// The defaults are Gateway mode: Direct only, so Provisioned mode stays off.
+func TestLoadConfig_ConnModeDefaults(t *testing.T) {
+	t.Setenv("SMU_CONN_MODES", "")
+	t.Setenv("SMU_DEFAULT_CONN", "")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.connModes != connDirect || cfg.defaultConn != connDirect {
+		t.Fatalf("want direct/direct, got %q/%q", cfg.connModes, cfg.defaultConn)
+	}
+}
+
+// Env values are case-insensitive so "Provisioned"/"BOTH" don't fail the enum check.
+func TestLoadConfig_ConnModesLowercased(t *testing.T) {
+	t.Setenv("SMU_CONN_MODES", "BOTH")
+	t.Setenv("SMU_DEFAULT_CONN", "Provisioned")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.connModes != connBoth || cfg.defaultConn != connProvisioned {
+		t.Fatalf("want both/provisioned, got %q/%q", cfg.connModes, cfg.defaultConn)
+	}
+}
+
 // ----- pwaHandler -------------------------------------------------------------
 
-func TestPWAHandler_MissingDir(t *testing.T) {
-	h := newPWAHandler(filepath.Join(t.TempDir(), "absent"), quietLogger())
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("missing dir: want 404, got %d", rec.Code)
-	}
-}
-
-func TestPWAHandler_EmptyDir(t *testing.T) {
-	h := newPWAHandler(t.TempDir(), quietLogger()) // empty dir
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("empty dir: want 404, got %d", rec.Code)
-	}
-}
-
-func TestPWAHandler_ServesIndex(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>hi</html>"), 0o644); err != nil {
+// mustPWA is newPWAHandler over a directory that holds the bundle.
+func mustPWA(t *testing.T, dir, index string) *pwaHandler {
+	t.Helper()
+	h, err := newPWAHandler(dir, index, quietLogger())
+	if err != nil {
 		t.Fatal(err)
 	}
-	h := newPWAHandler(dir, quietLogger())
+	return h
+}
 
+// A deployment that cannot serve the mode's bundle does not start: a missing
+// or empty app directory, a path that is a file, a bundle that is missing or
+// is a directory. The error names the file and what to do.
+func TestPWAHandler_UnusableBundleStopsTheStart(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "SolaceMsgUtility")
+	writeFile(t, file, "not a directory")
+	directOnly := t.TempDir()
+	writeFile(t, filepath.Join(directOnly, directIndexFile), "<html>direct</html>")
+	bundleIsADir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(bundleIsADir, directIndexFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ name, dir, index, want string }{
+		{"the directory is missing", filepath.Join(t.TempDir(), "absent"), directIndexFile, "cannot be read"},
+		{"the directory is empty", t.TempDir(), directIndexFile, "cannot be read"},
+		{"the path is a file", file, directIndexFile, "cannot be read"},
+		{"the Provisioned bundle is missing", directOnly, provisionedIndexFile, "cannot be read"},
+		{"the bundle is a directory", bundleIsADir, directIndexFile, "is not a regular file"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, err := newPWAHandler(c.dir, c.index, quietLogger())
+			if h != nil || err == nil {
+				t.Fatalf("want the start refused, got %v %v", h, err)
+			}
+			for _, want := range []string{c.want, filepath.Join(c.dir, c.index), "mount a build that holds " + c.index} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the error lacks %q: %v", want, err)
+				}
+			}
+		})
+	}
+}
+
+// The app has no client-side routes and the bundle's relative vendor paths
+// only resolve at /, so a path that is not a file is a 404 for every method:
+// never the bundle, and never a redirect a browser would keep.
+func TestPWAHandler_UnknownPathIsNotFound(t *testing.T) {
+	dir := writeBundles(t)
+	for _, provisioned := range []bool{false, true} {
+		h := mustPWA(t, dir, appIndexFile(provisioned))
+		for _, p := range []string{"/queue-browser/some/deep/route", "/login", "/login/", "/a/b?x=1", "/missing.js"} {
+			for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(method, p, nil))
+				if rec.Code != http.StatusNotFound || rec.Header().Get("Location") != "" {
+					t.Errorf("provisioned=%v %s %s: want 404 without a Location, got %d %q", provisioned, method, p, rec.Code, rec.Header().Get("Location"))
+				}
+				if strings.Contains(rec.Body.String(), "<html>direct") || strings.Contains(rec.Body.String(), "<html>provisioned") {
+					t.Errorf("provisioned=%v %s %s: served a bundle: %q", provisioned, method, p, rec.Body.String())
+				}
+			}
+		}
+	}
+}
+
+// The image ships the Direct, Provisioned and admin bundles side by side.
+func writeBundles(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range map[string]string{directIndexFile: "<html>direct</html>", provisionedIndexFile: "<html>provisioned</html>", adminIndexFile: "<html>admin</html>"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// / serves the mode's bundle: the Direct-only one in Gateway mode, the one with
+// the sign-in in Provisioned mode.
+func TestPWAHandler_ServesTheModesBundle(t *testing.T) {
+	dir := writeBundles(t)
+	for provisioned, want := range map[bool]string{false: "direct", true: "provisioned"} {
+		h := mustPWA(t, dir, appIndexFile(provisioned))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		if rec.Code != http.StatusOK || rec.Body.String() != "<html>"+want+"</html>" {
+			t.Errorf("provisioned=%v /: want the %s bundle, got %d %q", provisioned, want, rec.Code, rec.Body.String())
+		}
+		expectAppPageHeaders(t, rec)
+	}
+}
+
+// expectAppPageHeaders checks what the gateway adds to an app bundle's page:
+// HTML, its policy on top of the bundle's own (no framing, connections to
+// the gateway only), no type sniffing and no referrer.
+func expectAppPageHeaders(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	h := rec.Header()
+	if !strings.HasPrefix(h.Get("Content-Type"), "text/html") ||
+		h.Get("Content-Security-Policy") != "frame-ancestors 'none'; connect-src 'self'" ||
+		h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "no-referrer" {
+		t.Errorf("app page headers: %v", h)
+	}
+}
+
+// The vendor scripts next to the bundle are served as the type their names
+// say, never as one a browser guesses.
+func TestPWAHandler_FilesAreNotSniffed(t *testing.T) {
+	dir := writeBundles(t)
+	if err := os.WriteFile(filepath.Join(dir, "solclient.js"), []byte("var solace = {};"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	mustPWA(t, dir, directIndexFile).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/solclient.js", nil))
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		!strings.Contains(rec.Header().Get("Content-Type"), "javascript") {
+		t.Errorf("solclient.js: want 200 javascript with nosniff, got %d %v", rec.Code, rec.Header())
+	}
+}
+
+// Only the gated /solAdmin route may serve the admin bundle, and only / the
+// Provisioned one, in either mode.
+func TestPWAHandler_NeverServesTheAdminOrProvisionedBundleByName(t *testing.T) {
+	dir := writeBundles(t)
+	for _, provisioned := range []bool{false, true} {
+		h := mustPWA(t, dir, appIndexFile(provisioned))
+		for _, p := range []string{"/solAdmin.html", "/SOLADMIN.HTML", "/x/../solAdmin.html", "/solAdmin.html/", "/provisioned.html", "/Provisioned.HTML"} {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
+			if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "<html>") {
+				t.Errorf("provisioned=%v %s: want 404 without a bundle, got %d %q", provisioned, p, rec.Code, rec.Body.String())
+			}
+		}
+	}
+}
+
+// A bundle that goes away under a running gateway (a mount changed) is a 404
+// naming the file, and a warn line naming it and the request.
+func TestPWAHandler_BundleGoneAtRequestTimeIsLogged(t *testing.T) {
+	dir := writeBundles(t)
+	var buf strings.Builder
+	h, err := newPWAHandler(dir, appIndexFile(true), newCapturingLogger(&buf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, provisionedIndexFile)); err != nil {
+		t.Fatal(err)
+	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("root: want 200, got %d", rec.Code)
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "provisioned.html not found") {
+		t.Errorf("/: want 404 naming provisioned.html, got %d %q", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "hi") {
-		t.Errorf("root body: want index content, got %q", rec.Body.String())
-	}
-}
-
-func TestPWAHandler_SPAFallback_NoExtension(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>SPA</html>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	h := newPWAHandler(dir, quietLogger())
-
-	// /queue-browser/some/deep/route has no file extension → fallback to index.html.
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/queue-browser/some/deep/route", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("fallback: want 200, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "SPA") {
-		t.Errorf("fallback body: want SPA index, got %q", rec.Body.String())
-	}
-}
-
-func TestPWAHandler_MissingAsset_404(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html></html>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	h := newPWAHandler(dir, quietLogger())
-
-	// Anything with a file extension should NOT fall back — it's an asset request.
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/missing.js", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("missing asset: want 404, got %d", rec.Code)
+	for _, want := range []string{"level=WARN", "app bundle missing", "file=" + filepath.Join(dir, provisionedIndexFile), "path=/"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("log lacks %q: %s", want, buf.String())
+		}
 	}
 }
 
@@ -255,13 +498,18 @@ func TestReverseProxy_HTTPRoundTrip(t *testing.T) {
 	defer upstream.Close()
 
 	upURL, _ := url.Parse(upstream.URL)
-	rp := newReverseProxy(x509.NewCertPool(), false, quietLogger())
+	rp := newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger())
 
-	// Build /http/{port}/{host}/some/path?x=1 against the test server.
-	gw := httptest.NewServer(rp)
+	// Build /http/{port}/{host}/some/path?x=1 against the test server, behind
+	// withClient as serve() mounts it.
+	gw := httptest.NewServer(withClient(liveWith(nil), rp))
 	defer gw.Close()
 	path := "/http/" + upURL.Port() + "/" + upURL.Hostname() + "/some/path"
-	resp, err := http.Get(gw.URL + path + "?x=1&y=2")
+	req, _ := http.NewRequest(http.MethodGet, gw.URL+path+"?x=1&y=2", nil)
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	req.Header.Set("Forwarded", "for=203.0.113.9")
+	req.Header.Set("X-Forwarded-Host", "forged.example")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -286,14 +534,246 @@ func TestReverseProxy_HTTPRoundTrip(t *testing.T) {
 	if captured.URL.RawQuery != "x=1&y=2" {
 		t.Errorf("upstream query: want x=1&y=2, got %q", captured.URL.RawQuery)
 	}
-	// X-Forwarded-For must NOT be set — transparent passthrough.
-	if v := captured.Header.Get("X-Forwarded-For"); v != "" {
-		t.Errorf("X-Forwarded-For leaked: %q (must be empty per spec)", v)
+	// The upstream learns the client's real address (the test's own socket),
+	// not the one it claimed, and no forged forwarding header passes.
+	client, _, _ := net.SplitHostPort(gw.Listener.Addr().String())
+	if xff, fwd := captured.Header.Get("X-Forwarded-For"), captured.Header.Get("Forwarded"); xff != client || !strings.Contains(fwd, client) {
+		t.Errorf("upstream forwarding headers: X-Forwarded-For %q, Forwarded %q, want the address %s", xff, fwd, client)
+	}
+	if v := captured.Header.Get("X-Forwarded-Host"); v != "" {
+		t.Errorf("the client's X-Forwarded-Host reached the upstream: %q", v)
+	}
+}
+
+// A Message VPN or queue whose name holds a "/" is one path segment (%2F) in a
+// SEMP request. The relay sends the path after the host, and the query, with
+// the escapes the browser sent, so the broker is asked for that name.
+func TestReverseProxy_KeepsAnEncodedSlashInAName(t *testing.T) {
+	asked := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked <- r.RequestURI
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	upURL, _ := url.Parse(upstream.URL)
+	gw := httptest.NewServer(withClient(liveWith(nil), newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger())))
+	defer gw.Close()
+
+	const tail = "/SEMP/v2/monitor/msgVpns/a%2Fb/queues?count=10&where=queueName%3D%3Dq%2F1"
+	resp, err := http.Get(gw.URL + "/http/" + upURL.Port() + "/" + upURL.Hostname() + tail)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: want 200, got %d", resp.StatusCode)
+	}
+	if got := <-asked; got != tail {
+		t.Errorf("the broker was asked for %q, want %q", got, tail)
+	}
+}
+
+// One transport serves the Direct relay, the SEMP relay and the SMF gate: it
+// makes its own TLS connections, verified through the trust holder when each
+// is made, and closes its idle connections when the trust changes.
+func TestNewUpstreamTransport_VerifiesThroughTheTrustHolder(t *testing.T) {
+	trust := testTrust(false)
+	tr := newUpstreamTransport(trust)
+	if tr.DialTLSContext == nil || tr.TLSClientConfig != nil {
+		t.Errorf("verification belongs to dialUpstreamTLS, reading the holder: %+v", tr.TLSClientConfig)
+	}
+	if len(trust.hooks) != 1 {
+		t.Errorf("the transport must close its idle connections on a trust change: %d hooks", len(trust.hooks))
+	}
+}
+
+// An address that is not host:port, or a host that does not answer, fails
+// before any handshake and leaves no connection behind.
+func TestDialUpstreamTLS_FailsBeforeTheHandshakeWhenItCannotConnect(t *testing.T) {
+	dialer := &net.Dialer{Timeout: time.Second}
+	trust := testTrust(false)
+	if conn, err := dialUpstreamTLS(context.Background(), dialer, trust, "tcp", "no-port"); err == nil || conn != nil {
+		t.Errorf("an address with no port must be refused, got %v %v", conn, err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	if conn, err := dialUpstreamTLS(context.Background(), dialer, trust, "tcp", addr); err == nil || conn != nil {
+		t.Errorf("a closed port must fail to connect, got %v %v", conn, err)
+	}
+}
+
+// The upstream dialer offers HTTP/1.1 only: against a broker (or a TLS proxy in
+// front of one) that would pick h2 when offered, the connection is HTTP/1.1,
+// which a WebSocket upgrade needs.
+func TestDialUpstreamTLS_NegotiatesHTTP11OnlyEvenWhenTheServerOffersH2(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	// Both protocols, h2 first, as a TLS proxy in front of a broker might offer
+	// them. (EnableHTTP2 would offer h2 alone, and a server with no overlap
+	// lets an http/1.1 client fall back with no protocol named at all.)
+	srv.TLS = &tls.Config{NextProtos: []string{"h2", "http/1.1"}}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+
+	// The server does prefer h2 when a client offers it.
+	probe, err := tls.Dial("tcp", srv.Listener.Addr().String(), &tls.Config{RootCAs: pool, NextProtos: []string{"h2", "http/1.1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	offered := probe.ConnectionState().NegotiatedProtocol
+	_ = probe.Close()
+	if offered != "h2" {
+		t.Fatalf("the test server must negotiate h2 when offered it, got %q", offered)
+	}
+
+	conn, err := dialUpstreamTLS(context.Background(), &net.Dialer{Timeout: 5 * time.Second}, newTrustHolder(pool, false, quietLogger()), "tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if got := conn.(*tls.Conn).ConnectionState().NegotiatedProtocol; got != "http/1.1" {
+		t.Errorf("negotiated protocol: want http/1.1, got %q", got)
+	}
+}
+
+func TestDropSessionCookie(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"no cookie header", nil, nil},
+		{"only the session", []string{"__Host-smu-session=abc"}, nil},
+		{"session among others", []string{"a=1; __Host-smu-session=abc; b=2"}, []string{"a=1; b=2"}},
+		{"one line per cookie", []string{"__Host-smu-session=abc", "c=3"}, []string{"c=3"}},
+		{"empty parts dropped", []string{" ; d=4 ;"}, []string{"d=4"}},
+		{"the sign-in ticket too", []string{"a=1; __Host-smu-signin=tkt; __Host-smu-session=abc"}, []string{"a=1"}},
+		{"look-alike name kept", []string{"__Host-smu-session2=x"}, []string{"__Host-smu-session2=x"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := http.Header{}
+			for _, v := range c.in {
+				h.Add("Cookie", v)
+			}
+			dropSessionCookie(h)
+			if got := h.Values("Cookie"); !slices.Equal(got, c.want) {
+				t.Errorf("Cookie: want %q, got %q", c.want, got)
+			}
+		})
+	}
+}
+
+func TestReverseProxy_NeverForwardsTheSessionCookie(t *testing.T) {
+	var captured http.Header
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Header.Clone()
+	}))
+	defer upstream.Close()
+	upURL, _ := url.Parse(upstream.URL)
+	gw := httptest.NewServer(newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger()))
+	defer gw.Close()
+
+	req, _ := http.NewRequest("GET", gw.URL+"/http/"+upURL.Port()+"/"+upURL.Hostname()+"/SEMP", nil)
+	req.Header.Add("Cookie", "theirs=1; __Host-smu-session=live-session-id")
+	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if got := captured.Values("Cookie"); !slices.Equal(got, []string{"theirs=1"}) {
+		t.Errorf("upstream Cookie: want [theirs=1], got %q", got)
+	}
+	// Direct SEMP needs the browser's own Basic header.
+	if got := captured.Get("Authorization"); got != "Basic dXNlcjpwYXNz" {
+		t.Errorf("upstream Authorization: want the browser's, got %q", got)
+	}
+}
+
+func TestDropSessionSetCookie(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"no Set-Cookie", nil, nil},
+		{"a replacement session", []string{"__Host-smu-session=theirs; Secure; Path=/; HttpOnly"}, nil},
+		{"an expiry", []string{"__Host-smu-session=; Max-Age=0; Secure; Path=/"}, nil},
+		{"spaces around the name", []string{" __Host-smu-session =x; Secure; Path=/"}, nil},
+		{"others kept in order", []string{"a=1; Path=/", "__Host-smu-session=x; Secure; Path=/", "b=2"}, []string{"a=1; Path=/", "b=2"}},
+		{"a replacement sign-in ticket", []string{"__Host-smu-signin=theirs; Secure; Path=/; HttpOnly"}, nil},
+		{"look-alike name kept", []string{"__Host-smu-session2=x; Secure; Path=/"}, []string{"__Host-smu-session2=x; Secure; Path=/"}},
+		{"name only in the value kept", []string{"a=__Host-smu-session; Path=/"}, []string{"a=__Host-smu-session; Path=/"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := http.Header{}
+			for _, v := range c.in {
+				h.Add("Set-Cookie", v)
+			}
+			dropSessionSetCookie(h)
+			if got := h.Values("Set-Cookie"); !slices.Equal(got, c.want) {
+				t.Errorf("Set-Cookie: want %q, got %q", c.want, got)
+			}
+		})
+	}
+}
+
+func TestReverseProxy_UpstreamCannotSetTheSessionCookie(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "__Host-smu-session=attacker-session; Secure; Path=/; HttpOnly")
+		w.Header().Add("Set-Cookie", "theirs=1; Path=/")
+	}))
+	defer upstream.Close()
+	upURL, _ := url.Parse(upstream.URL)
+	gw := httptest.NewServer(newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger()))
+	defer gw.Close()
+
+	resp, err := http.Get(gw.URL + "/http/" + upURL.Port() + "/" + upURL.Hostname() + "/SEMP")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Values("Set-Cookie"); !slices.Equal(got, []string{"theirs=1; Path=/"}) {
+		t.Errorf("Set-Cookie to the browser: want only theirs=1, got %q", got)
+	}
+}
+
+func TestReverseProxy_UpstreamChallengeNeverReachesTheBrowser(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Basic realm="SEMP"`)
+		w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer upstream.Close()
+	upURL, _ := url.Parse(upstream.URL)
+	gw := httptest.NewServer(newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger()))
+	defer gw.Close()
+
+	resp, err := http.Get(gw.URL + "/http/" + upURL.Port() + "/" + upURL.Hostname() + "/SEMP")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	// The refusal itself passes: the app tells wrong credentials by the 401.
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status: want 401, got %d", resp.StatusCode)
+	}
+	for _, k := range []string{"WWW-Authenticate", "Proxy-Authenticate"} {
+		if got := resp.Header.Values(k); len(got) != 0 {
+			t.Errorf("%s to the browser: want none, got %q", k, got)
+		}
 	}
 }
 
 func TestReverseProxy_BadPathReturns400(t *testing.T) {
-	rp := newReverseProxy(x509.NewCertPool(), false, quietLogger())
+	rp := newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger())
 	gw := httptest.NewServer(rp)
 	defer gw.Close()
 
@@ -308,7 +788,7 @@ func TestReverseProxy_BadPathReturns400(t *testing.T) {
 }
 
 func TestReverseProxy_UpstreamDown_502(t *testing.T) {
-	rp := newReverseProxy(x509.NewCertPool(), false, quietLogger())
+	rp := newReverseProxy(newUpstreamTransport(testTrust(false)), quietLogger())
 	gw := httptest.NewServer(rp)
 	defer gw.Close()
 
@@ -348,6 +828,64 @@ func TestAccessLog_RecordsStatusAndBytes(t *testing.T) {
 	}
 }
 
+// The access log runs inside withClient: behind a trusted proxy it names the
+// client X-Forwarded-For gives, the one the access list and the throttle use,
+// and the signed-in user a gate recorded.
+func TestAccessLog_NamesTheResolvedClientAndUser(t *testing.T) {
+	var buf strings.Builder
+	lv := liveWith(func(c *config) { c.access.trustedProxies = prefixes(t, "10.0.0.0/8") })
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setRequestUser(r, "viewer")
+		w.WriteHeader(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/managed/me", nil)
+	req.RemoteAddr = "10.1.1.1:5000"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	withClient(lv, accessLog(inner, newCapturingLogger(&buf))).ServeHTTP(httptest.NewRecorder(), req)
+	for _, want := range []string{"client=203.0.113.9", "user=viewer", "status=204", "path=/managed/me"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("access log lacks %q: %s", want, buf.String())
+		}
+	}
+	if strings.Contains(buf.String(), "10.1.1.1") {
+		t.Errorf("the proxy is not the client: %s", buf.String())
+	}
+}
+
+// A handler that takes the connection over (a WebSocket) is logged as a 101
+// with hijacked=true, not as a 200 with no bytes.
+func TestAccessLog_RecordsAHijackAsA101(t *testing.T) {
+	var buf strings.Builder
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, brw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		defer conn.Close()
+		_, _ = brw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: test\r\n\r\n")
+		_ = brw.Flush()
+	})
+	logged := accessLog(inner, newCapturingLogger(&buf))
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logged.ServeHTTP(w, r)
+		close(done)
+	}))
+	defer srv.Close()
+	if status := rawStatusLine(t, srv.Listener.Addr().String(), "GET /ws HTTP/1.1\r\nHost: gateway\r\nConnection: Upgrade\r\nUpgrade: test\r\n\r\n"); !strings.HasPrefix(status, "HTTP/1.1 101") {
+		t.Fatalf("want the handler's 101, got %q", status)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the handler never returned")
+	}
+	if !strings.Contains(buf.String(), "status=101") || !strings.Contains(buf.String(), "hijacked=true") {
+		t.Errorf("want a 101 marked hijacked: %s", buf.String())
+	}
+}
+
 func TestAccessLog_SkipsHosted(t *testing.T) {
 	var buf strings.Builder
 	logger := newCapturingLogger(&buf)
@@ -363,21 +901,161 @@ func TestAccessLog_SkipsHosted(t *testing.T) {
 	}
 }
 
-func TestRecordingResponseWriter_DefaultStatus(t *testing.T) {
-	// Writing without explicit WriteHeader: status should remain the default 200.
-	rec := httptest.NewRecorder()
-	rrw := &recordingResponseWriter{ResponseWriter: rec, status: 200}
-	if _, err := rrw.Write([]byte("xy")); err != nil {
+func newCapturingLogger(w io.Writer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug}))
+}
+
+// ----- adminHandler (/solAdmin) ------------------------------------------------
+
+func TestAdminHandler_DisabledIs404(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, adminIndexFile), []byte("<html>admin</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if rrw.status != 200 {
-		t.Errorf("status: want 200, got %d", rrw.status)
+	// Bundle present but the deployment is not in Provisioned mode: the surface must
+	// not exist, and must be indistinguishable from a wrong URL.
+	h := newAdminHandler(dir, false, quietLogger())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath, nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("disabled: want 404, got %d", rec.Code)
 	}
-	if rrw.bytes != 2 {
-		t.Errorf("bytes: want 2, got %d", rrw.bytes)
+	if strings.Contains(rec.Body.String(), "admin") {
+		t.Errorf("disabled: body leaked the bundle: %q", rec.Body.String())
 	}
 }
 
-func newCapturingLogger(w io.Writer) *slog.Logger {
-	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug}))
+func TestAdminHandler_ServesBundle(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, adminIndexFile), []byte("<html>admin</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := newAdminHandler(dir, true, quietLogger())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("enabled: want 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "admin") {
+		t.Errorf("enabled: want the admin bundle, got %q", rec.Body.String())
+	}
+	expectAppPageHeaders(t, rec)
+	// The admin surface must never be cached by an intermediary.
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("cache-control: want no-store, got %q", got)
+	}
+}
+
+// The bundle's relative vendor paths only resolve at /solAdmin, so the trailing
+// slash is sent there; a disabled route keeps its plain 404 for it too.
+func TestAdminHandler_TrailingSlashRedirects(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, adminIndexFile), []byte("<html>admin</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	newAdminHandler(dir, true, quietLogger()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath+"/", nil))
+	if rec.Code != http.StatusPermanentRedirect || rec.Header().Get("Location") != adminPath || strings.Contains(rec.Body.String(), "<html>admin") {
+		t.Errorf("enabled: want 308 to %s, got %d %q %q", adminPath, rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	newAdminHandler(dir, false, quietLogger()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath+"/", nil))
+	if rec.Code != http.StatusNotFound || rec.Header().Get("Location") != "" {
+		t.Errorf("disabled: want 404 without a Location, got %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+// Route on, bundle missing: a packaging error, still a 404 to the caller. The
+// app's index.html in the directory is never the answer: no history-mode
+// fallback answers /solAdmin with the ordinary app.
+func TestAdminHandler_EnabledButNotDeployed(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "index.html"), "<html>SPA</html>")
+	h := newAdminHandler(dir, true, quietLogger())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, adminPath, nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("missing bundle: want 404, got %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "SPA") {
+		t.Errorf("served the SPA at %s: %q", adminPath, rec.Body.String())
+	}
+}
+
+// The image keeps the vendor scripts beside the bundle and a licenses/
+// directory: a file is served as itself, a directory with an index.html gets
+// it, and one without is never listed but answered with the bundle.
+func TestPWAHandler_FilesAndDirectories(t *testing.T) {
+	dir := writeBundles(t)
+	writeFile(t, filepath.Join(dir, "solclient.js"), "// solclient")
+	if err := os.MkdirAll(filepath.Join(dir, "licenses", "jszip"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "licenses", "jszip", "LICENSE.markdown"), "jszip licence")
+	if err := os.Mkdir(filepath.Join(dir, "guide"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "guide", "index.html"), "<html>guide</html>")
+	h := mustPWA(t, dir, directIndexFile)
+
+	cases := []struct{ path, want string }{
+		{"/solclient.js", "// solclient"},
+		{"/guide/", "<html>guide</html>"},
+		{"/licenses/jszip/LICENSE.markdown", "jszip licence"},
+	}
+	for _, c := range cases {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, c.path, nil))
+		body := rec.Body.String()
+		if rec.Code != http.StatusOK || !strings.Contains(body, c.want) {
+			t.Errorf("%s: want 200 with %q, got %d %q", c.path, c.want, rec.Code, body)
+		}
+		if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("%s: want nosniff, got %v", c.path, rec.Header())
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/licenses/", nil))
+	if rec.Code != http.StatusNotFound || rec.Header().Get("Location") != "" || strings.Contains(rec.Body.String(), "LICENSE.markdown") {
+		t.Errorf("/licenses/: a directory without an index is never listed, want 404, got %d %q %q", rec.Code, rec.Header().Get("Location"), rec.Body.String())
+	}
+}
+
+// The relay streams through the access log: a flush reaches the client.
+func TestAccessLog_PassesFlushThrough(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("chunk"))
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			t.Errorf("flush through the access log: %v", err)
+		}
+	})
+	rec := httptest.NewRecorder()
+	accessLog(inner, quietLogger()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/http/8080/h/x", nil))
+	if !rec.Flushed {
+		t.Error("the flush did not reach the client's writer")
+	}
+}
+
+// A second WriteHeader is ignored, as net/http ignores it: the log records
+// the status the client got.
+func TestAccessLog_KeepsTheFirstStatus(t *testing.T) {
+	var buf strings.Builder
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	rec := httptest.NewRecorder()
+	accessLog(inner, newCapturingLogger(&buf)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/foo", nil))
+	if rec.Code != http.StatusTeapot || !strings.Contains(buf.String(), "status=418") {
+		t.Errorf("want 418 sent and logged, got %d; log: %s", rec.Code, buf.String())
+	}
+}
+
+// A WebSocket upgrade over a writer that cannot hijack fails with an error
+// the relay reports, rather than a panic.
+func TestRecordingResponseWriter_HijackWithoutSupport(t *testing.T) {
+	rrw := &recordingResponseWriter{ResponseWriter: httptest.NewRecorder(), status: 200}
+	if _, _, err := rrw.Hijack(); err == nil {
+		t.Error("want an error from a writer without http.Hijacker")
+	}
 }

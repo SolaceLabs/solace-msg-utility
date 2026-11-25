@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 290" width="760" height="290" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="290" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="20" width="720" height="250" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="54" font-size="16" font-weight="700">Queue Subscriptions Search</text>
+    <text x="301.6" y="54" fill="#64748b">2 / 14 queues</text>
+    <circle cx="396.96" cy="50" r="1.5" fill="#64748b"/>
+    <text x="404.96" y="54" fill="#64748b">3 / 37 subscriptions</text>
+    <circle cx="557.36" cy="50" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="557.36" y="54" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <rect x="652" y="36" width="68" height="26" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="686" y="53" font-weight="700" text-anchor="middle">Refresh</text>
+    <circle cx="634" cy="49" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="634" y="53" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <rect x="40" y="72" width="680" height="182" fill="#ffffff" rx="6" stroke="#e2e8f0"/>
+    <rect x="41" y="73" width="678" height="28" fill="#f1f5f9"/>
+    <text x="66" y="91" font-size="11" fill="#64748b" font-weight="700">VPN</text>
+    <text x="236" y="91" font-size="11" fill="#64748b" font-weight="700">Queue</text>
+    <text x="456" y="91" font-size="11" fill="#64748b" font-weight="700">Subscription</text>
+    <rect x="56" y="108" width="160" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="66" y="126">prod</text>
+    <rect x="226" y="108" width="210" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="236" y="126">orders*</text>
+    <rect x="446" y="108" width="266" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="456" y="126">orders/eu/&gt;</text>
+    <circle cx="40" cy="122" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="40" y="126" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <line x1="41" y1="146" x2="719" y2="146" stroke="#e2e8f0"/>
+    <text x="66" y="169">prod</text>
+    <text x="236" y="169">orders.incoming</text>
+    <text x="456" y="169">orders/eu/new</text>
+    <line x1="41" y1="182" x2="719" y2="182" stroke="#e2e8f0"/>
+    <text x="66" y="205">prod</text>
+    <text x="236" y="205">orders.incoming</text>
+    <text x="456" y="205">orders/eu/*/cancelled</text>
+    <line x1="41" y1="218" x2="719" y2="218" stroke="#e2e8f0"/>
+    <text x="66" y="241">prod</text>
+    <text x="236" y="241">orders.audit</text>
+    <text x="456" y="241">orders/&gt;</text>
+    <circle cx="40" cy="200" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="40" y="204" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+</svg>

@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 582" width="760" height="582" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="582" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="16" width="720" height="152" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="38" y="42" font-size="14" font-weight="700">Access</text>
+    <text x="38" y="60" font-size="11" fill="#64748b">Your address as the gateway sees it: 10.0.4.17 (from X-Forwarded-For, sent by the trusted proxy 10.0.4.2).</text>
+    <circle cx="716" cy="46" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="50" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <text x="38" y="80" font-size="11" fill="#64748b" font-weight="700">Allowed clients: CIDR ranges, one per line</text>
+    <text x="38" y="94" font-size="11" fill="#64748b" font-weight="700">(empty admits every client)</text>
+    <rect x="38" y="102" width="316" height="50" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="48" y="131" font-family="Consolas, Menlo, monospace">10.0.0.0/8</text>
+    <circle cx="342" cy="84" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="342" y="88" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <text x="372" y="80" font-size="11" fill="#64748b" font-weight="700">Trusted reverse proxies: CIDR ranges,</text>
+    <text x="372" y="94" font-size="11" fill="#64748b" font-weight="700">one per line</text>
+    <rect x="372" y="102" width="316" height="50" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="382" y="131" font-family="Consolas, Menlo, monospace">10.0.4.2/32</text>
+    <circle cx="676" cy="78" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="676" y="82" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <rect x="20" y="178" width="720" height="168" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="38" y="204" font-size="14" font-weight="700">Modules</text>
+    <text x="38" y="216" font-size="11" fill="#64748b" font-weight="700">Modules signed-in users may be given</text>
+    <rect x="38" y="226" width="200" height="58" fill="#f8fafc" rx="6" stroke="#00C895" stroke-width="2"/>
+    <rect x="50" y="236" width="14" height="14" fill="#00C895" rx="3"/>
+    <path d="M53 243.5 l3 3 l5 -6" fill="none" stroke="#ffffff" stroke-width="1.8"/>
+    <text x="72" y="247" font-weight="700">Queue Browser</text>
+    <text x="50" y="266" font-size="9" fill="#64748b">Browse, inspect and delete ...</text>
+    <rect x="250" y="226" width="200" height="58" fill="#f8fafc" rx="6" stroke="#00C895" stroke-width="2"/>
+    <rect x="262" y="236" width="14" height="14" fill="#00C895" rx="3"/>
+    <path d="M265 243.5 l3 3 l5 -6" fill="none" stroke="#ffffff" stroke-width="1.8"/>
+    <text x="284" y="247" font-weight="700">Queue Copy</text>
+    <text x="262" y="266" font-size="9" fill="#64748b">Copy or move messages ...</text>
+    <rect x="462" y="226" width="200" height="58" fill="#f8fafc" rx="6" stroke="#e2e8f0"/>
+    <rect x="474" y="236" width="14" height="14" fill="#ffffff" rx="3" stroke="#cbd5e1"/>
+    <text x="496" y="247" font-weight="700">Queue Subscriptions</text>
+    <text x="474" y="266" font-size="9" fill="#64748b">See which topics each ...</text>
+    <circle cx="716" cy="255" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="259" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+    <text x="38" y="308" font-size="11" fill="#64748b" font-weight="700">A user without a list of their own gets</text>
+    <rect x="300" y="295" width="260" height="26" fill="#f1f5f9" rx="5" stroke="#e2e8f0"/>
+    <rect x="300" y="295" width="160" height="26" fill="#00C895" rx="5"/>
+    <text x="380" y="312" fill="#ffffff" font-weight="700" text-anchor="middle">Every offered module</text>
+    <text x="510" y="312" fill="#64748b" text-anchor="middle">No modules</text>
+    <circle cx="716" cy="308" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="312" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+    <rect x="20" y="356" width="720" height="216" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="38" y="382" font-size="14" font-weight="700">Audit trail</text>
+    <text x="38" y="392" font-size="11" fill="#64748b">The audit trail itself is always written to /data/audit.log on the gateway; these settings only add to it.</text>
+    <rect x="38" y="407" width="30" height="16" fill="#cbd5e1" rx="8"/>
+    <circle cx="46" cy="415" r="6" fill="#ffffff"/>
+    <text x="78" y="420">Copy audit lines to the gateway log (stdout)</text>
+    <circle cx="716" cy="415" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="419" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+    <rect x="38" y="439" width="30" height="16" fill="#00C895" rx="8"/>
+    <circle cx="60" cy="447" r="6" fill="#ffffff"/>
+    <text x="78" y="452">Also audit broker access: dials, SMF sockets and SEMP relay requests</text>
+    <circle cx="716" cy="447" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="451" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
+    <text x="38" y="486" font-size="11" fill="#64748b" font-weight="700">If the audit log cannot be written</text>
+    <text x="38" y="509" font-size="11" font-weight="700">Carry on</text>
+    <rect x="98.8" y="497" width="30" height="16" fill="#cbd5e1" rx="8"/>
+    <circle cx="106.8" cy="505" r="6" fill="#ffffff"/>
+    <text x="136.8" y="509" font-size="11" fill="#64748b">Refuse changes</text>
+    <text x="38" y="536" font-size="10" fill="#64748b">Carry on logs each lost record in the gateway log. Refuse changes stops every change until the audit log</text>
+    <text x="38" y="550" font-size="10" fill="#64748b">can be written.</text>
+    <circle cx="716" cy="508" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="716" y="512" font-weight="700" fill="#ffffff" text-anchor="middle">8</text>
+</svg>

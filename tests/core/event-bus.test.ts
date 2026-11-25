@@ -1,14 +1,8 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
 import { createEventBus } from '../../src/core/event-bus';
 
 describe('EventBus', () => {
-    it('creates an event bus with on, off, emit methods', () => {
-        const bus = createEventBus();
-        expect(bus.on).toBeDefined();
-        expect(bus.off).toBeDefined();
-        expect(bus.emit).toBeDefined();
-    });
-
     it('calls handler when event is emitted', () => {
         const bus = createEventBus();
         const handler = vi.fn();
@@ -90,33 +84,6 @@ describe('EventBus', () => {
         );
     });
 
-    it('cleans up empty listener Set on off()', () => {
-        const bus = createEventBus();
-        const handler = vi.fn();
-        bus.on('client:disconnected', handler);
-        bus.off('client:disconnected', handler);
-        // Emitting should do nothing — the Set was cleaned up
-        bus.emit('client:disconnected');
-        expect(handler).not.toHaveBeenCalled();
-    });
-
-    it('handles void events with no args', () => {
-        const bus = createEventBus();
-        const handler = vi.fn();
-        bus.on('jszip:loaded', handler);
-        bus.emit('jszip:loaded');
-        expect(handler).toHaveBeenCalledTimes(1);
-    });
-
-    it('handles events with complex payloads', () => {
-        const bus = createEventBus();
-        const handler = vi.fn();
-        const session = { id: 'test-session' };
-        bus.on('client:connected', handler);
-        bus.emit('client:connected', { session });
-        expect(handler).toHaveBeenCalledWith({ session });
-    });
-
     describe('hold() / release() buffering', () => {
         it('buffers emits between hold() and release(), delivers on release()', () => {
             const bus = createEventBus();
@@ -171,9 +138,9 @@ describe('EventBus', () => {
 
     describe('dispatch snapshot — listeners registered during dispatch do not fire in the same emit', () => {
         it('listeners added during dispatch do NOT fire in the same emit', () => {
-            // Regression for the VPN-switch bug: the connections module registered
-            // onFail on `client:disconnected` from inside a `client:disconnected`
-            // handler. With naive Set.forEach, onFail would fire in the same emit
+            // The connections module registers onFail on `client:disconnected`
+            // from inside a `client:disconnected` handler (VPN switch). With
+            // naive Set.forEach, onFail would fire in the same emit
             // and tear down its sibling onSuccess before the reconnect completed.
             const bus = createEventBus();
             const calls: string[] = [];

@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { formatBytes } from '../../../src/core/utils';
 import {
     cacheElements,
-    setPrimaryConnected,
     applyDestPrefill,
     applyDestType,
     applySourceReadonly,
@@ -16,6 +16,12 @@ import {
     setDestSempFormLocked,
     setDestSolFormLocked,
     setDestBrokerLocked,
+    setDestTargetLocked,
+    applyDestMode,
+    applySourceMode,
+    clearDestTypedSecrets,
+    DEST_SCOPE_HINT,
+    DEST_TARGET_LOCKED_TITLE,
     renderModalInitial,
     renderDestSummary,
     renderVerifyProgress,
@@ -52,28 +58,13 @@ describe('queue-copy/ui', () => {
         elsHolder = setup();
     });
 
-    describe('cacheElements', () => {
-        it('caches every required element including the source-side mirror', () => {
-            const els = elsHolder.els;
-            expect(els.modal.tagName.toLowerCase()).toBe('dialog');
-            expect(els.btnStart).toBeDefined();
-            expect(els.btnStart.disabled).toBe(true);
-            expect(els.destTypeToggle).toBeDefined();
-            expect(els.destTypeLabelQueue).toBeDefined();
-            expect(els.destTypeLabelTopic).toBeDefined();
-            expect(els.modeRadios.length).toBe(2);
-            expect(els.destSempUrlPath).toBeDefined();
-            expect(els.destSolUrlPath).toBeDefined();
-            expect(els.modalSourceBroker).toBeDefined();
-            expect(els.modalSourceUsage).toBeDefined();
-            expect(els.modalSourceMaxSize).toBeDefined();
-            // Source-side read-only mirror.
-            expect(els.sourceHost).toBeDefined();
-            expect(els.sourceSempProtocol).toBeDefined();
-            expect(els.sourceSolVpn).toBeDefined();
-            expect(els.sourceEditButtons.length).toBe(3);
-        });
-    });
+    /** A slide choice's tick box: Queue / Topic ('#copy-dest-type-switch') or Copy / Move ('#copy-mode-switch'). */
+    const slideInput = (group: string) => elsHolder.els.container.querySelector<HTMLInputElement>(`${group} input`)!;
+    /** Where a slide choice stands: its switch, and the text of each highlighted answer. */
+    const slide = (group: string) => [
+        slideInput(group).checked,
+        [...elsHolder.els.container.querySelectorAll(`${group} .slide-choice-label.active`)].map(l => l.textContent),
+    ];
 
     describe('applySourceReadonly', () => {
         it('populates every source field from the snapshot, including passwords', () => {
@@ -92,6 +83,21 @@ describe('queue-copy/ui', () => {
             expect(elsHolder.els.sourceSolPass.value).toBe('sol-secret');
         });
 
+        it('shows an appliance primary as one: its management host with SEMP, its messaging host with the Client, nothing editable', () => {
+            const e = elsHolder.els;
+            const typeButtons = () => Array.from(e.container.querySelectorAll<HTMLButtonElement>('#copy-source-broker-type button'));
+            applySourceReadonly(e, { ...PRIMARY, host: 'mgmt.solace.com', messagingHost: 'msg.solace.com' });
+            expect(e.sourceHosts.type()).toBe('appliance');
+            expect([e.sourceHost.value, e.sourceSolHost.value]).toEqual(['mgmt.solace.com', 'msg.solace.com']);
+            expect([e.sourceHost.disabled, e.sourceSolHost.disabled, ...typeButtons().map(b => b.disabled)]).toEqual([true, true, true, true]);
+
+            // A primary with one host shows it in both cards.
+            applySourceReadonly(e, PRIMARY);
+            expect(e.sourceHosts.type()).toBe('software');
+            expect([e.sourceHost.value, e.sourceSolHost.value]).toEqual(['broker.solace.com', 'broker.solace.com']);
+            expect([e.sourceHost.disabled, e.sourceSolHost.disabled, ...typeButtons().map(b => b.disabled)]).toEqual([true, true, true, true]);
+        });
+
         it('null snapshot blanks scalar fields without throwing; protocol selects keep their default', () => {
             // First populate, then re-apply with null to verify the clear path.
             applySourceReadonly(elsHolder.els, PRIMARY);
@@ -108,21 +114,27 @@ describe('queue-copy/ui', () => {
         });
     });
 
-    describe('setPrimaryConnected', () => {
-        it('shows content + hides warning when connected', () => {
-            setPrimaryConnected(elsHolder.els, true);
-            expect(elsHolder.els.warning.classList.contains('hidden')).toBe(true);
-            expect(elsHolder.els.content.classList.contains('hidden')).toBe(false);
-        });
-
-        it('shows warning + hides content when disconnected', () => {
-            setPrimaryConnected(elsHolder.els, false);
-            expect(elsHolder.els.warning.classList.contains('hidden')).toBe(false);
-            expect(elsHolder.els.content.classList.contains('hidden')).toBe(true);
-        });
-    });
+    // The connection gate (#copy-warning) is created and toggled by the
+    // shared module-gate component inside install; its show/hide-vs-content
+    // behaviour is covered by module.test.ts ("installs without primary
+    // connection: warning visible, content hidden" / "installs with primary
+    // connected: content visible"), and the component's own show()/hide() in
+    // tests/core/components/module-gate.
 
     describe('applyDestPrefill', () => {
+        it('sameBroker=true: takes the primary\'s broker type and both hosts, locked; unticked, they are the user\'s', () => {
+            const e = elsHolder.els;
+            const typeButtons = () => Array.from(e.destBrokerType.querySelectorAll<HTMLButtonElement>('button'));
+            applyDestPrefill(e, true, true, { ...PRIMARY, host: 'mgmt.solace.com', messagingHost: 'msg.solace.com' });
+            expect(e.destHosts.type()).toBe('appliance');
+            expect([e.destHost.value, e.destSolHost.value]).toEqual(['mgmt.solace.com', 'msg.solace.com']);
+            expect([e.destHost.disabled, e.destSolHost.disabled, ...typeButtons().map(b => b.disabled)]).toEqual([true, true, true, true]);
+
+            applyDestPrefill(e, false, false, PRIMARY);
+            expect(e.destHosts.type()).toBe('appliance');
+            expect([e.destHost.disabled, e.destSolHost.disabled, ...typeButtons().map(b => b.disabled)]).toEqual([false, false, false, false]);
+        });
+
         it('sameBroker=true & sameVpn=true: disables every dest field, prefills with primary values', () => {
             applyDestPrefill(elsHolder.els, true, true, PRIMARY);
             expect(elsHolder.els.destHost.disabled).toBe(true);
@@ -142,12 +154,23 @@ describe('queue-copy/ui', () => {
             expect(elsHolder.els.destSolPass.disabled).toBe(false);
         });
 
-        it('sameBroker=false: forces sameVpn off + disables that toggle, leaves all fields editable', () => {
+        it('sameBroker=false: the same VPN means nothing, so the button reads Another broker and all fields stay editable', () => {
             applyDestPrefill(elsHolder.els, false, true, PRIMARY);
-            expect(elsHolder.els.toggleSameVpn.checked).toBe(false);
-            expect(elsHolder.els.toggleSameVpn.disabled).toBe(true);
+            expect(elsHolder.els.destScope.value()).toBe('another-broker');
             expect(elsHolder.els.destHost.disabled).toBe(false);
             expect(elsHolder.els.destSolVpn.disabled).toBe(false);
+        });
+
+        it('shows the choice the two facts amount to on the Copy to button', () => {
+            const e = elsHolder.els;
+            const pressed = () => [...e.destScopeGroup.querySelectorAll<HTMLButtonElement>('button')]
+                .filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.textContent);
+            applyDestPrefill(e, true, false, PRIMARY);
+            expect([e.destScope.value(), pressed()]).toEqual(['another-vpn', ['Another VPN']]);
+            applyDestPrefill(e, false, false, PRIMARY);
+            expect([e.destScope.value(), pressed()]).toEqual(['another-broker', ['Another broker']]);
+            applyDestPrefill(e, true, true, PRIMARY);
+            expect([e.destScope.value(), pressed()]).toEqual(['this-vpn', ['This VPN']]);
         });
 
         it('null primary leaves disabled flags applied but does not blank values', () => {
@@ -160,19 +183,16 @@ describe('queue-copy/ui', () => {
 
     describe('applyDestType', () => {
         it('queue: toggle unchecked, Queue label active, queue placeholder', () => {
+            applyDestType(elsHolder.els, 'topic');
             applyDestType(elsHolder.els, 'queue');
-            expect(elsHolder.els.destTypeToggle.checked).toBe(false);
-            expect(elsHolder.els.destTypeLabelQueue.classList.contains('active')).toBe(true);
-            expect(elsHolder.els.destTypeLabelTopic.classList.contains('active')).toBe(false);
+            expect(slide('#copy-dest-type-switch')).toEqual([false, ['Queue']]);
             expect(elsHolder.els.destNameLabel.textContent).toContain('Queue');
             expect(elsHolder.els.destInput.placeholder).toContain('queue');
         });
 
         it('topic: toggle checked, Topic label active, topic placeholder', () => {
             applyDestType(elsHolder.els, 'topic');
-            expect(elsHolder.els.destTypeToggle.checked).toBe(true);
-            expect(elsHolder.els.destTypeLabelTopic.classList.contains('active')).toBe(true);
-            expect(elsHolder.els.destTypeLabelQueue.classList.contains('active')).toBe(false);
+            expect(slide('#copy-dest-type-switch')).toEqual([true, ['Topic']]);
             expect(elsHolder.els.destNameLabel.textContent).toContain('Topic');
             expect(elsHolder.els.destInput.placeholder).toContain('topic');
         });
@@ -253,14 +273,184 @@ describe('queue-copy/ui', () => {
             expect(elsHolder.els.destSolVpn.disabled).toBe(false);
         });
 
-        it('broker host lock disables host when either dest connection is live; no-op when neither', () => {
-            // Start with host enabled.
-            elsHolder.els.destHost.disabled = false;
-            setDestBrokerLocked(elsHolder.els, true);
-            expect(elsHolder.els.destHost.disabled).toBe(true);
-            // Calling with `false` is a no-op — applyDestPrefill owns the unlock decision.
-            setDestBrokerLocked(elsHolder.els, false);
-            expect(elsHolder.els.destHost.disabled).toBe(true);
+        /** The destination's management host, messaging host and type control, each locked or not. */
+        const brokerLocks = (e: typeof elsHolder.els) => [
+            e.destHost.disabled,
+            e.destSolHost.disabled,
+            Array.from(e.destBrokerType.querySelectorAll<HTMLButtonElement>('button')).every(b => b.disabled),
+        ];
+
+        it('broker lock holds each host of an appliance with its own connection, and the type with either', () => {
+            const e = elsHolder.els;
+            e.destHosts.setType('appliance');
+            setDestBrokerLocked(e, false, { semp: true, messaging: false });
+            expect(brokerLocks(e)).toEqual([true, false, true]);
+            setDestBrokerLocked(e, false, { semp: false, messaging: true });
+            expect(brokerLocks(e)).toEqual([false, true, true]);
+            setDestBrokerLocked(e, false, { semp: true, messaging: true });
+            expect(brokerLocks(e)).toEqual([true, true, true]);
+            setDestBrokerLocked(e, false, { semp: false, messaging: false });
+            expect(brokerLocks(e)).toEqual([false, false, false]);
+        });
+
+        it('broker lock holds the one host of a Software / Cloud broker while either connection is up', () => {
+            const e = elsHolder.els;
+            e.destHosts.setType('software');
+            // The messaging box of one host only shows it: it is never the user's to type in.
+            setDestBrokerLocked(e, false, { semp: false, messaging: true });
+            expect(brokerLocks(e)).toEqual([true, true, true]);
+            setDestBrokerLocked(e, false, { semp: false, messaging: false });
+            expect(brokerLocks(e)).toEqual([false, true, false]);
+        });
+
+        it('broker lock holds both hosts on the source\'s broker, with no destination connection at all', () => {
+            const e = elsHolder.els;
+            e.destHosts.setType('appliance');
+            setDestBrokerLocked(e, true, { semp: false, messaging: false });
+            expect(brokerLocks(e)).toEqual([true, true, true]);
+        });
+    });
+
+    describe('applyDestPrefill -- a destination connection that is up', () => {
+        const sempFields = (e: typeof elsHolder.els) => [e.destSempProtocol, e.destSempPort, e.destSempUrlPath, e.destSempUser, e.destSempPass].map(f => f.disabled);
+        const clientFields = (e: typeof elsHolder.els) =>
+            [e.destSolProtocol, e.destSolPort, e.destSolUrlPath, e.destSolVpn, e.destSolUser, e.destSolPass].map(f => f.disabled);
+        const all = (n: number, locked: boolean) => Array.from({ length: n }, () => locked);
+
+        it('keeps the SEMP card and the management host locked while the destination SEMP is up, and frees the Client card', () => {
+            const e = elsHolder.els;
+            e.destHosts.setType('appliance');
+            applyDestPrefill(e, false, false, PRIMARY, { semp: true, messaging: false });
+            expect(sempFields(e)).toEqual(all(5, true));
+            expect(clientFields(e)).toEqual(all(6, false));
+            expect([e.destHost.disabled, e.destSolHost.disabled]).toEqual([true, false]);
+        });
+
+        it('keeps the Client card and the messaging host locked while the messaging session is up, and frees the SEMP card', () => {
+            const e = elsHolder.els;
+            e.destHosts.setType('appliance');
+            applyDestPrefill(e, false, false, PRIMARY, { semp: false, messaging: true });
+            expect(sempFields(e)).toEqual(all(5, false));
+            expect(clientFields(e)).toEqual(all(6, true));
+            expect([e.destHost.disabled, e.destSolHost.disabled]).toEqual([false, true]);
+        });
+
+        it('keeps the VPN, username and password of another VPN on the source\'s broker locked while its session is up', () => {
+            const e = elsHolder.els;
+            applyDestPrefill(e, true, false, PRIMARY, { semp: false, messaging: true });
+            expect(clientFields(e)).toEqual(all(6, true));
+            applyDestPrefill(e, true, false, PRIMARY, { semp: false, messaging: false });
+            expect([e.destSolVpn.disabled, e.destSolUser.disabled, e.destSolPass.disabled]).toEqual([false, false, false]);
+        });
+    });
+
+    describe('setDestTargetLocked', () => {
+        const parts = (e: typeof elsHolder.els) => [...e.destScopeGroup.querySelectorAll<HTMLButtonElement>('button')];
+
+        it('locks the Copy to button that chooses the destination, with a title saying why', () => {
+            const e = elsHolder.els;
+            setDestTargetLocked(e, true);
+            expect(parts(e).map(b => b.disabled)).toEqual([true, true, true]);
+            expect(e.destScopeGroup.title).toBe(DEST_TARGET_LOCKED_TITLE);
+            // A locked button keeps its choice.
+            parts(e)[2].click();
+            expect(e.destScope.value()).toBe('this-vpn');
+        });
+
+        it('unlocking makes the choice free again and takes the title away', () => {
+            const e = elsHolder.els;
+            setDestTargetLocked(e, true);
+            setDestTargetLocked(e, false);
+            expect(parts(e).map(b => b.disabled)).toEqual([false, false, false]);
+            expect(e.destScopeGroup.title).toBe('');
+            parts(e)[2].click();
+            expect(e.destScope.value()).toBe('another-broker');
+        });
+    });
+
+    describe('applyDestMode', () => {
+        const shown = (el: HTMLElement) => !el.classList.contains('hidden');
+
+        it('Direct primary: the broker type, SEMP and Client cards; no provisioned card', () => {
+            const e = elsHolder.els;
+            applyDestMode(e, { provisioned: false, needsSecondary: true });
+            expect([e.destTypeGroup, e.destSempCard, e.destSolCard].every(shown)).toBe(true);
+            expect(shown(e.destProv)).toBe(false);
+        });
+
+        it('Provisioned primary needing a secondary: the card replaces the broker type and both cards', () => {
+            const e = elsHolder.els;
+            applyDestMode(e, { provisioned: true, needsSecondary: true });
+            expect([e.destTypeGroup, e.destSempCard, e.destSolCard].some(shown)).toBe(false);
+            expect(shown(e.destProv)).toBe(true);
+            expect(shown(e.destProvCardHost)).toBe(true);
+            expect(shown(e.destProvSame)).toBe(false);
+        });
+
+        it('Provisioned primary reused as the destination: a note instead of the card', () => {
+            const e = elsHolder.els;
+            applyDestMode(e, { provisioned: true, needsSecondary: false });
+            expect(shown(e.destProv)).toBe(true);
+            expect(shown(e.destProvCardHost)).toBe(false);
+            expect(shown(e.destProvSame)).toBe(true);
+        });
+
+        it('says under the Copy to button what the choice leaves to fill in, in the words of the mode', () => {
+            const e = elsHolder.els;
+            applyDestPrefill(e, true, false, PRIMARY);
+            applyDestMode(e, { provisioned: false, needsSecondary: true });
+            expect(e.destScopeHint.textContent).toBe('Same broker as the source. Give the Message VPN and its login below.');
+            applyDestMode(e, { provisioned: true, needsSecondary: true });
+            expect(e.destScopeHint.textContent).toBe('Same broker as the source. Pick the Message VPN below.');
+
+            applyDestPrefill(e, false, false, PRIMARY);
+            applyDestMode(e, { provisioned: false, needsSecondary: true });
+            expect(e.destScopeHint.textContent).toBe('A different broker. Give its address and both logins below.');
+            applyDestMode(e, { provisioned: true, needsSecondary: true });
+            expect(e.destScopeHint.textContent).toBe('Pick a broker and a Message VPN below.');
+
+            applyDestPrefill(e, true, true, PRIMARY);
+            applyDestMode(e, { provisioned: false, needsSecondary: false });
+            expect(e.destScopeHint.textContent).toBe(DEST_SCOPE_HINT.provisioned['this-vpn']);
+            expect(e.destScopeHint.textContent).toBe('The connection you already have: same broker, same Message VPN. Nothing to fill in.');
+        });
+    });
+
+    describe('mode', () => {
+        it('opens on Copy, and shows a mode chosen in code on the slide choice', () => {
+            const e = elsHolder.els;
+            expect([e.mode.value(), slide('#copy-mode-switch')]).toEqual(['copy', [false, ['Copy']]]);
+            e.mode.set('move');
+            expect([e.mode.value(), slide('#copy-mode-switch')]).toEqual(['move', [true, ['Move (destructive: removes from source)']]]);
+        });
+    });
+
+    describe('applySourceMode', () => {
+        const shown = (el: HTMLElement) => !el.classList.contains('hidden');
+
+        it('Direct primary: the Broker, SEMP and Client cards; no connection card', () => {
+            const e = elsHolder.els;
+            applySourceMode(e, false);
+            expect([e.sourceBrokerCard, e.sourceSempCard, e.sourceSolCard].every(shown)).toBe(true);
+            expect(shown(e.sourceProv)).toBe(false);
+        });
+
+        it('Provisioned primary: the one connection card in place of the three', () => {
+            const e = elsHolder.els;
+            applySourceMode(e, true);
+            expect([e.sourceBrokerCard, e.sourceSempCard, e.sourceSolCard].some(shown)).toBe(false);
+            expect(shown(e.sourceProv)).toBe(true);
+        });
+    });
+
+    describe('clearDestTypedSecrets', () => {
+        it('empties both destination password fields', () => {
+            const e = elsHolder.els;
+            e.destSempPass.value = 'a';
+            e.destSolPass.value = 'b';
+            clearDestTypedSecrets(e);
+            expect(e.destSempPass.value).toBe('');
+            expect(e.destSolPass.value).toBe('');
         });
     });
 
@@ -285,6 +475,7 @@ describe('queue-copy/ui', () => {
                 sourceOk: true, via: 'semp', errors: [],
                 messageVpn: 'v', messageCount: 5, spoolUsageBytes: 1024, quotaBytes: 1024 * 1024 * 1024,
                 maxMessageSize: 10_000_000, oldestMsgId: '1', newestMsgId: '5',
+                accessType: 'read-write', owner: 'admin',
             });
             expect(elsHolder.els.btnModalSourceRefresh.disabled).toBe(false);
         });
@@ -295,6 +486,7 @@ describe('queue-copy/ui', () => {
                 sourceOk: false, via: 'queue-browser', errors: ['not found'],
                 messageVpn: null, messageCount: null, spoolUsageBytes: null, quotaBytes: null,
                 maxMessageSize: null, oldestMsgId: null, newestMsgId: null,
+                accessType: null, owner: null,
             });
             expect(elsHolder.els.btnModalSourceRefresh.disabled).toBe(false);
         });
@@ -374,26 +566,38 @@ describe('queue-copy/ui', () => {
     });
 
     describe('setFormDisabled', () => {
-        it('disables every form control + toggle + radios + source-edit buttons', () => {
-            setFormDisabled(elsHolder.els, true);
-            expect(elsHolder.els.sourceInput.disabled).toBe(true);
-            expect(elsHolder.els.destSempPort.disabled).toBe(true);
-            expect(elsHolder.els.destSolPort.disabled).toBe(true);
-            expect(elsHolder.els.btnStart.disabled).toBe(true);
-            expect(elsHolder.els.destTypeToggle.disabled).toBe(true);
-            elsHolder.els.modeRadios.forEach(r => expect(r.disabled).toBe(true));
-            elsHolder.els.sourceEditButtons.forEach(b => expect(b.disabled).toBe(true));
-        });
+        it('locks every control on the page through its fieldset and leaves each control its own state', () => {
+            const { els } = elsHolder;
+            const controls = [
+                els.sourceInput, els.btnSourcePick, ...els.destScopeGroup.querySelectorAll('button'), els.destHost,
+                els.destSempPort, els.destSolPort, els.destSolVpn, slideInput('#copy-dest-type-switch'), els.destInput,
+                els.btnDestPick, els.btnStart, slideInput('#copy-mode-switch'), ...els.sourceEditButtons,
+            ];
+            controls.forEach(c => expect(els.content.contains(c)).toBe(true));
+            // The modal's own buttons stay usable while the page is locked.
+            expect(els.content.contains(els.modal)).toBe(false);
+            els.destHost.disabled = true;       // the same-broker lock
+            els.btnStart.disabled = false;      // the Next gate allows a run
+            const nextClicked = vi.fn();
+            els.btnStart.addEventListener('click', nextClicked);
 
-        it('re-enables when false', () => {
-            setFormDisabled(elsHolder.els, true);
-            setFormDisabled(elsHolder.els, false);
-            expect(elsHolder.els.sourceInput.disabled).toBe(false);
+            setFormDisabled(els, true);
+            expect(els.content.disabled).toBe(true);
+            els.btnStart.click();
+            expect(nextClicked).not.toHaveBeenCalled();
+
+            setFormDisabled(els, false);
+            expect(els.content.disabled).toBe(false);
+            expect(els.destHost.disabled).toBe(true);
+            els.btnStart.click();
+            expect(nextClicked).toHaveBeenCalledTimes(1);
         });
     });
 
     describe('renderModalInitial', () => {
-        it('populates source + dest summaries and sets Copy/Move button text from mode', () => {
+        it('populates source + dest summaries, sets Copy/Move button text from mode, and holds Start until the check ends', () => {
+            // Start left on by the previous open.
+            elsHolder.els.btnModalStart.disabled = false;
             renderModalInitial(elsHolder.els, SRC, DST, 'copy');
             expect(elsHolder.els.modalTitle.textContent).toBe('Confirm Queue Copy');
             expect(elsHolder.els.modalSourceBroker.textContent).toBe('broker.example:1943');
@@ -432,9 +636,8 @@ describe('queue-copy/ui', () => {
     describe('renderVerifyProgress', () => {
         it('shows live count + size with loading hint', () => {
             renderVerifyProgress(elsHolder.els, 7, 1024);
-            expect(elsHolder.els.modalSourceCount.textContent).toContain('7');
-            expect(elsHolder.els.modalSourceCount.textContent).toContain('loading');
-            expect(elsHolder.els.modalSourceUsage.textContent).toContain('loading');
+            expect(elsHolder.els.modalSourceCount.textContent).toBe('7 (loading\u2026)');
+            expect(elsHolder.els.modalSourceUsage.textContent).toBe(`${formatBytes(1024)} (loading\u2026)`);
         });
     });
 
@@ -464,8 +667,9 @@ describe('queue-copy/ui', () => {
             expect(elsHolder.els.modalSourceStatus.textContent).toBe('Found via SEMP');
             expect(elsHolder.els.modalSourceVpn.textContent).toBe('vpn-01');
             expect(elsHolder.els.modalSourceCount.textContent).toBe('18');
-            expect(elsHolder.els.modalSourceUsage.textContent).toContain('/');
-            expect(elsHolder.els.modalSourceMaxSize.textContent).toMatch(/MB|KB|B/);
+            expect(elsHolder.els.modalSourceUsage.textContent)
+                .toBe(`${formatBytes(2937)} / ${formatBytes(5000 * 1024 * 1024)}`);
+            expect(elsHolder.els.modalSourceMaxSize.textContent).toBe(formatBytes(10_000_000));
         });
 
         it('on success, renderVerifyResult does NOT toggle btnModalStart — that gate lives in ui-modal', () => {
@@ -498,7 +702,7 @@ describe('queue-copy/ui', () => {
         it('spool present, quota null: usage shows just used bytes', () => {
             renderModalInitial(elsHolder.els, SRC, DST, 'copy');
             renderVerifyResult(elsHolder.els, baseOk({ spoolUsageBytes: 500 }));
-            expect(elsHolder.els.modalSourceUsage.textContent).toMatch(/B|KB|MB/);
+            expect(elsHolder.els.modalSourceUsage.textContent).toBe(formatBytes(500));
             expect(elsHolder.els.modalSourceUsage.textContent).not.toContain('/');
         });
 
@@ -510,6 +714,8 @@ describe('queue-copy/ui', () => {
 
         it('failure: "Not Found" status, Start disabled, errors surfaced', () => {
             renderModalInitial(elsHolder.els, SRC, DST, 'copy');
+            // Enabled first, so the assertion below sees the failure disable it.
+            elsHolder.els.btnModalStart.disabled = false;
             renderVerifyResult(elsHolder.els, {
                 sourceOk: false, via: 'semp', errors: ['no perms'],
                 messageVpn: null, messageCount: null, spoolUsageBytes: null,

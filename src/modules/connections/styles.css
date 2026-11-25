@@ -1,3 +1,58 @@
-/* Connections module — currently relies entirely on shell + generic components.
- * Add module-specific selectors (e.g. `.auth-toggle`, `.ssl-trust-*`) here if/when
+/* Connections module — mostly relies on shell + generic components.
+ * Add module-specific selectors (e.g. `.conn-probe-*`, `.conn-ssl-*`) here if/when
  * they need styling beyond what the design system provides. */
+
+/* The inconclusive-/hosted notice (module.ts, module.managed.ts), a warning
+ * box above the cards: the message with its Retry button beside it. */
+.conn-probe-notice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+/* "Save All Config": warning colours at rest, on hover and when disabled. */
+.btn-primary.conn-btn-save-all,
+.btn-primary.conn-btn-save-all:hover,
+.btn-primary.conn-btn-save-all:disabled {
+    background-color: var(--status-warning);
+    border-color: var(--status-warning);
+    color: #000;
+}
+
+/* Certificate trust helper dialog. */
+dialog.conn-ssl-dialog {
+    max-width: 500px;
+}
+
+.btn-icon.conn-ssl-close {
+    font-size: 1.5rem;
+}
+
+.conn-ssl-box {
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    margin: 0.5rem 0;
+}
+
+.conn-ssl-origin,
+.conn-ssl-url {
+    font-family: monospace;
+    word-break: break-all;
+}
+
+.conn-ssl-origin {
+    font-size: 0.85rem;
+}
+
+.conn-ssl-url {
+    font-size: 0.8rem;
+}
+
+.btn.conn-ssl-link {
+    display: inline-block;
+    text-decoration: none;
+    padding: 0.5rem 1.5rem;
+}

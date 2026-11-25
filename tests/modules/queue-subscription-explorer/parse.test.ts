@@ -124,7 +124,7 @@ describe('queue-subscription-explorer/parse', () => {
             expect(r.error).toContain('Permission denied');
         });
 
-        it('falls back to "error" when <execute-result/> has neither reason nor code (closes COV-11)', () => {
+        it('falls back to "error" when <execute-result/> has neither reason nor code', () => {
             // Defensive parse — broker quirk where execute-result has no
             // attributes. Without the `?? 'error'` tail of the fallback chain
             // the error message would render the misleading literal "null".
@@ -140,7 +140,7 @@ describe('queue-subscription-explorer/parse', () => {
 
         it('returns an error for malformed XML', () => {
             const r = parseSubscriptionsResponse('<not-xml<<<');
-            expect(r.ok).toBe(false);
+            expect(r).toEqual({ ok: false, error: 'SEMP v1 parse error: malformed XML response.' });
         });
 
         it('skips queues missing <info><message-vpn>', () => {
@@ -179,12 +179,10 @@ describe('queue-subscription-explorer/parse', () => {
             expect(r.page.rows).toEqual([{ vpn: 'v', queue: 'x', topic: 'real/topic' }]);
         });
 
-        it('treats execute-result with no reason and no code attribute as a generic error', () => {
+        it('names the code when <execute-result/> carries a code and no reason', () => {
             const xml = `<rpc-reply><execute-result code="fail"/></rpc-reply>`;
             const r = parseSubscriptionsResponse(xml);
-            expect(r.ok).toBe(false);
-            if (r.ok) return;
-            expect(r.error).toContain('fail');
+            expect(r).toEqual({ ok: false, error: 'SEMP v1 execute failed: fail' });
         });
 
         it('returns ok with empty rows when the broker has no queues at all', () => {

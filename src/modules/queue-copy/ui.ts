@@ -1,17 +1,24 @@
 import { required } from '../../core/dom';
+import { createBrokerHosts, type BrokerHosts } from '../../core/connections/broker-hosts';
 import { formatBytes } from '../../core/utils';
-import type { CopyJob, VerifyResult, DestType, CopyMode } from './state';
+import { createSegmented, type Segmented } from '../../core/segmented';
+import { createSlideChoice, type SlideChoice } from '../../core/slide-choice';
+import { DEST_SCOPES, destScopeOf } from './state';
+import type { CopyJob, VerifyResult, DestType, CopyMode, DestScope, DestLive } from './state';
 
 export interface CopyUiElements {
     container: HTMLElement;
 
-    // Top-level visibility
-    warning: HTMLElement;
-    content: HTMLElement;
+    // Top-level visibility (the gate is owned by the module-gate component);
+    // the fieldset that holds every control on the page
+    content: HTMLFieldSetElement;
 
     // Source read-only connection mirror (populated from AppState.solaceConnection
     // + AppState.sempCredentials via applySourceReadonly)
+    /** The source's broker type and hosts, shown and never edited (core/connections/broker-hosts.ts). */
+    sourceHosts: BrokerHosts;
     sourceHost: HTMLInputElement;
+    sourceSolHost: HTMLInputElement;
     sourceSempProtocol: HTMLSelectElement;
     sourceSempPort: HTMLInputElement;
     sourceSempUrlPath: HTMLInputElement;
@@ -25,16 +32,38 @@ export interface CopyUiElements {
     sourceSolPass: HTMLInputElement;
     /** All "Edit in Connections" buttons — one in each source card header. */
     sourceEditButtons: NodeListOf<HTMLButtonElement>;
+    // Provisioned source (the primary is a Provisioned connection): the host
+    // of the read-only connection card shown in place of the three source cards.
+    sourceBrokerCard: HTMLElement;
+    sourceSempCard: HTMLElement;
+    sourceSolCard: HTMLElement;
+    sourceProv: HTMLElement;
 
     // Source queue (editable)
     sourceInput: HTMLInputElement;
     btnSourcePick: HTMLButtonElement;
     sourceError: HTMLElement;
 
-    // Destination Broker (host + toggles)
-    toggleSameBroker: HTMLInputElement;
-    toggleSameVpn: HTMLInputElement;
+    // Destination Broker (type + the Copy to choice); its hosts sit in the SEMP and Client cards
+    /** The Copy to button: this connection, another VPN on its broker, or another broker. */
+    destScope: Segmented<DestScope>;
+    destScopeGroup: HTMLElement;
+    destScopeHint: HTMLElement;
+    /** The destination's broker type and hosts (core/connections/broker-hosts.ts). */
+    destHosts: BrokerHosts;
+    destBrokerType: HTMLElement;
+    destTypeGroup: HTMLElement;
     destHost: HTMLInputElement;
+    destSolHost: HTMLInputElement;
+    // Provisioned destination (the primary is a Provisioned connection): the
+    // host of the shared connection card, and the note shown instead of it
+    // while the destination is the primary itself. The manual SEMP and Client
+    // cards are hidden meanwhile.
+    destSempCard: HTMLElement;
+    destSolCard: HTMLElement;
+    destProv: HTMLElement;
+    destProvCardHost: HTMLElement;
+    destProvSame: HTMLElement;
 
     // Destination SEMP (Management) card
     destSempProtocol: HTMLSelectElement;
@@ -52,9 +81,9 @@ export interface CopyUiElements {
     destSolPass: HTMLInputElement;
 
     // Destination Connect buttons + status + error panes. The two rows
-    // toggle visibility via the `.hidden` class based on the Same-broker /
-    // Same-VPN checkboxes — mirrors the connections module's per-card
-    // Connect / Disconnect button lifecycle.
+    // toggle visibility via the `.hidden` class based on the Copy to choice
+    // — mirrors the connections module's per-card Connect / Disconnect
+    // button lifecycle.
     destSempConnectRow: HTMLElement;
     btnDestSempConnect: HTMLButtonElement;
     destSempStatus: HTMLElement;
@@ -64,17 +93,15 @@ export interface CopyUiElements {
     destSolStatus: HTMLElement;
     destSolError: HTMLElement;
 
-    // Destination target — slide toggle (unchecked = queue, checked = topic).
-    destTypeToggle: HTMLInputElement;
-    destTypeLabelQueue: HTMLElement;
-    destTypeLabelTopic: HTMLElement;
+    // Destination target: a slide choice (core/slide-choice.ts), Queue or Topic.
+    destType: SlideChoice<DestType>;
     destNameLabel: HTMLElement;
     destInput: HTMLInputElement;
     btnDestPick: HTMLButtonElement;
     destError: HTMLElement;
 
-    // Mode (lives inside Destination card now)
-    modeRadios: NodeListOf<HTMLInputElement>;
+    // Mode (lives inside the Destination card): a slide choice, Copy or Move.
+    mode: SlideChoice<CopyMode>;
 
     // Footer action
     btnStart: HTMLButtonElement;
@@ -127,12 +154,37 @@ export interface CopyUiElements {
 }
 
 export function cacheElements(container: HTMLElement): CopyUiElements {
+    const sourceHost = required<HTMLInputElement>(container, '#copy-source-host');
+    const sourceSolHost = required<HTMLInputElement>(container, '#copy-source-sol-host');
+    const destBrokerType = required<HTMLElement>(container, '#copy-dest-broker-type');
+    const destScopeGroup = required<HTMLElement>(container, '#copy-dest-scope');
+    const destHost = required<HTMLInputElement>(container, '#copy-dest-host');
+    const destSolHost = required<HTMLInputElement>(container, '#copy-dest-sol-host');
+    // The source side mirrors the primary connection: locked for good.
+    const sourceHosts = createBrokerHosts({
+        typeGroup: required<HTMLElement>(container, '#copy-source-broker-type'),
+        typeHint: required<HTMLElement>(container, '#copy-source-broker-type-hint'),
+        host: sourceHost,
+        hostLabel: required<HTMLElement>(container, '#lbl-copy-source-host'),
+        messagingHost: sourceSolHost,
+        messagingHint: required<HTMLElement>(container, '#copy-source-sol-host-hint'),
+    });
+    sourceHosts.lock({ management: true, messaging: true });
+    const destHosts = createBrokerHosts({
+        typeGroup: destBrokerType,
+        typeHint: required<HTMLElement>(container, '#copy-dest-broker-type-hint'),
+        host: destHost,
+        hostLabel: required<HTMLElement>(container, '#lbl-copy-dest-host'),
+        messagingHost: destSolHost,
+        messagingHint: required<HTMLElement>(container, '#copy-dest-sol-host-hint'),
+    });
     return {
         container,
-        warning: required(container, '#copy-warning'),
-        content: required(container, '#copy-content'),
+        content: required<HTMLFieldSetElement>(container, '#copy-content'),
 
-        sourceHost: required<HTMLInputElement>(container, '#copy-source-host'),
+        sourceHosts,
+        sourceHost,
+        sourceSolHost,
         sourceSempProtocol: required<HTMLSelectElement>(container, '#copy-source-semp-protocol'),
         sourceSempPort: required<HTMLInputElement>(container, '#copy-source-semp-port'),
         sourceSempUrlPath: required<HTMLInputElement>(container, '#copy-source-semp-urlpath'),
@@ -145,14 +197,28 @@ export function cacheElements(container: HTMLElement): CopyUiElements {
         sourceSolUser: required<HTMLInputElement>(container, '#copy-source-sol-user'),
         sourceSolPass: required<HTMLInputElement>(container, '#copy-source-sol-pass'),
         sourceEditButtons: container.querySelectorAll<HTMLButtonElement>('.copy-source-edit-btn'),
+        sourceBrokerCard: required<HTMLElement>(container, '#copy-source-broker-card'),
+        sourceSempCard: required<HTMLElement>(container, '#copy-source-semp-card'),
+        sourceSolCard: required<HTMLElement>(container, '#copy-source-sol-card'),
+        sourceProv: required<HTMLElement>(container, '#copy-source-prov'),
 
         sourceInput: required<HTMLInputElement>(container, '#copy-source-input'),
         btnSourcePick: required<HTMLButtonElement>(container, '#copy-btn-source-pick'),
         sourceError: required(container, '#copy-source-error'),
 
-        toggleSameBroker: required<HTMLInputElement>(container, '#copy-toggle-same-broker'),
-        toggleSameVpn: required<HTMLInputElement>(container, '#copy-toggle-same-vpn'),
-        destHost: required<HTMLInputElement>(container, '#copy-dest-host'),
+        destScope: createSegmented<DestScope>(destScopeGroup, { attr: 'data-dest-scope', choices: DEST_SCOPES }),
+        destScopeGroup,
+        destScopeHint: required<HTMLElement>(container, '#copy-dest-scope-hint'),
+        destHosts,
+        destBrokerType,
+        destTypeGroup: required<HTMLElement>(container, '#copy-dest-type-group'),
+        destHost,
+        destSolHost,
+        destSempCard: required<HTMLElement>(container, '#copy-dest-semp-card'),
+        destSolCard: required<HTMLElement>(container, '#copy-dest-sol-card'),
+        destProv: required<HTMLElement>(container, '#copy-dest-prov'),
+        destProvCardHost: required<HTMLElement>(container, '#copy-dest-prov-card'),
+        destProvSame: required<HTMLElement>(container, '#copy-dest-prov-same'),
 
         destSempProtocol: required<HTMLSelectElement>(container, '#copy-dest-semp-protocol'),
         destSempPort: required<HTMLInputElement>(container, '#copy-dest-semp-port'),
@@ -176,15 +242,13 @@ export function cacheElements(container: HTMLElement): CopyUiElements {
         destSolStatus: required(container, '#copy-dest-sol-status'),
         destSolError: required(container, '#copy-dest-sol-error'),
 
-        destTypeToggle: required<HTMLInputElement>(container, '#copy-dest-type-toggle'),
-        destTypeLabelQueue: required(container, '#copy-dest-type-label-queue'),
-        destTypeLabelTopic: required(container, '#copy-dest-type-label-topic'),
+        destType: createSlideChoice<DestType>(required(container, '#copy-dest-type-switch'), { choices: ['queue', 'topic'] }),
         destNameLabel: required(container, '#copy-dest-name-label'),
         destInput: required<HTMLInputElement>(container, '#copy-dest-input'),
         btnDestPick: required<HTMLButtonElement>(container, '#copy-btn-dest-pick'),
         destError: required(container, '#copy-dest-error'),
 
-        modeRadios: container.querySelectorAll<HTMLInputElement>('input[name="copy-mode"]'),
+        mode: createSlideChoice<CopyMode>(required(container, '#copy-mode-switch'), { choices: ['copy', 'move'] }),
 
         btnStart: required<HTMLButtonElement>(container, '#copy-btn-start'),
 
@@ -223,17 +287,6 @@ export function cacheElements(container: HTMLElement): CopyUiElements {
     };
 }
 
-/** Show/hide the warning vs content panels based on primary connection. */
-export function setPrimaryConnected(els: CopyUiElements, isConnected: boolean): void {
-    if (isConnected) {
-        els.warning.classList.add('hidden');
-        els.content.classList.remove('hidden');
-    } else {
-        els.warning.classList.remove('hidden');
-        els.content.classList.add('hidden');
-    }
-}
-
 /**
  * Snapshot of the primary connection used to prefill destination fields and
  * populate the source-side read-only mirror. Includes passwords so the source
@@ -241,7 +294,10 @@ export function setPrimaryConnected(els: CopyUiElements, isConnected: boolean): 
  * the connections form.
  */
 export interface PrimarySnapshot {
+    /** The primary's one host, or its SEMP host when messaging runs on another. */
     host: string;
+    /** The primary's messaging host, when it is not `host` (an appliance). */
+    messagingHost?: string;
     solace: { protocol: string; port: string; urlPath: string; vpn: string; user: string; pass: string };
     semp: { protocol: string; port: string; urlPath: string; user: string; pass: string };
 }
@@ -249,11 +305,13 @@ export interface PrimarySnapshot {
 /**
  * Populate the read-only Source cards with the live primary connection values,
  * including passwords. Passwords come from AppState (solaceConnection.pass +
- * sempCredentials.pass), which the connections module publishes on connect.
+ * sempCredentials.pass), which the connections module publishes on connect;
+ * a managed session publishes them blank, since its credentials stay with the
+ * gateway, and its broker name in place of a host.
  */
 export function applySourceReadonly(els: CopyUiElements, primary: PrimarySnapshot | null): void {
     const v = (x: string | undefined) => x ?? '';
-    els.sourceHost.value = v(primary?.host);
+    els.sourceHosts.write({ host: v(primary?.host), messagingHost: primary?.messagingHost });
     if (primary?.semp.protocol) els.sourceSempProtocol.value = primary.semp.protocol;
     els.sourceSempPort.value = v(primary?.semp.port);
     els.sourceSempUrlPath.value = v(primary?.semp.urlPath);
@@ -268,36 +326,36 @@ export function applySourceReadonly(els: CopyUiElements, primary: PrimarySnapsho
 }
 
 /**
- * Apply toggle state to the destination form: when "Same broker" is on, every
- * broker-level field is disabled and prefilled with the primary's value
- * (passwords stay blank — we don't surface the primary password in a visible
- * field). When "Same VPN" is on (only meaningful with Same broker), the
- * Client-side VPN/user/pass fields are also disabled-and-synced.
+ * Apply the Copy to choice to the destination form. The button shows the
+ * choice the two facts amount to. On the source's broker (`sameBroker`), every
+ * broker-level field (the broker type and both hosts among them) is disabled
+ * and prefilled with the primary's value (passwords stay blank — we don't
+ * surface the primary password in a visible field). On its Message VPN too
+ * (`sameVpn`, only meaningful with `sameBroker`), the Client-side
+ * VPN/user/pass fields are also disabled-and-synced.
  *
- * Forced sameVpn=false when sameBroker=false (different broker → different
- * VPN by definition).
+ * A field the choice leaves free is still locked while its own connection is
+ * up (`live`): the SEMP card with the destination's SEMP, the Client card with
+ * its messaging session. So this may run after one of them closed without
+ * freeing the fields of the one still up.
  */
 export function applyDestPrefill(
     els: CopyUiElements,
     sameBroker: boolean,
     sameVpn: boolean,
     primary: PrimarySnapshot | null,
+    live: DestLive = { semp: false, messaging: false },
 ): void {
-    if (!sameBroker) {
-        els.toggleSameVpn.checked = false;
-        els.toggleSameVpn.disabled = true;
-    } else {
-        els.toggleSameVpn.disabled = false;
-    }
+    els.destScope.set(destScopeOf(sameBroker, sameVpn));
 
     const setVal = (input: HTMLInputElement | HTMLSelectElement, val: string) => {
         input.value = val;
     };
 
-    // Broker-level fields driven by Same broker
+    // Broker-level fields, locked on the source's broker
     const lockBroker = sameBroker;
     if (lockBroker && primary) {
-        setVal(els.destHost, primary.host);
+        els.destHosts.write({ host: primary.host, messagingHost: primary.messagingHost });
         setVal(els.destSempProtocol, primary.semp.protocol);
         setVal(els.destSempPort, primary.semp.port);
         setVal(els.destSempUrlPath, primary.semp.urlPath);
@@ -306,44 +364,100 @@ export function applyDestPrefill(
         setVal(els.destSolPort, primary.solace.port);
         setVal(els.destSolUrlPath, primary.solace.urlPath);
     }
-    els.destHost.disabled = lockBroker;
-    els.destSempProtocol.disabled = lockBroker;
-    els.destSempPort.disabled = lockBroker;
-    els.destSempUrlPath.disabled = lockBroker;
-    els.destSempUser.disabled = lockBroker;
-    els.destSempPass.disabled = lockBroker;
-    els.destSolProtocol.disabled = lockBroker;
-    els.destSolPort.disabled = lockBroker;
-    els.destSolUrlPath.disabled = lockBroker;
+    setDestBrokerLocked(els, lockBroker, live);
+    setDestSempFormLocked(els, lockBroker || live.semp);
+    els.destSolProtocol.disabled = lockBroker || live.messaging;
+    els.destSolPort.disabled = lockBroker || live.messaging;
+    els.destSolUrlPath.disabled = lockBroker || live.messaging;
 
-    // VPN-level fields driven by Same VPN (only meaningful when Same broker)
+    // VPN-level fields, locked on the source's Message VPN
     const lockVpn = sameBroker && sameVpn;
     if (lockVpn && primary) {
         setVal(els.destSolVpn, primary.solace.vpn);
         setVal(els.destSolUser, primary.solace.user);
     }
-    els.destSolVpn.disabled = lockVpn;
-    els.destSolUser.disabled = lockVpn;
-    els.destSolPass.disabled = lockVpn;
+    els.destSolVpn.disabled = lockVpn || live.messaging;
+    els.destSolUser.disabled = lockVpn || live.messaging;
+    els.destSolPass.disabled = lockVpn || live.messaging;
 
     // Connect-row visibility:
-    //   - SEMP needs its own Connect when "Same broker" is unchecked.
-    //     With Same broker checked the destination reuses the primary SEMP,
-    //     so no extra connect step is required.
-    //   - Client needs its own Connect when EITHER toggle is unchecked.
-    //     Same-broker + Same-VPN reuses the primary session entirely.
+    //   - SEMP needs its own Connect on another broker. On the source's
+    //     broker the destination reuses the primary SEMP, so no extra
+    //     connect step is required.
+    //   - Client needs its own Connect unless the destination is the
+    //     source's own VPN, which reuses the primary session entirely.
     els.destSempConnectRow.classList.toggle('hidden', sameBroker);
     els.destSolConnectRow.classList.toggle('hidden', sameBroker && sameVpn);
 }
 
+/** What each Copy to choice leaves to fill in: typed cards for a Direct primary, pickers for a Provisioned one. */
+export const DEST_SCOPE_HINT: Record<'manual' | 'provisioned', Record<DestScope, string>> = {
+    manual: {
+        'this-vpn': 'The connection you already have: same broker, same Message VPN. Nothing to fill in.',
+        'another-vpn': 'Same broker as the source. Give the Message VPN and its login below.',
+        'another-broker': 'A different broker. Give its address and both logins below.',
+    },
+    provisioned: {
+        'this-vpn': 'The connection you already have: same broker, same Message VPN. Nothing to fill in.',
+        'another-vpn': 'Same broker as the source. Pick the Message VPN below.',
+        'another-broker': 'Pick a broker and a Message VPN below.',
+    },
+};
+
+/**
+ * Render the destination for the primary connection's mode.
+ *
+ * Primary Direct: the typed broker type, SEMP and Client cards (what the
+ * Copy to choice and the Connect buttons drive). Primary Provisioned: the
+ * broker type and both cards give way to the shared provisioned connection
+ * card -- or, while the destination is the primary itself (This VPN), to a
+ * note. The Copy to button stays in both modes; the line under it says what
+ * the choice leaves to fill in.
+ */
+export function applyDestMode(
+    els: CopyUiElements,
+    opts: { provisioned: boolean; needsSecondary: boolean },
+): void {
+    const { provisioned, needsSecondary } = opts;
+    els.destScopeHint.textContent = DEST_SCOPE_HINT[provisioned ? 'provisioned' : 'manual'][els.destScope.value()];
+    els.destTypeGroup.classList.toggle('hidden', provisioned);
+    els.destSempCard.classList.toggle('hidden', provisioned);
+    els.destSolCard.classList.toggle('hidden', provisioned);
+    els.destProv.classList.toggle('hidden', !provisioned);
+    els.destProvCardHost.classList.toggle('hidden', !needsSecondary);
+    els.destProvSame.classList.toggle('hidden', needsSecondary);
+}
+
+/**
+ * Render the source for the primary connection's mode: the Broker, SEMP and
+ * Client cards that mirror a Direct primary, or the one read-only connection
+ * card of a Provisioned one, which has no address or credential to show.
+ */
+export function applySourceMode(els: CopyUiElements, provisioned: boolean): void {
+    els.sourceBrokerCard.classList.toggle('hidden', provisioned);
+    els.sourceSempCard.classList.toggle('hidden', provisioned);
+    els.sourceSolCard.classList.toggle('hidden', provisioned);
+    els.sourceProv.classList.toggle('hidden', !provisioned);
+}
+
+/**
+ * Forget the typed destination passwords (the field values; the caller clears
+ * the state copies). Run when the destination stops being typed: a secret
+ * must not sit in a field the user can no longer see.
+ */
+export function clearDestTypedSecrets(els: CopyUiElements): void {
+    els.destSempPass.value = '';
+    els.destSolPass.value = '';
+}
+
 /**
  * Lock or unlock the destination SEMP form fields. Called from module.ts's
- * SEMP factory hooks: `onConnected` → lock, `onDisconnected`/`onAuthFailed`/
- * `onError` → unlock. Mirrors the connections module's "fields disabled while
+ * SEMP factory hooks: `onConnected` -> lock, `onDisconnected`/`onAuthFailed`/
+ * `onError` -> unlock. Mirrors the connections module's "fields disabled while
  * bound" pattern so the user can't change creds out from under a live session.
  *
- * Host stays under the broker-level lock — see `setDestBrokerLocked` — because
- * SEMP and Client share the same host field.
+ * The management host has its own lock -- see `setDestBrokerLocked` -- because
+ * the broker type decides what it is.
  */
 export function setDestSempFormLocked(els: CopyUiElements, locked: boolean): void {
     els.destSempProtocol.disabled = locked;
@@ -369,17 +483,29 @@ export function setDestSolFormLocked(els: CopyUiElements, locked: boolean): void
 }
 
 /**
- * Lock or unlock the destination broker host field. The host is shared between
- * SEMP and Client, so it should be locked whenever EITHER connection is live.
- * Pass `eitherConnected` = (destSempCtx !== null) || (destSession !== null).
+ * Lock the destination's broker type and its hosts, as the Direct form locks
+ * its own. On the source's broker (`sameBroker`) both hosts are the primary's
+ * and stay locked. Otherwise each host locks with its own connection: the
+ * management host while the destination's SEMP is up, the messaging host
+ * while its messaging session is. The type, and the one host of a Software /
+ * Cloud broker, lock while either is up (`core/connections/broker-hosts.ts`).
  */
-export function setDestBrokerLocked(els: CopyUiElements, eitherConnected: boolean): void {
-    if (eitherConnected) {
-        els.destHost.disabled = true;
-    }
-    // Note: when both disconnect, the unlock decision is owned by
-    // applyDestPrefill (which considers the Same-broker toggle). We don't
-    // unlock here — applyDestPrefill is called from the hook side too.
+export function setDestBrokerLocked(els: CopyUiElements, sameBroker: boolean, live: DestLive): void {
+    els.destHosts.lock({ management: sameBroker || live.semp, messaging: sameBroker || live.messaging });
+}
+
+/** Tooltip on the destination-choosing controls while they are locked. */
+export const DEST_TARGET_LOCKED_TITLE = 'Locked while the destination connects.';
+
+/**
+ * Lock the control that chooses where the destination session lands -- the
+ * Copy to button -- while a destination connect is in flight, with a title
+ * saying why. (The provisioned card locks its own Broker and VPN pickers while
+ * it connects.)
+ */
+export function setDestTargetLocked(els: CopyUiElements, locked: boolean): void {
+    els.destScope.setDisabled(locked);
+    els.destScopeGroup.title = locked ? DEST_TARGET_LOCKED_TITLE : '';
 }
 
 /** Possible destination connect status. */
@@ -437,20 +563,28 @@ function setErrorPane(el: HTMLElement, message: string | null): void {
     }
 }
 
-/** Update the dest-name field label + the slide-toggle's active-side
- *  highlight based on dest type. */
+/** Show the destination type: on its slide choice, and in the name field's label and placeholder. */
 export function applyDestType(els: CopyUiElements, type: DestType): void {
-    const isTopic = type === 'topic';
-    els.destTypeToggle.checked = isTopic;
-    els.destTypeLabelQueue.classList.toggle('active', !isTopic);
-    els.destTypeLabelTopic.classList.toggle('active', isTopic);
-    if (isTopic) {
+    els.destType.set(type);
+    if (type === 'topic') {
         els.destNameLabel.textContent = 'Topic';
         els.destInput.placeholder = 'Destination topic (e.g. orders/created)';
     } else {
         els.destNameLabel.textContent = 'Queue name';
         els.destInput.placeholder = 'Destination queue name';
     }
+}
+
+/**
+ * Show (`message`) or clear (`null`) the inline error under the destination
+ * name. The input sits inside `.input-with-search`, so the design
+ * system's `.is-invalid + .invalid-feedback` rule cannot reach the feedback
+ * line; `copy-feedback-visible` (styles.css) shows it instead.
+ */
+export function setDestNameError(els: CopyUiElements, message: string | null): void {
+    els.destInput.classList.toggle('is-invalid', message !== null);
+    els.destError.classList.toggle('copy-feedback-visible', message !== null);
+    els.destError.textContent = message ?? '';
 }
 
 /**
@@ -478,24 +612,15 @@ export function setStartEnabled(els: CopyUiElements, enabled: boolean): void {
     els.btnStart.disabled = !enabled;
 }
 
-/** Disable form inputs while a copy is running so the user can't change settings mid-flight.
- *  Source-side connection fields are always disabled (they mirror connections);
- *  this function only toggles user-editable controls. */
+/**
+ * Lock the page while a copy runs, so no setting changes mid-flight. Every
+ * control sits in one fieldset (`els.content`): disabling it disables them all
+ * without touching their own disabled state, so when the run ends each control
+ * is back under its own rule (the same-broker lock, a connected destination,
+ * the Next gate), including any change those rules made during the run.
+ */
 export function setFormDisabled(els: CopyUiElements, disabled: boolean): void {
-    const inputs: (HTMLInputElement | HTMLSelectElement | HTMLButtonElement)[] = [
-        els.sourceInput, els.btnSourcePick,
-        els.toggleSameBroker, els.toggleSameVpn,
-        els.destHost,
-        els.destSempProtocol, els.destSempPort, els.destSempUrlPath, els.destSempUser, els.destSempPass,
-        els.destSolProtocol, els.destSolPort, els.destSolUrlPath,
-        els.destSolVpn, els.destSolUser, els.destSolPass,
-        els.destTypeToggle,
-        els.destInput, els.btnDestPick,
-        els.btnStart,
-    ];
-    for (const el of inputs) el.disabled = disabled;
-    els.modeRadios.forEach(r => r.disabled = disabled);
-    els.sourceEditButtons.forEach(b => b.disabled = disabled);
+    els.content.disabled = disabled;
 }
 
 /**

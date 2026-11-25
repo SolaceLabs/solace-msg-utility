@@ -2,10 +2,11 @@
  * PwaModule Contract
  *
  * Every module in the application must implement this interface.
- * Modules are registered in `src/registry.ts` alongside their priority; the
- * Kernel receives `{ module, priority }` tuples and installs in descending
- * priority order. `priority` is intentionally NOT on the module itself — it's
- * a registry-level decision so the full ordering is visible in one file.
+ * Modules and their priorities are listed in the active variant's manifest
+ * (`src/variants/<name>.ts`), which `src/registry.ts` resolves; the Kernel
+ * receives `{ module, priority }` tuples and installs in descending priority
+ * order. `priority` is intentionally NOT on the module itself -- it is a
+ * variant-level decision so the full ordering is visible in one file.
  */
 
 // Re-export connection-domain types so consumers can import them alongside
@@ -18,6 +19,69 @@ export type {
     SempContext,
 } from './connections/types';
 
+// Type-only (erased at build time, so no runtime import cycle) — AppContext
+// carries the managed profile defined alongside the managed API client.
+import type { ManagedProfileStore } from './services/managed-profile';
+import type { NotificationCenter } from './components/notification-center';
+import type { QueuePicker } from './components/queue-picker';
+import type { DeploymentConfig } from './connections/conn-modes';
+
+/* ------------------------------------------------------------------ */
+/*  Managed (RBAC) session                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A single permission row from the managed RBAC profile. Each field is a glob
+ * (`*` = match-all; leading/middle/trailing supported, case-sensitive). A row
+ * grants only when broker AND msgVpns AND queues all match the candidate.
+ */
+export interface QGlob {
+    brokers: string;
+    msgVpns: string;
+    queues: string;
+}
+
+/**
+ * The current user's managed session, adopted from the gateway session
+ * (`GET /managed/me`) by the connections module's Managed panel or admin-login. `null`/absent whenever no managed login is active
+ * (including every Direct-mode session), where RBAC helpers degrade to allow-all.
+ *
+ * This carries only **matcher inputs**. The provisioned broker and VPN names
+ * live in `AppContext.managedProfile` -- see
+ * `src/core/services/managed-profile.ts` for the ownership split. No broker
+ * credential is held in the browser for a managed session.
+ */
+export interface ManagedSession {
+    /** Whether the user may see the admin-only management modules. */
+    admin: boolean;
+    /**
+     * The signed-in username, so a module can tell a change to the session's
+     * own account. The gateway's HttpOnly cookie is the credential; nothing
+     * here authenticates.
+     */
+    username: string;
+    /** Connected broker NAME — the source of the `broker` argument to matchers. */
+    broker: string;
+    /**
+     * Provisioned VPN names for the connected `broker`, published by the
+     * connections module from `/managed/me` (`connections.yaml` ∩ entitled).
+     * `[]` until connected. This is what bounds the queue-picker's VPN list in
+     * managed mode (via `queueSourceFrom`) so it matches the Connections dropdown
+     * — provisioning, not the broader entitlement globs.
+     */
+    vpns: string[];
+    /** Queues the user may forward/delete on (operate ⊇ read-only). */
+    operate: QGlob[];
+    /** Queues the user may only view. */
+    readOnly: QGlob[];
+    /**
+     * App modules the gateway lets this user open (`/managed/me`'s `modules`).
+     * Connections and the admin modules are not governed by it — see
+     * `isModuleVisible` in `rbac.ts`.
+     */
+    modules: string[];
+}
+
 /* ------------------------------------------------------------------ */
 /*  Application State                                                  */
 /* ------------------------------------------------------------------ */
@@ -28,14 +92,17 @@ export interface AppState {
     selectedVpn: string | null;
     /**
      * Live primary Solace connection info — including the password the user
-     * typed into the form. Populated by the connections module on
+     * typed into the form (Direct; a managed session leaves it '' and puts the
+     * broker name in `host`). Populated by the connections module on
      * `client:connected`, cleared on `client:disconnected`. Consumers
      * (e.g. queue-copy) use this to prefill destination forms and to mirror
      * the source-side connection read-only panel. The SolClientJS Session
      * does not expose these properties back from the session object itself,
      * so the connections module captures them at click time and publishes
      * here. Parallel to `sempCredentials` which has been doing the same for
-     * the SEMP side since day one.
+     * the SEMP side since day one. `appliance` is set when the form that
+     * connected was an appliance, whose `host` is its messaging host: it may
+     * equal the SEMP host, so the two hosts alone do not tell the type.
      */
     solaceConnection: {
         host: string;
@@ -45,13 +112,16 @@ export interface AppState {
         vpn: string;
         user: string;
         pass: string;
+        appliance?: boolean;
     } | null;
     /**
      * Live primary SEMP connection info. `baseUrl` is the wire URL the
      * client must POST against (gateway-prefixed in hosted mode), while
      * `protocol`/`host`/`port`/`urlPath` carry the ORIGINAL values the user
      * typed — useful for UI that needs to display or reuse the broker
-     * identity without reverse-engineering the wire URL.
+     * identity without reverse-engineering the wire URL. A managed session sets
+     * `relay` (the gateway's SEMP relay base, also `baseUrl`), puts the broker
+     * name in `host`, and leaves `user`/`pass` '': the gateway holds them.
      */
     sempCredentials: {
         user: string;
@@ -61,8 +131,26 @@ export interface AppState {
         host: string;
         port: string;
         urlPath: string;
+        relay?: string;
     } | null;
     isSempConnected: boolean;
+    /**
+     * Current managed (RBAC) session -- a runtime posture, not a variant: set
+     * after login by the connections module's Managed tab (or by admin-login in
+     * the admin app) and cleared on logout. Optional so unmanaged sessions (and
+     * AppContext test literals) need not set it; absent/null => RBAC helpers in
+     * `./rbac` degrade to allow-all.
+     */
+    managed?: ManagedSession | null;
+    /**
+     * The deployment's connection-mode config and `/hosted` verdict, published
+     * once by the connections module from its probe -- the single home of the
+     * hosted flag (`isHostedDeployment` in `core/hosted.ts`). Other modules read
+     * it to route a secondary connection's URLs (`SolaceConfig.hosted` /
+     * `SempConfig.hosted`) rather than probing the gateway again; a secondary
+     * connection's mode follows the primary's (queue-copy's destination).
+     */
+    connConfig?: DeploymentConfig;
 }
 
 /* ------------------------------------------------------------------ */
@@ -86,6 +174,26 @@ export interface BusEvents {
     'connection:check-connection': { vpn: string; queue: string; returnTo?: 'queue-browser' | 'queue-copy' };
     /** Navigate to the connections form. Emitted by "Edit in Connections" buttons. */
     'connection:edit-requested':   void;
+    /**
+     * The managed RBAC session changed (login / logout / re-fetch entitlements).
+     * The kernel re-renders the sidebar (module visibility) on this. Emitted by
+     * the connections Managed tab, admin-login and user-management (self-
+     * demote); never fires in an unmanaged session.
+     */
+    'rbac:changed':                void;
+    /**
+     * Ask the module that owns the managed login to end the session with its
+     * ordinary sign-out (`POST /managed/logout`, drop any managed broker
+     * connection, clear `managedProfile` + `AppState.managed`, emit
+     * `rbac:changed`, show its signed-out view). Emitted by user-management
+     * when a change to the signed-in admin's own account (new password,
+     * administrator flag, deletion) ended the session at the gateway, and by
+     * any admin module on a 401: the session cannot be patched in place.
+     * Answered by admin-login (while it holds the session) and by the
+     * connections module (routed to the Managed panel when `appState.managed`
+     * is set).
+     */
+    'rbac:sign-out-requested':     void;
     'browser:available':           void;
     'browser:browse-queue':        { queue: string };
     /** Connections module finished switching VPN on a queue-copy origin request. */
@@ -144,13 +252,41 @@ export interface AppContext {
      * Helper for SEMP API requests. `path` is the endpoint + query string only
      * (e.g. '/SEMP/v2/monitor/msgVpns?count=100' or '/SEMP' for v1 RPC); the
      * kernel assembles the full URL from `appState.sempCredentials` on every
-     * call, applies hosted-mode gateway routing, and injects Basic auth.
+     * call, applies hosted-mode gateway routing, and injects Basic auth (a
+     * managed session's relay instead: no Authorization header).
      */
     sempFetch: (path: string, options?: RequestInit) => Promise<Response>;
+    /**
+     * The managed session's provisioned profile, owned by core so any module
+     * can open a provisioned connection (`dial`) without reaching into the
+     * module that owns the login. Inert -- and `isActive() === false` -- outside
+     * a managed session.
+     */
+    managedProfile: ManagedProfileStore;
+    /**
+     * The app's notification record, behind the header bell. Every ok / warn /
+     * error toast and the connection lifecycle are recorded automatically; a
+     * module records something without a toast with
+     * `ctx.notifications.add(level, module, text)` (`module` as the sidebar
+     * names it). See src/core/components/notification-center/.
+     */
+    notifications: NotificationCenter;
+    /**
+     * The app's queue picker, one per kernel: `ctx.queuePicker.pick(source,
+     * opts?)` opens it against a `QueueSource`. Its cache is shared by every
+     * module that picks from the same source. See src/core/components/queue-picker/.
+     */
+    queuePicker: QueuePicker;
     /** Helper for clipboard copy with visual feedback */
     copyToClipboard: (text: string, btnElement?: HTMLElement) => Promise<void>;
-    /** Global app config */
-    config: Record<string, any>;
+    /**
+     * Place a module's account control at the top of the sidebar, above the
+     * page items, where it stays visible on every page. The module builds
+     * and owns the element (its visibility included); the shell only holds
+     * it. One at a time: a later call replaces it. The connections module's
+     * managed entry and admin-login use it.
+     */
+    mountSidebarAccount: (el: HTMLElement) => void;
 }
 
 /* ------------------------------------------------------------------ */

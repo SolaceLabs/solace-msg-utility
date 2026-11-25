@@ -1,0 +1,168 @@
+/**
+ * Managed API transport — same-origin JSON calls to the gateway's `/managed/*`
+ * endpoints (go-web-proxy/managed.go).
+ *
+ * Authentication is the gateway's session cookie: `HttpOnly`, so script never
+ * sees it, and sent by the browser on every same-origin request. Sign-in and
+ * password changes happen on the gateway's own pages (`/login`,
+ * `/login/password`), which the UI reaches by plain links.
+ *
+ * Every call resolves — it never rejects. A non-2xx answer carries the
+ * gateway's `{ error, field?, reason?, rev?, basis? }` code; `managedErrorMessage` turns it
+ * into text for the user. Lives in core because the Managed panel and the
+ * three admin modules all talk to the gateway through it.
+ */
+import { showToast } from '../toast';
+import { logger } from '../logger';
+import { isTimeoutError, raceDeadline, REQUEST_TIMEOUT_MS } from '../timing';
+import type { EventBus } from '../types';
+
+const log = logger.withTag('managed-api');
+
+/** A failed call: the HTTP status (0 when the gateway was unreachable) and its code. */
+export interface ManagedError {
+    ok: false;
+    status: number;
+    /** The gateway's code, or `network` / `bad_response` from this client. */
+    code: string;
+    /** For `invalid`: which field, and a reason fit to show the admin. */
+    field?: string;
+    reason?: string;
+    /** For `stale`: the record's current rev (a number; the settings rev is text). */
+    rev?: number | string;
+    /** For a `stale` import: the gateway's current basis, opaque to the browser. */
+    basis?: unknown;
+}
+
+/** `login.twoFactor`: who signs in with a code from an authenticator app. */
+export type TwoFactorMode = 'optional' | 'admins' | 'mandatory';
+
+/** The `twoFactor` member of `GET /managed/me`: the gateway's mode, and whether this user has set it up. */
+export interface TwoFactorState {
+    mode: TwoFactorMode;
+    enrolled: boolean;
+}
+
+export type ManagedResult<T> = { ok: true; data: T } | ManagedError;
+
+type Method = 'GET' | 'PUT' | 'POST' | 'DELETE';
+
+/** What one exchange yields: the status, and the JSON body when there was one to read. */
+interface Exchange {
+    ok: boolean;
+    status: number;
+    body?: unknown;
+    /** False for a 204 (nothing to read) and for a body that is not JSON. */
+    parsed: boolean;
+}
+
+/** The fetch and the read of its body: the one exchange `managedRequest` puts a deadline on. */
+async function exchange(method: Method, path: string, body?: unknown): Promise<Exchange> {
+    const res = await fetch(path, {
+        method,
+        credentials: 'same-origin',
+        ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    });
+    if (res.ok && res.status === 204) return { ok: true, status: 204, parsed: false };
+    try {
+        return { ok: res.ok, status: res.status, body: await res.json(), parsed: true };
+    } catch {
+        // Not JSON (e.g. a reverse proxy's error page): the status alone decides.
+        return { ok: res.ok, status: res.status, parsed: false };
+    }
+}
+
+/**
+ * One gateway call. A gateway that does not complete its answer (headers and
+ * body, one deadline over both) within `REQUEST_TIMEOUT_MS` is reported as
+ * `timeout`, so a stalled `/managed/me` at startup ends in the signed-out view
+ * with an error instead of a blank page. It is not `network`: the request was
+ * sent and is left running, so a change may still be applied after it.
+ */
+export async function managedRequest<T = void>(method: Method, path: string, body?: unknown): Promise<ManagedResult<T>> {
+    let ans: Exchange;
+    try {
+        ans = await raceDeadline(exchange(method, path, body));
+    } catch (e) {
+        if (isTimeoutError(e)) {
+            log.warn(`${method} ${path} got no answer from the gateway within ${REQUEST_TIMEOUT_MS / 1000} s; a change may still be applied:`, e);
+            return { ok: false, status: 0, code: 'timeout' };
+        }
+        log.warn(`${method} ${path} could not reach the gateway:`, e);
+        return { ok: false, status: 0, code: 'network' };
+    }
+    if (ans.ok) {
+        if (ans.status === 204) return { ok: true, data: undefined as T };
+        return ans.parsed ? { ok: true, data: ans.body as T } : { ok: false, status: ans.status, code: 'bad_response' };
+    }
+    const err = (ans.parsed ? ans.body : {}) as { error?: string; field?: string; reason?: string; rev?: number | string; basis?: unknown };
+    return { ok: false, status: ans.status, code: err.error ?? `http_${ans.status}`, field: err.field, reason: err.reason, rev: err.rev, basis: err.basis };
+}
+
+const MESSAGES: Record<string, string> = {
+    unauthenticated: 'Your session has ended. Sign in again.',
+    password_change_required: 'You must change your password before you continue.',
+    forbidden: 'This needs an administrator.',
+    not_found: 'Not found. It may already have been removed.',
+    bad_request: 'The gateway rejected the request as malformed.',
+    too_large: 'The request is too large.',
+    last_admin: 'At least one administrator must remain.',
+    cross_origin: 'The gateway refused a cross-site request.',
+    rate_limited: 'Too many requests. Wait a minute and try again.',
+    would_lock_out: 'This change would lock this browser out of the gateway.',
+    config_changed_on_disk: 'config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.',
+    stale: 'This was changed by someone else since you opened it. Reload to see the current version.',
+    exists: 'That name already exists. Use Edit to change it.',
+    rev_required: 'The page did not send the version it was working from, so the gateway refused the change. Reload the page and try again.',
+    store_changed_on_disk: 'A data file (users, connections or backup settings) was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.',
+    tls_read_only: 'The gateway\'s certificate or trust files are read-only on its host, so they cannot be changed here.',
+    tls_write_failed: 'The gateway could not write its certificate or trust files, so nothing was changed. Its log has the cause.',
+    store_write_failed: 'The gateway could not write its data files, so nothing was changed. Its log has the cause.',
+    audit_unavailable: 'The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.',
+    config_unreadable: 'The gateway cannot read its config.yaml. Its log has the cause.',
+    backup_unavailable: 'The gateway could not write the backup. Its log has the cause.',
+    server_error: 'The gateway could not complete the request. Its log has the cause.',
+    read_only: 'The gateway relays SEMP reads only; this request would change the broker.',
+    upstream_auth: 'The broker refused the credential the gateway holds for it. Ask an administrator to check the connection.',
+    upstream_unavailable: 'The gateway could not reach the broker, or the broker gave an answer it cannot pass on. Its log has the cause.',
+    network: 'The gateway could not be reached.',
+    timeout: 'The gateway did not answer in time. If this was a change, it may still have been applied: reload to see where it stands before you try again.',
+    bad_response: 'The gateway sent a response this page cannot read.',
+};
+
+/**
+ * Every code with a stock message: the gateway's error codes plus `network`,
+ * `timeout` and `bad_response`, which managedRequest makes itself.
+ * tests/mock-broker/gateway/error-codes.test.ts holds this list to the codes
+ * the real gateway's handlers send (go-web-proxy/testdata/contract/error-codes.json),
+ * and the managed demo to it: each code is sent by the fake gateway or named
+ * as one it does not simulate.
+ */
+export const MANAGED_ERROR_CODES: readonly string[] = Object.keys(MESSAGES);
+
+/**
+ * Text for a failed call. A reason from the gateway (sent with `invalid` and
+ * `would_lock_out`, always fit to show an admin) wins over the stock line.
+ */
+export function managedErrorMessage(err: ManagedError): string {
+    if (err.reason) return err.reason;
+    return MESSAGES[err.code] ?? `Unexpected answer from the gateway (HTTP ${err.status}).`;
+}
+
+/** Sign-out toasts carry an instruction and the view changes underneath them,
+ *  so they stay up longer than the default. */
+export const SIGNED_OUT_TOAST_MS = 5000;
+
+/**
+ * Report a failed admin call. A 401 means the gateway ended the session: the
+ * message goes to a toast (the view is about to change) and the session owner
+ * is asked to sign out. Any other failure goes to `show`.
+ */
+export function reportManagedFailure(err: ManagedError, eventBus: EventBus, show: (message: string) => void): void {
+    if (err.code === 'unauthenticated') {
+        showToast(managedErrorMessage(err), 'error', SIGNED_OUT_TOAST_MS);
+        eventBus.emit('rbac:sign-out-requested');
+        return;
+    }
+    show(managedErrorMessage(err));
+}

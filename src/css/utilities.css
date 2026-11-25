@@ -35,6 +35,14 @@
     font-size: 0.875rem;
 }
 
+.text-body-sm {
+    font-size: 0.9rem;
+}
+
+.leading-normal {
+    line-height: 1.5;
+}
+
 .text-xs {
     font-size: 0.75rem;
 }
@@ -148,6 +156,15 @@
 /* ---------- Sizing ---------- */
 .w-full {
     width: 100%;
+}
+
+/* Fixed widths for the short Host / Port / URL Path fields of a connection form. */
+.w-100px {
+    width: 100px;
+}
+
+.w-150px {
+    width: 150px;
 }
 
 .h-full {

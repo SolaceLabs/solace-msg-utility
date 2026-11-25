@@ -1,23 +1,37 @@
-import { ui } from './ui-core.js';
+import { ui, NOTICE_TOAST_MS } from './ui-core.js';
 import { state, getBrowser } from './state.js';
 import { icons } from './constants.js';
-import { escapeHtml } from '../../core/utils';
+import { escapeHtml, solaceErrorText } from '../../core/utils';
+import { showToast } from '../../core/toast';
 import { required } from '../../core/dom';
 import { showPayload } from './features.js';
+import { contentFileName } from './payload.js';
 import { logger } from '../../core/logger';
-import type { EventBus } from '../../core/types';
+import { canOperate } from '../../core/rbac';
+import type { AppState, EventBus } from '../../core/types';
+
+const log = logger.withTag('queue-browser');
 
 // ui-table.ts - Message List & Table Logic
-// Initialized via initTable(eventBus) to provide EventBus for delete events.
+// Initialized via initTable(eventBus, { appState }) to provide EventBus for
+// delete events and the managed session for read-only rows.
 
 declare const JSZip: any;
 
-export function initTable(eventBus: EventBus) {
+export function initTable(eventBus: EventBus, opts: { appState?: AppState } = {}) {
+
+    /** A managed session's read-only row covers this queue on the connected VPN. */
+    function rbacReadOnly(queueName: string): boolean {
+        const s = opts.appState;
+        const m = s?.managed;
+        return !!m && !canOperate(m, m.broker, s!.selectedVpn ?? '', queueName);
+    }
 
     ui.getSelectedMessageIds = function () {
         const els = ui.getElements();
-        const checkedBoxes = Array.from(els.msgList.querySelectorAll('.msg-check:checked'));
-        return checkedBoxes.map((cb: any) => cb.closest('tr').dataset.id);
+        const checkedBoxes = Array.from<Element>(els.msgList.querySelectorAll('.msg-check:checked'));
+        // Every checkbox sits in its message row.
+        return checkedBoxes.map((cb: Element) => cb.closest('tr')!.dataset.id);
     };
 
     ui.createRowHtml = function (msg: any) {
@@ -40,7 +54,7 @@ export function initTable(eventBus: EventBus) {
                     <div class="browser-actions">
                         ${downloadBtns}
                         <button class="btn-icon btn-forward-row" title="Forward Message">${icons.forward}</button>
-                        ${!isReadOnly ? `<button class="btn-icon btn-delete-row" title="Delete" style="color: var(--status-disconnected);">${icons.delete}</button>` : ''}
+                        ${!isReadOnly ? `<button class="btn-icon btn-icon-danger btn-delete-row" title="Delete">${icons.delete}</button>` : ''}
                     </div>
                 </td>
             </tr>
@@ -48,10 +62,13 @@ export function initTable(eventBus: EventBus) {
     };
 
     ui.attachRowListeners = function (tr: HTMLElement) {
+        // createRowHtml gives every row its message's data-id.
+        const id = tr.dataset.id!;
         // Row Click (Select)
-        tr.addEventListener('click', (e: any) => {
-            if (e.target.closest('input') || e.target.closest('button')) return;
-            ui.selectMessage((tr as HTMLElement & { dataset: DOMStringMap }).dataset.id);
+        tr.addEventListener('click', (e: MouseEvent) => {
+            const target = e.target as Element;
+            if (target.closest('input') || target.closest('button')) return;
+            ui.selectMessage(id);
         });
 
         // The four `if (msg)` guards below protect a state-find race: a click can land
@@ -63,18 +80,18 @@ export function initTable(eventBus: EventBus) {
         if (showPayload()) {
             required(tr, '.btn-download-content').addEventListener('click', (e) => {
                 e.stopPropagation();
-                const msg = state.displayedMessages.find((m: any) => m.id === (tr as any).dataset.id);
+                const msg = state.displayedMessages.find((m: any) => m.id === id);
                 if (msg) ui.downloadMessageContent(msg);
             });
             required(tr, '.btn-download-full').addEventListener('click', (e) => {
                 e.stopPropagation();
-                const msg = state.displayedMessages.find((m: any) => m.id === (tr as any).dataset.id);
+                const msg = state.displayedMessages.find((m: any) => m.id === id);
                 if (msg) ui.downloadMessageFull(msg);
             });
         }
         required(tr, '.btn-forward-row').addEventListener('click', (e) => {
             e.stopPropagation();
-            const msg = state.displayedMessages.find((m: any) => m.id === (tr as any).dataset.id);
+            const msg = state.displayedMessages.find((m: any) => m.id === id);
             if (msg) ui.showForwardModal(msg);
         });
         required(tr, '.msg-check').addEventListener('change', ui.updateCounts);
@@ -84,7 +101,7 @@ export function initTable(eventBus: EventBus) {
         if (btnDel) {
             btnDel.addEventListener('click', (e) => {
                 e.stopPropagation();
-                eventBus.emit('app:message-delete', { id: (tr as any).dataset.id! });
+                eventBus.emit('app:message-delete', { id });
             });
         }
     };
@@ -172,19 +189,20 @@ export function initTable(eventBus: EventBus) {
     ui.updatePermissionUI = function (queueName: string) {
         const els = ui.getElements();
 
-        let isReadOnly = false;
         let perms: any = null;
         const browser = getBrowser(queueName);
         const consumer = browser ? browser._messageConsumer : null;
         perms = consumer ? consumer._permissions : null;
 
-        if (perms) {
-            if (typeof perms === 'string' && perms === 'READ_ONLY') isReadOnly = true;
-        }
+        // Downgrade only: the broker's own permission, made read-only by a
+        // managed session's read-only row; a row never upgrades a queue the
+        // broker keeps read-only.
+        const managedReadOnly = rbacReadOnly(queueName);
+        const isReadOnly = perms === 'READ_ONLY' || managedReadOnly;
 
         state.currentQueuePermissions = isReadOnly ? { READ_ONLY: true } : { READ_ONLY: false };
 
-        if (perms) {
+        if (perms || managedReadOnly) {
             els.hdrPermissions.classList.remove('hidden');
             if (isReadOnly) {
                 els.hdrPermissions.textContent = 'Read-Only';
@@ -203,17 +221,15 @@ export function initTable(eventBus: EventBus) {
     };
 
     ui.downloadMessagesZip = async function (type: string) {
-        if (!(window as any).JSZip) {
-            alert('JSZip library not loaded. Cannot create ZIP.');
+        if (!window.JSZip) {
+            showToast('Cannot create the ZIP: the JSZip library is not loaded.', 'error', NOTICE_TOAST_MS);
             return;
         }
 
-        // Get Checked Messages
+        // Get Checked Messages. The download buttons stay disabled until a row is
+        // selected (updateCounts), so an empty match only follows a row that left
+        // the view after it was checked.
         const ids = ui.getSelectedMessageIds();
-        if (ids.length === 0) {
-            alert('No messages selected.');
-            return;
-        }
         const msgs = state.displayedMessages.filter((m: any) => ids.includes(String(m.id)));
 
         if (msgs.length === 0) return;
@@ -224,14 +240,14 @@ export function initTable(eventBus: EventBus) {
         const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
 
         // type is one of 'content' | 'full' — only call sites are ui-events.ts which
-        // pass those literals. msg.content is always a string by the time it reaches
-        // here (set in service-events.onMessage; '' when no payload, never null).
+        // pass those literals. A binary attachment, map or stream goes in as its
+        // original bytes; any other body as its text (set in service-events.onMessage;
+        // '' when empty). Each entry takes the name Download Content suggests.
         let zipFilename = '';
         if (type === 'content') {
             zipFilename = `solace-messages-content-${timestamp}.zip`;
             msgs.forEach((msg: any) => {
-                const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}`;
-                zip.file(filename, msg.content);
+                zip.file(contentFileName(msg), msg.bytes ?? msg.content);
             });
         } else {
             zipFilename = `solace-messages-full-${timestamp}.zip`;
@@ -246,8 +262,8 @@ export function initTable(eventBus: EventBus) {
             const content = await zip.generateAsync({ type: 'blob' });
             ui.triggerDownloadBlob(content, zipFilename);
         } catch (err) {
-            logger.error('Failed to generate ZIP:', err);
-            alert('Failed to generate ZIP file.');
+            log.error('Failed to generate ZIP', err);
+            showToast(`Could not create the ZIP: ${solaceErrorText(err, 'unknown error')}`, 'error', NOTICE_TOAST_MS);
         }
     };
 }

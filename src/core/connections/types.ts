@@ -28,6 +28,18 @@ export interface SolaceConfig {
      * composes the full clientName as `SolMsgUtil/YYYYMMDDHHMMSS/{clientNameId}`.
      */
     clientNameId: string;
+    /**
+     * Managed sessions only: the gateway path of this VPN's SMF socket
+     * (`/managed/smf/{broker}/{vpn}`, from dial). When set, the SDK connects to
+     * it on the page's own host, and `protocol`/`port`/`urlPath` are unused.
+     */
+    smfPath?: string;
+    /**
+     * The deployment's `/hosted` verdict (`AppState.connConfig.hosted`), set by
+     * the caller from that single home: when true the broker URL is routed
+     * through the gateway's proxy path (`buildBrokerUrl`). Unset means Direct.
+     */
+    hosted?: boolean;
 }
 
 /** SEMP REST management config. */
@@ -36,11 +48,25 @@ export interface SempConfig {
     port: string;
     urlPath: string;
     user: string;
+    /**
+     * Managed sessions only: the gateway's SEMP relay for one broker
+     * (`/managed/relay/{broker}`). When set, every SEMP request goes there
+     * with no Authorization header: the gateway adds the broker's stored SEMP
+     * account, and the session cookie authenticates the browser.
+     */
+    relayBase?: string;
+    /** As `SolaceConfig.hosted`: route through the gateway's proxy path. */
+    hosted?: boolean;
 }
 
-/** Full broker connection config. Host is shared between Solace and SEMP. */
+/**
+ * Full broker connection config. `host` serves SEMP and messaging alike,
+ * unless `messagingHost` names another host for messaging: an appliance,
+ * whose management and messaging addresses differ (`./broker-hosts.ts`).
+ */
 export interface ConnectionConfig {
     host: string;
+    messagingHost?: string;
     solace: SolaceConfig;
     semp: SempConfig;
 }

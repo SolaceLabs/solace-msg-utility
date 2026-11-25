@@ -2,10 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { createService } from '../../../src/modules/queue-discovery/service';
 import { createEventBus } from '../../../src/core/event-bus';
 import type { AppContext, AppState } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 /**
- * After Stage C the queue-discovery service is a thin wrapper around the
- * lifted core `createSempDiscovery`. The paged-fetch / pagination /
+ * The queue-discovery service is a thin wrapper around the
+ * core `createSempDiscovery`. The paged-fetch / pagination /
  * error-mapping behaviors are tested at the core layer in
  * `tests/core/services/semp-discovery.test.ts`. These tests cover the
  * wrapper-only contract:
@@ -25,7 +26,7 @@ function createTestContext(overrides: Partial<AppContext> = {}): AppContext {
         },
         isSempConnected: true
     };
-    return {
+    return completeContext({
         container: document.createElement('div'),
         appState,
         eventBus,
@@ -33,9 +34,8 @@ function createTestContext(overrides: Partial<AppContext> = {}): AppContext {
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
         copyToClipboard: vi.fn(),
-        config: { useMocks: false },
         ...overrides
-    };
+    });
 }
 
 async function allPages<T>(gen: AsyncGenerator<T>): Promise<T[]> {

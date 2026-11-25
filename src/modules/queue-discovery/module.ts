@@ -2,14 +2,17 @@
  * Queue Discovery Module
  *
  * Discovers VPNs and Queues via SEMP API. Depends on the SEMP connection
- * from the Connections module — priority is configured in `src/registry.ts`.
+ * from the Connections module. No variant activates it.
  */
 
 import { createService } from './service.js';
 import { ui } from './ui.js';
 import { required } from '../../core/dom';
 import { logger } from '../../core/logger';
+import { showToast } from '../../core/toast';
 import type { AppContext } from '../../core/types';
+
+const log = logger.withTag('queue-discovery');
 
 export const QueueDiscoveryModule = {
     name: 'Queue Discovery',
@@ -50,13 +53,17 @@ export const QueueDiscoveryModule = {
         // and abandons its async generator. Protects against stale page data
         // merging into the new VPN's list.
         let fetchQueuesGen = 0;
+        // The same for fetchVpns: a Refresh (or Enter in the VPN box) while a
+        // fetch is in flight, or a SEMP disconnect, leaves the older loop to
+        // bail instead of merging its pages into the newer list and cache.
+        let fetchVpnsGen = 0;
 
         // --- Logic ---
 
         function handleVpnSelect(vpn: string) {
             selectedVpn = vpn;
             vpnInput.value = vpn;
-            logger.info(`VPN Selected: ${vpn}`);
+            log.info(`VPN selected: vpn=${vpn}`);
 
             setState('selectedVpn', vpn);
 
@@ -66,32 +73,36 @@ export const QueueDiscoveryModule = {
         function handleQueueSelect(queue: string) {
             selectedQueue = queue;
             queueInput.value = queue;
-            logger.info(`Queue Selected: ${queue}`);
+            log.info(`Queue selected: vpn=${selectedVpn} queue=${queue}`);
             btnCopy.disabled = false;
         }
 
         async function fetchVpns() {
+            const myGen = ++fetchVpnsGen;
             if (vpnCache) {
-                logger.debug('[Discovery] Using cached VPN list');
+                log.debug('Using cached VPN list');
                 currentVpnList = [...vpnCache];
                 ui.renderOptions(vpnList, currentVpnList, handleVpnSelect);
                 vpnInput.placeholder = 'Select a Message VPN';
                 return;
             }
-            logger.info('Fetching VPNs...');
+            log.info('Fetching VPN list');
             vpnInput.placeholder = 'Loading...';
             currentVpnList = [];
 
             for await (const page of service.fetchVpns()) {
+                if (myGen !== fetchVpnsGen) return;
                 if (page.ok) {
                     currentVpnList = [...currentVpnList, ...page.data].sort();
                     ui.renderOptions(vpnList, currentVpnList, handleVpnSelect);
                 } else {
-                    logger.error('Failed to fetch VPNs', page.error);
+                    log.error('Failed to fetch VPN list', page.error);
                     vpnInput.placeholder = page.error;
                     return;
                 }
             }
+            // A newer fetch started while the last page was read: it owns the cache.
+            if (myGen !== fetchVpnsGen) return;
             vpnCache = [...currentVpnList];
             vpnInput.placeholder = 'Select a Message VPN';
         }
@@ -110,7 +121,7 @@ export const QueueDiscoveryModule = {
             // next iteration.
             const cached = queueCache.get(vpn);
             if (cached) {
-                logger.debug(`[Discovery] Using cached queue list for ${vpn}`);
+                log.debug(`Using cached queue list for vpn=${vpn}`);
                 currentQueueList = [...cached];
                 ui.renderOptions(queueList, currentQueueList, handleQueueSelect);
                 if (currentQueueList.length === 0) {
@@ -124,7 +135,7 @@ export const QueueDiscoveryModule = {
                 return;
             }
 
-            logger.info(`Fetching Queues for ${vpn}...`);
+            log.info(`Fetching queue list for vpn=${vpn}`);
             queueInput.placeholder = 'Loading...';
             currentQueueList = [];
             ui.renderOptions(queueList, [], handleQueueSelect);
@@ -142,7 +153,7 @@ export const QueueDiscoveryModule = {
                     queueInput.disabled = false;
                     ui.renderOptions(queueList, currentQueueList, handleQueueSelect);
                 } else {
-                    logger.error('Failed to fetch Queues', page.error);
+                    log.error(`Failed to fetch queue list for vpn=${vpn}`, page.error);
                     queueInput.placeholder = page.error;
                     return;
                 }
@@ -165,9 +176,8 @@ export const QueueDiscoveryModule = {
         // --- Setup Components ---
         // No closeScope passed → outside-click listener attaches to `document` so
         // clicks anywhere outside the dropdown (sidebar, top-bar, other modules)
-        // close it. Container-scoping was tried earlier (see plan item 3.1) to
-        // avoid a theoretical re-install leak, but modules only install once per
-        // session in this app, so the trade-off was bad UX for no real benefit.
+        // close it. Modules install once per session, so there is no re-install
+        // listener leak to guard against by scoping it to the container.
         ui.setupSearchableSelect(vpnInput, vpnList, handleVpnSelect);
         ui.setupSearchableSelect(queueInput, queueList, handleQueueSelect);
 
@@ -185,7 +195,7 @@ export const QueueDiscoveryModule = {
             setTimeout(() => {
                 const val = vpnInput.value;
                 if ((val && !currentVpnList.includes(val)) || !val) {
-                    if (val) logger.warn('Invalid VPN entered. Clearing.');
+                    if (val) log.warn(`Invalid VPN entered, clearing: vpn=${val}`);
                     selectedVpn = null;
                     selectedQueue = null;
                     vpnInput.value = '';
@@ -199,7 +209,7 @@ export const QueueDiscoveryModule = {
                 if (queueInput.disabled) return;
                 const val = queueInput.value;
                 if (val && !currentQueueList.includes(val)) {
-                    logger.warn('Invalid queue entered. Clearing.');
+                    log.warn(`Invalid queue entered, clearing: vpn=${selectedVpn} queue=${val}`);
                     queueInput.value = '';
                     selectedQueue = null;
                     btnCopy.disabled = true;
@@ -240,10 +250,10 @@ export const QueueDiscoveryModule = {
 
         btnCopy.addEventListener('click', () => {
             if (selectedVpn && selectedQueue) {
-                logger.info(`[Discovery] Requesting Open in Browser: VPN=${selectedVpn}, Queue=${selectedQueue}`);
+                log.info(`Requesting open in browser: vpn=${selectedVpn} queue=${selectedQueue}`);
                 eventBus.emit('connection:check-connection', { vpn: selectedVpn, queue: selectedQueue });
             } else {
-                alert('Please select a VPN and Queue first.');
+                showToast('Select a Message VPN and a queue first.', 'warn');
             }
         });
 
@@ -269,7 +279,10 @@ export const QueueDiscoveryModule = {
                 } else {
                     // SEMP disconnect invalidates the discovery cache — on
                     // reconnect the user might point at a different broker, or
-                    // the same broker after a VPN/queue topology change.
+                    // the same broker after a VPN/queue topology change. A fetch
+                    // still in flight is the old broker's: it must not land.
+                    fetchVpnsGen++;
+                    fetchQueuesGen++;
                     vpnCache = null;
                     queueCache.clear();
                     selectedVpn = null;
@@ -280,6 +293,6 @@ export const QueueDiscoveryModule = {
             }
         });
 
-        logger.info('Queue Discovery Module Setup Complete');
+        log.info('Module setup complete');
     }
 };

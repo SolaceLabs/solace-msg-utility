@@ -1,20 +1,23 @@
 import { getOriginalIdHint } from './service';
 import { msgIdToString, compareMsgIds } from './service-verify';
 import { logger } from '../../core/logger';
+import { solaceErrorText } from '../../core/utils';
 import {
     IDLE_TIMEOUT_MS,
     PUBLISH_CONCURRENCY_HIGH,
     PUBLISH_CONCURRENCY_LOW,
 } from './constants';
+import { destTargetKey } from './state';
 import type { CopyJob, QueueCopyState } from './state';
+import type { SolacePublisher } from '../../core/services/solace-publisher';
 
 declare const solace: any;
 
 /**
- * Re-export from ./constants so test files importing these names from
- * `./service-copy` continue to work. The value definitions live in
+ * Re-exported for callers of the copy engine that size against its limits
+ * (the demo's copy-flow test). The value definitions live in
  * [`./constants.ts`](./constants.ts) — single source of truth, kept in sync
- * with the mock build. Full semantic docstrings (idle behavior, backpressure
+ * with the demo build. Full semantic docstrings (idle behavior, backpressure
  * hysteresis rationale, SDK publish-window context) stay below at the use
  * sites where they're most relevant.
  */
@@ -55,6 +58,19 @@ export interface CopyHooks {
 }
 
 /**
+ * The publisher the form names. This VPN (the source's own) publishes through the
+ * primary session; any other destination only through a destination session
+ * connected for the destination the form names now -- never through whichever
+ * session happens to exist, such as one whose connect landed after the user
+ * changed the target. Null when there is no such publisher.
+ */
+export function selectPublisher(state: QueueCopyState): SolacePublisher | null {
+    const f = state.destForm;
+    if (f.sameBroker && f.sameVpn) return state.primaryPublisher;
+    return state.destSessionTarget === destTargetKey(f) ? state.destPublisher : null;
+}
+
+/**
  * Run a copy/move job from the primary broker's source queue to the configured
  * destination.
  *
@@ -80,15 +96,14 @@ export interface CopyHooks {
  *
  * **Per-message remove (move mode):** `browser.removeMessageFromQueue(msg)`
  * is called inside the MESSAGE handler immediately after the publish ACK
- * lands — not batched at end-of-run. This matches the original behavior and
- * is preserved by the refactor.
+ * lands -- not batched at end-of-run.
  */
 export function runCopyJob(
     state: QueueCopyState,
     primarySession: any,
     hooks: CopyHooks,
 ): Promise<void> {
-    const publisher = state.destPublisher ?? state.primaryPublisher;
+    const publisher = selectPublisher(state);
     // The modal gates `runCopyJob` invocation on a populated verify result
     // with `sourceOk && messageCount > 0` (see `ui-modal.ts handleModalStart`),
     // so `state.verify.result` and `messageCount` are provably non-null here.
@@ -109,18 +124,12 @@ export function runCopyJob(
         `[Copy] runCopyJob start — mode=${state.mode} queue="${state.sourceQueue}" ` +
         `dest=${state.dest.type}:"${state.dest.name}" total=${total} ` +
         `oldestMsgId=${recordedOldestId ?? '(none)'} maxMsgId=${maxMsgId ?? '(none)'} ` +
-        `publisher=${publisher ? (state.destPublisher ? 'dest' : 'primary') : 'NULL'}`,
+        `publisher=${publisher ? (publisher === state.primaryPublisher ? 'primary' : 'dest') : 'NULL'}`,
     );
 
     return new Promise<void>((resolve) => {
         // Phase-1 state — drive the stop sequence.
         let stopReason: StopReason | null = null;
-        // `drainStarted` declaration commented for parity with the re-entry
-        // guard inside triggerStop (search for "Re-entry guard kept commented").
-        // let drainStarted = false;
-        // `finished` declaration commented for parity with the idempotency
-        // guard inside evaluateAndFinish (search for "Idempotency guard kept commented").
-        // let finished = false;
         let firstMessageSeen = false;
         // True once the MESSAGE event for `maxMsgId` has been observed
         // (synchronously, before its publish.send await). Used by the
@@ -161,13 +170,9 @@ export function runCopyJob(
          * resolves the outer Promise. Exactly one firing.
          */
         const evaluateAndFinish = (): void => {
-            // Idempotency guard kept commented in case a future call-site adds
-            // a direct invocation. Currently unreachable: every triggerStop
-            // path funnels through `drainAndFinish` which only fires once
-            // because `drainStarted` gates it. See the `let finished`
-            // declaration above (also commented for parity).
-            // if (finished) return;
-            // finished = true;
+            // Runs once: its callers are the paths that end the run before a
+            // browser exists, and drainAndFinish, which triggerStop's
+            // first-wins guard schedules once.
 
             // Cancel always upgrades the final classification — if the user
             // cancelled at any point, the run is reported as cancelled even
@@ -246,7 +251,18 @@ export function runCopyJob(
             name: state.sourceQueue,
             type: solace.QueueType.QUEUE,
         });
-        browser = primarySession.createQueueBrowser(props);
+        try {
+            browser = primarySession.createQueueBrowser(props);
+        } catch (e) {
+            // e.g. the managed entitlement wrapper refusing the queue, or the
+            // SDK refusing a session that is going down: end the run with the
+            // reason instead of rejecting with the modal stuck on "Copying...".
+            state.job!.lastError = solaceErrorText(e, 'Could not open the source queue.');
+            stopReason = 'browser-error';
+            logger.error(`[Copy] createQueueBrowser threw: ${state.job!.lastError}`);
+            queueMicrotask(() => evaluateAndFinish());
+            return;
+        }
         logger.debug(`[Copy] Source QueueBrowser created for "${state.sourceQueue}"`);
 
         /**
@@ -278,20 +294,12 @@ export function runCopyJob(
                 logger.debug('[Copy] rejectAllPending — cancel');
                 publisher.rejectAllPending('Cancelled');
             }
-            // Re-entry guard kept commented in case future code reordering
-            // allows triggerStop re-entry. Currently unreachable: the
-            // `stopReason !== null` early-return at the top of triggerStop
-            // short-circuits any re-entry, so `drainStarted` would always be
-            // false at this point. See the `let drainStarted` declaration
-            // above (also commented for parity).
-            // if (!drainStarted) {
-            //     drainStarted = true;
-            // Defer to a microtask so a synchronous cancelRequested-set
-            // immediately after the triggering event (e.g. test code
-            // setting it on the next line after fireDown) is visible to
-            // evaluateAndFinish when the drain reaches it.
+            // Scheduled at most once: the first-wins guard above returns on any
+            // later call. Deferred to a microtask so a synchronous
+            // cancelRequested-set immediately after the triggering event (e.g.
+            // test code setting it on the next line after fireDown) is visible
+            // to evaluateAndFinish when the drain reaches it.
             queueMicrotask(() => void drainAndFinish());
-            // }
         };
 
         /**
@@ -318,15 +326,13 @@ export function runCopyJob(
         const resetIdleTimer = (): void => {
             if (idleTimer !== null) clearTimeout(idleTimer);
             idleTimer = setTimeout(() => {
-                // Race guards kept commented in case future timer-management
-                // changes allow the timer to fire after a stop or with
-                // in-flight publishes. Currently unreachable: the
-                // pause-suspension fix clears the timer when entering pause,
-                // and triggerStop clears it on any stop reason, so by the
-                // time this callback fires `stopReason === null` and
-                // `inFlight === 0` is the only reachable state.
-                // if (stopReason !== null) return;
-                // if (inFlight > 0) { resetIdleTimer(); return; }
+                // triggerStop clears this timer, so it never fires after a stop.
+                // A quiet source with acks still pending is not idle yet: the
+                // ack timeout matches IDLE_TIMEOUT_MS, and stopping now would
+                // disconnect the browser a late ack in move mode needs to
+                // remove its message. Each settling publish re-arms this timer
+                // (the finally block below) or stops the run.
+                if (inFlight > 0) return;
                 triggerStop('idle');
             }, IDLE_TIMEOUT_MS);
         };
@@ -336,21 +342,18 @@ export function runCopyJob(
             resetIdleTimer();
         });
         browser.on(solace.QueueBrowserEventName.CONNECT_FAILED_ERROR, (e: any) => {
-            state.job!.lastError = e?.infoStr ?? 'Browser connect failed';
-            logger.error(`[Copy] Source QueueBrowser CONNECT_FAILED_ERROR: ${state.job!.lastError}`);
+            // OperationError carries the reason on `.message`, not `infoStr`.
+            // First stop reason wins: a later browser event must not overwrite it.
+            if (stopReason === null) state.job!.lastError = solaceErrorText(e, 'Browser connect failed');
+            logger.error(`[Copy] Source QueueBrowser CONNECT_FAILED_ERROR: ${solaceErrorText(e, 'Browser connect failed')}`);
             triggerStop('browser-error');
         });
         browser.on(solace.QueueBrowserEventName.DOWN_ERROR, (e: any) => {
-            state.job!.lastError = e?.infoStr ?? 'Browser disconnected';
-            logger.error(`[Copy] Source QueueBrowser DOWN_ERROR: ${state.job!.lastError}`);
+            // First stop reason wins: a later browser event must not overwrite it.
+            if (stopReason === null) state.job!.lastError = solaceErrorText(e, 'Browser disconnected');
+            logger.error(`[Copy] Source QueueBrowser DOWN_ERROR: ${solaceErrorText(e, 'Browser disconnected')}`);
             triggerStop('browser-error');
         });
-        // GM_DISABLED registered for SDK-event-code-validation parity
-        // (createBrowserMock in tests/setup.ts throws on unknown event codes).
-        // No-op — any actual failure surfaces via DOWN_ERROR or the next
-        // publish failure. Covered by the `GM_DISABLED is a no-op` test.
-        browser.on(solace.QueueBrowserEventName.GM_DISABLED, () => { /* no-op */ });
-
         browser.on(solace.QueueBrowserEventName.MESSAGE, async (msg: any) => {
             if (stopReason !== null) {
                 logger.debug(`[Copy] MESSAGE arrived after stop (${stopReason}) — ignored`);
@@ -363,8 +366,8 @@ export function runCopyJob(
             }
 
             const msgId = msgIdToString(msg);
-            // Template-literal coercion renders a null msgId as 'null' — fine
-            // for a debug log; the `?? '(no-id)'` fallback was cosmetic.
+            // Template-literal coercion renders a null msgId as 'null', which
+            // is fine for a debug log.
             logger.debug(`[Copy] MESSAGE received id=${msgId} inFlight=${inFlight}`);
 
             // First-message drift check — strictly synchronous (before any
@@ -438,9 +441,8 @@ export function runCopyJob(
             if (!browserPaused && inFlight >= PUBLISH_CONCURRENCY_HIGH) {
                 browserPaused = true;
                 try { browser.stop(); } catch { /* swallow — best-effort */ }
-                // clearTimeout silently ignores null/undefined; the guard
-                // (idleTimer !== null) was purely cosmetic — every pause path
-                // is reached via a MESSAGE that already called resetIdleTimer.
+                // Every pause path is reached via a MESSAGE that already
+                // called resetIdleTimer, so the timer is set here.
                 clearTimeout(idleTimer!);
                 idleTimer = null;
                 logger.debug(`[Copy] backpressure: pausing source browser at inFlight=${inFlight} (idle timer suspended)`);
@@ -482,10 +484,8 @@ export function runCopyJob(
                         try {
                             browser.removeMessageFromQueue(msg);
                             logger.debug(`[Copy] removeMessageFromQueue id=${msgId} (move mode)`);
-                        } catch (e: any) {
-                            // Template-literal coercion renders an absent
-                            // .message as 'undefined' — adequate for a warn log.
-                            logger.warn(`[Copy] removeMessageFromQueue for id=${msgId} threw: ${e?.message}`);
+                        } catch (e) {
+                            logger.warn(`[Copy] removeMessageFromQueue for id=${msgId} threw: ${solaceErrorText(e, 'no reason given')}`);
                         }
                     } else {
                         logger.debug(`[Copy] skipping removeMessageFromQueue id=${msgId} — browser already disconnected`);
@@ -549,8 +549,8 @@ export function runCopyJob(
             logger.debug(`[Copy] Connecting source QueueBrowser to "${state.sourceQueue}"`);
             browser.connect();
             resetIdleTimer();
-        } catch (e: any) {
-            state.job!.lastError = e?.message ?? 'Failed to start copy browser.';
+        } catch (e) {
+            state.job!.lastError = solaceErrorText(e, 'Failed to start copy browser.');
             logger.error(`[Copy] browser.connect() threw: ${state.job!.lastError}`);
             triggerStop('browser-error');
         }

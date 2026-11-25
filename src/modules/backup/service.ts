@@ -1,0 +1,96 @@
+/**
+ * Backup & Restore service -- the gateway's `/managed/backup*` API
+ * (go-web-proxy/backup_api.go), authenticated by the session cookie (see
+ * `src/core/services/managed-api.ts`).
+ *
+ * Versions: the schedule carries a `rev` (0 when there is none) that a save or
+ * delete sends back, and a preview carries a `basis` (opaque to this page) that
+ * the import sends back untouched. The gateway refuses either once the data has
+ * moved on (`stale`).
+ */
+import { managedRequest } from '../../core/services/managed-api';
+
+export type ScheduleKind = 'hourly' | 'daily' | 'weekly' | 'monthly';
+
+/** When scheduled backups run, in UTC. A field the kind does not use is 0. */
+export interface BackupSchedule {
+    kind: ScheduleKind;
+    minute: number;
+    hour: number;
+    /** 0 (Sunday) to 6: weekly only. */
+    weekday: number;
+    /** 1 to 31: monthly only; a shorter month runs on its last day. */
+    day: number;
+}
+
+export interface BackupFile {
+    name: string;
+    size: number;
+    /** RFC 3339, UTC. */
+    created: string;
+}
+
+/** The GET /managed/backup body. */
+export interface BackupStatus {
+    schedule: (BackupSchedule & { keep: number; rev: number }) | null;
+    nextRun: string | null;
+    lastRun: { at: string; file: string; error: string } | null;
+    /** Why the gateway cannot write to its backup directory; "" when it can. */
+    dirProblem: string;
+    /** Newest first. */
+    files: BackupFile[];
+}
+
+export interface NameDiff {
+    added: string[];
+    changed: string[];
+    removed: string[];
+}
+
+/** The POST /managed/backup/preview body. */
+export interface ImportPreview {
+    created: string;
+    gateway: string;
+    users: NameDiff;
+    connections: NameDiff;
+    /** Settings keys an import would change. */
+    settings: string[];
+    /** Whether importing the users that way ends the requester's own session. */
+    signsOutCaller: { replace: boolean; merge: boolean };
+    /** The versions of the gateway's data this preview was made against; opaque, sent back with the import. */
+    basis: unknown;
+}
+
+/** A file to import: its content, or the name of a saved backup. */
+export type ImportSource = { file: string } | { backup: string };
+
+export type SectionChoice = 'replace' | 'merge' | 'skip';
+
+export interface ImportChoices {
+    users: SectionChoice;
+    connections: SectionChoice;
+    settings: 'replace' | 'skip';
+}
+
+export interface ImportResult {
+    signedOut: boolean;
+}
+
+export function createBackupService() {
+    return {
+        status: () => managedRequest<BackupStatus>('GET', '/managed/backup'),
+        /** A saved backup as written, still sealed with its schedule's passphrase. */
+        download: (name: string) => managedRequest<{ filename: string; content: string }>('GET', `/managed/backup/files/${encodeURIComponent(name)}`),
+        /** `passphrase` "" keeps the current schedule's; `rev` is the schedule's (0 when there is none). Answers the new rev. */
+        saveSchedule: (s: BackupSchedule & { keep: number; passphrase: string; rev: number }) => managedRequest<{ rev: number }>('PUT', '/managed/backup/schedule', s),
+        removeSchedule: (rev: number) => managedRequest('DELETE', `/managed/backup/schedule?rev=${rev}`),
+        runNow: () => managedRequest<{ file: string }>('POST', '/managed/backup/run'),
+        exportFile: (passphrase: string) => managedRequest<{ filename: string; content: string }>('POST', '/managed/backup/export', { passphrase }),
+        preview: (source: ImportSource, passphrase: string) => managedRequest<ImportPreview>('POST', '/managed/backup/preview', { ...source, passphrase }),
+        /** `basis` is the preview's, sent untouched. */
+        importFile: (source: ImportSource, passphrase: string, choices: ImportChoices, basis: unknown) =>
+            managedRequest<ImportResult>('POST', '/managed/backup/import', { ...source, passphrase, ...choices, basis }),
+    };
+}
+
+export type BackupService = ReturnType<typeof createBackupService>;

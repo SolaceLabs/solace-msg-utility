@@ -1,0 +1,409 @@
+/* About module -- the About card and the manual of the Help tab (the tab strip
+ * is the design system's `.tabs`). Two prefixes, both this module's:
+ * `.about-*` for the page, and
+ * `.manual-*` for the manual: its frame here, and the parts a chapter
+ * (src/modules/<id>/help.html) is written with. docs/developer-guide.md lists
+ * those parts. */
+
+/* ---------- The page ---------- */
+.about-card {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 2.5rem 3rem;
+    line-height: 1.7;
+}
+
+.about-title {
+    margin: 0 0 1rem;
+    color: var(--solace-dark-blue);
+}
+
+.about-facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.5rem 1.5rem;
+    margin: 1.5rem 0 0;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.about-facts dt {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.about-facts dd {
+    margin: 0;
+}
+
+.about-card a,
+.manual-sheet a {
+    color: var(--accent-secondary);
+}
+
+/* ---------- The manual: Contents beside one sheet of paper ---------- */
+.manual {
+    display: grid;
+    grid-template-columns: 250px minmax(0, 860px);
+    gap: 2rem;
+    align-items: start;
+    justify-content: center;
+}
+
+.manual-contents {
+    position: sticky;
+    top: 0;
+    max-height: calc(100vh - var(--header-height) - 4rem);
+    overflow-y: auto;
+    padding-right: 0.5rem;
+}
+
+.manual-contents-title {
+    margin-bottom: 0.75rem;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.manual-contents-list,
+.manual-contents-sections {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.manual-contents-chapter,
+.manual-contents-section {
+    display: block;
+    width: 100%;
+    padding: 0.35rem 0.6rem;
+    border: 0;
+    border-left: 3px solid transparent;
+    background: none;
+    color: var(--text-primary);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.manual-contents-chapter {
+    font-weight: 600;
+}
+
+.manual-contents-section {
+    padding-left: 1.4rem;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.manual-contents-chapter:hover,
+.manual-contents-section:hover {
+    color: var(--accent-secondary);
+}
+
+/* Only the chapter that is open lists its sections. */
+.manual-contents-sections {
+    display: none;
+    margin-bottom: 0.5rem;
+}
+
+.is-current > .manual-contents-sections {
+    display: block;
+}
+
+.is-current > .manual-contents-chapter {
+    border-left-color: var(--accent-primary);
+    color: var(--solace-dark-blue);
+}
+
+/* The section the reader has scrolled to. */
+.is-reading > .manual-contents-section {
+    border-left-color: var(--accent-primary);
+    background: #ecfdf5;
+    color: var(--solace-dark-blue);
+    font-weight: 600;
+}
+
+/* The bottom padding is the least the sheet has: module.ts sets the blank the
+ * sheet ends in, as tall as the part of the window below the reading line. */
+.manual-sheet {
+    padding: 3.5rem 4rem 3rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: #ffffff;
+    box-shadow: var(--shadow-md);
+    color: #1f2937;
+    line-height: 1.7;
+    scroll-margin-top: 1rem;
+}
+
+.manual-pager {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.manual-colophon {
+    margin: 2rem 0 0;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+/* ---------- The parts of a chapter ---------- */
+.manual-chapter {
+    counter-reset: manual-figure;
+}
+
+.manual-chapter::before {
+    content: "Chapter " attr(data-number);
+    display: block;
+    color: var(--accent-secondary);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.manual-chapter h2 {
+    margin: 0.25rem 0 1.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 3px solid var(--accent-primary);
+    color: var(--solace-dark-blue);
+    font-size: 2rem;
+    line-height: 1.25;
+}
+
+.manual-chapter h3 {
+    margin: 3rem 0 1rem;
+    padding-left: 0.75rem;
+    border-left: 4px solid var(--accent-primary);
+    color: var(--solace-dark-blue);
+    font-size: 1.35rem;
+    line-height: 1.3;
+    scroll-margin-top: 1rem;
+}
+
+.manual-chapter h4 {
+    margin: 2rem 0 0.5rem;
+    color: var(--solace-dark-blue);
+    font-size: 1.05rem;
+}
+
+.manual-chapter p {
+    margin: 0 0 1rem;
+}
+
+.manual-lead {
+    color: #475569;
+    font-size: 1.15rem;
+    line-height: 1.6;
+}
+
+.manual-chapter ul,
+.manual-chapter ol {
+    margin: 0 0 1rem;
+    padding-left: 1.5rem;
+}
+
+.manual-chapter li {
+    margin-bottom: 0.4rem;
+}
+
+.manual-chapter li > ul,
+.manual-chapter li > ol {
+    margin-top: 0.4rem;
+}
+
+/* Steps the reader follows in order, and the numbered legend of a figure:
+   the number sits in a disc, as the callouts in the figure do. */
+.manual-chapter ol.manual-steps,
+.manual-chapter ol.manual-callouts {
+    padding-left: 0;
+    list-style: none;
+    counter-reset: manual-item;
+}
+
+.manual-steps > li,
+.manual-callouts > li {
+    position: relative;
+    counter-increment: manual-item;
+}
+
+.manual-steps > li {
+    min-height: 2rem;
+    margin-bottom: 0.9rem;
+    padding-left: 3rem;
+}
+
+.manual-callouts > li {
+    margin-bottom: 0.5rem;
+    padding-left: 2.25rem;
+}
+
+.manual-steps > li::before,
+.manual-callouts > li::before {
+    content: counter(manual-item);
+    position: absolute;
+    left: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.manual-steps > li::before {
+    top: -0.1rem;
+    width: 2rem;
+    height: 2rem;
+    background: var(--accent-secondary);
+}
+
+.manual-callouts > li::before {
+    top: 0.15rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    background: var(--solace-dark-blue);
+    font-size: 0.8rem;
+}
+
+.manual-figure {
+    margin: 2rem 0;
+    counter-increment: manual-figure;
+    text-align: center;
+}
+
+.manual-figure img {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+}
+
+.manual-figure figcaption {
+    margin-top: 0.6rem;
+    color: #475569;
+    font-size: 0.9rem;
+    font-style: italic;
+}
+
+.manual-figure figcaption::before {
+    content: "Figure " counter(manual-figure) ". ";
+    font-style: normal;
+    font-weight: 700;
+}
+
+/* A boxed aside. Its kind names it: the label is drawn here, not written in the chapter. */
+.manual-note {
+    margin: 1.5rem 0;
+    padding: 0.9rem 1.1rem;
+    border-left: 4px solid #3b82f6;
+    border-radius: 0 6px 6px 0;
+    background: #eff6ff;
+}
+
+.manual-note::before {
+    content: "Note";
+    display: block;
+    margin-bottom: 0.25rem;
+    color: #1d4ed8;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.manual-note[data-kind="tip"] {
+    border-left-color: var(--accent-primary);
+    background: #ecfdf5;
+}
+
+.manual-note[data-kind="tip"]::before {
+    content: "Tip";
+    color: #047857;
+}
+
+.manual-note[data-kind="important"] {
+    border-left-color: #8b5cf6;
+    background: #f5f3ff;
+}
+
+.manual-note[data-kind="important"]::before {
+    content: "Important";
+    color: #6d28d9;
+}
+
+.manual-note[data-kind="warning"] {
+    border-left-color: var(--status-warning);
+    background: #fffbeb;
+}
+
+.manual-note[data-kind="warning"]::before {
+    content: "Warning";
+    color: #b45309;
+}
+
+.manual-note > :last-child {
+    margin-bottom: 0;
+}
+
+.manual-chapter table {
+    width: 100%;
+    margin: 0 0 1.5rem;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+}
+
+.manual-chapter th,
+.manual-chapter td {
+    padding: 0.6rem 0.8rem;
+    border: 1px solid var(--border-color);
+    text-align: left;
+    vertical-align: top;
+}
+
+.manual-chapter th {
+    background: #f1f5f9;
+    color: var(--solace-dark-blue);
+}
+
+.manual-chapter code {
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    background: #f1f5f9;
+    font-size: 0.9em;
+}
+
+.manual-chapter pre {
+    margin: 0 0 1rem;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    border-radius: 6px;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+.manual-chapter pre code {
+    padding: 0;
+    background: none;
+    font-size: inherit;
+}
+
+.manual-chapter kbd {
+    display: inline-block;
+    padding: 0.05rem 0.45rem;
+    border: 1px solid #cbd5e1;
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: #f8fafc;
+    font-family: inherit;
+    font-size: 0.85em;
+    font-weight: 600;
+}

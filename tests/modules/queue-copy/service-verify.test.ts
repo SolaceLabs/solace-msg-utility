@@ -8,6 +8,7 @@ import {
     normalizeAccessType,
 } from '../../../src/modules/queue-copy/service-verify';
 import { createSessionMock, createBrowserMock } from '../../setup';
+import { managedErrorMessage } from '../../../src/core/services/managed-api';
 import type { SempContext } from '../../../src/core/connections/types';
 import type { VerifyResult } from '../../../src/modules/queue-copy/state';
 
@@ -165,7 +166,7 @@ describe('queue-copy/service-verify', () => {
             // wire URL from the connection-form values and applies hosted-mode
             // routing. The test's SempContext.fetch stub stands in for that
             // closure, so the assertion checks the path the service hands in.
-            const fetchImpl = vi.fn(async () => textRes(SAMPLE_RESPONSE));
+            const fetchImpl = vi.fn(async (_path: string, _init?: RequestInit) => textRes(SAMPLE_RESPONSE));
             const ctx = makeSempCtx(fetchImpl);
 
             const result = await verifySource({
@@ -188,7 +189,7 @@ describe('queue-copy/service-verify', () => {
         });
 
         it('uses vpn-name="*" when caller passes empty vpn', async () => {
-            const fetchImpl = vi.fn(async () => textRes(SAMPLE_RESPONSE));
+            const fetchImpl = vi.fn(async (_path: string, _init?: RequestInit) => textRes(SAMPLE_RESPONSE));
             await verifySource({
                 sempCtx: makeSempCtx(fetchImpl), primarySession: createSessionMock(),
                 vpn: '', queue: 'q', signal: new AbortController().signal,
@@ -198,7 +199,7 @@ describe('queue-copy/service-verify', () => {
         });
 
         it('escapes XML special characters in queue and VPN names', async () => {
-            const fetchImpl = vi.fn(async () => textRes(SAMPLE_RESPONSE));
+            const fetchImpl = vi.fn(async (_path: string, _init?: RequestInit) => textRes(SAMPLE_RESPONSE));
             await verifySource({
                 sempCtx: makeSempCtx(fetchImpl), primarySession: createSessionMock(),
                 vpn: 'a&b', queue: '<q>"x"', signal: new AbortController().signal,
@@ -234,7 +235,17 @@ describe('queue-copy/service-verify', () => {
                 sempCtx: makeSempCtx(fetchImpl), primarySession: createSessionMock(),
                 vpn: 'v', queue: 'q', signal: new AbortController().signal,
             });
-            expect(result.errors[0]).toBe('SEMP v1 returned 503');
+            expect(result.errors[0]).toBe('SEMP v1 returned an error (HTTP 503)');
+        });
+
+        it("a relay refusal surfaces the gateway's reason, as every SEMP caller does", async () => {
+            const refusal = new Response(JSON.stringify({ error: 'read_only' }), { status: 403 });
+            const result = await verifySource({
+                sempCtx: makeSempCtx(vi.fn(async () => refusal)), primarySession: createSessionMock(),
+                vpn: 'v', queue: 'q', signal: new AbortController().signal,
+            });
+            expect(result.sourceOk).toBe(false);
+            expect(result.errors[0]).toBe(managedErrorMessage({ ok: false, status: 403, code: 'read_only' }));
         });
 
         it('aborts before fetch when signal already aborted', async () => {
@@ -259,7 +270,10 @@ describe('queue-copy/service-verify', () => {
                 sempCtx: makeSempCtx(fetchImpl), primarySession: createSessionMock(),
                 vpn: 'v', queue: 'q', signal: ctrl.signal,
             });
+            // The post-fetch abort check cancels verify before the supplementary call.
+            expect(result.sourceOk).toBe(false);
             expect(result.errors).toContain('Verification cancelled.');
+            expect(fetchImpl).toHaveBeenCalledTimes(1);
         });
 
         it('catches AbortError thrown by fetch', async () => {
@@ -440,34 +454,6 @@ describe('queue-copy/service-verify', () => {
             expect(result.newestMsgId).toBeNull();
         });
 
-        it('supplementary DOMParser throw → newestMsgId null', async () => {
-            const fetchImpl = vi.fn()
-                .mockResolvedValueOnce(textRes(SAMPLE_RESPONSE))
-                .mockResolvedValueOnce(textRes('<x/>'));
-            const orig = (globalThis as any).DOMParser;
-            // Real DOMParser must run on the detail-call parseSempV1Response;
-            // the throw needs to land only on the SECOND parseFromString call.
-            let callCount = 0;
-            class FlakyParser {
-                parseFromString(xml: string, mime: string): any {
-                    callCount += 1;
-                    if (callCount === 2) throw new Error('parser bomb');
-                    return new orig().parseFromString(xml, mime);
-                }
-            }
-            (globalThis as any).DOMParser = FlakyParser;
-            try {
-                const result = await verifySource({
-                    sempCtx: makeSempCtx(fetchImpl), primarySession: createSessionMock(),
-                    vpn: 'v', queue: 'q', signal: new AbortController().signal,
-                });
-                expect(result.sourceOk).toBe(true);
-                expect(result.newestMsgId).toBeNull();
-            } finally {
-                (globalThis as any).DOMParser = orig;
-            }
-        });
-
         it('supplementary <message-id> is non-numeric → newestMsgId null (defensive)', async () => {
             const garbageId = `<rpc-reply><rpc><show><queue><queues><queue><spooled-messages>` +
                 `<spooled-message><message-id>not-a-number</message-id></spooled-message>` +
@@ -498,25 +484,6 @@ describe('queue-copy/service-verify', () => {
             });
             expect(result.sourceOk).toBe(true);
             expect(result.newestMsgId).toBeNull();
-        });
-
-        it('signal aborted between the two calls → supplementary not issued, cancelled', async () => {
-            const ctrl = new AbortController();
-            // Abort INSIDE the first fetch's resolver so the post-detail
-            // signal.aborted check fires before the supplementary call.
-            const fetchImpl = vi.fn(async () => {
-                ctrl.abort();
-                return textRes(SAMPLE_RESPONSE);
-            });
-            const result = await verifySource({
-                sempCtx: makeSempCtx(fetchImpl), primarySession: createSessionMock(),
-                vpn: 'v', queue: 'q', signal: ctrl.signal,
-            });
-            // The first-call's post-fetch abort check fires first, so verify
-            // is cancelled there — supplementary never runs.
-            expect(result.sourceOk).toBe(false);
-            expect(result.errors).toContain('Verification cancelled.');
-            expect(fetchImpl).toHaveBeenCalledTimes(1);
         });
 
         it('signal aborted between detail-parse and supplementary call', async () => {
@@ -749,6 +716,40 @@ describe('queue-copy/service-verify', () => {
             vi.useRealTimers();
         });
 
+        it('keeps counting past the 10 s bind window once bound: a deep queue settles with its full count', async () => {
+            vi.useFakeTimers();
+            const promise = verifySource({
+                sempCtx: null, primarySession: session,
+                vpn: '', queue: 'q', signal: new AbortController().signal,
+            });
+            await Promise.resolve();
+            (browser as any)._handlers.UP();
+            // A message every second for 12 s: the idle window never closes
+            // and the bind deadline passes while still accumulating.
+            for (let i = 0; i < 12; i++) {
+                (browser as any)._handlers.MESSAGE({ smfHeader: { messageLength: 10 } });
+                await vi.advanceTimersByTimeAsync(1_000);
+            }
+            await vi.advanceTimersByTimeAsync(ACCUMULATE_IDLE_MS);
+            const result = await promise;
+            expect(result.sourceOk).toBe(true);
+            expect(result.errors).toEqual([]);
+            expect(result.messageCount).toBe(12);
+            vi.useRealTimers();
+        });
+
+        it('a createQueueBrowser throw resolves a failed verify result with the reason', async () => {
+            (session.createQueueBrowser as any).mockImplementation(() => {
+                throw new Error('You are not entitled to browse queue "q".');
+            });
+            const result = await verifySource({
+                sempCtx: null, primarySession: session,
+                vpn: '', queue: 'q', signal: new AbortController().signal,
+            });
+            expect(result.sourceOk).toBe(false);
+            expect(result.errors).toEqual(['You are not entitled to browse queue "q".']);
+        });
+
         it('hard timeout after UP is a no-op (idle takes over)', async () => {
             vi.useFakeTimers();
             const promise = verifySource({
@@ -779,21 +780,6 @@ describe('queue-copy/service-verify', () => {
                 vpn: '', queue: 'q', signal: new AbortController().signal,
             });
             expect(result.errors[0]).toBe('Failed to start verification probe.');
-        });
-
-        it('GM_DISABLED during accumulation is a no-op', async () => {
-            vi.useFakeTimers();
-            const promise = verifySource({
-                sempCtx: null, primarySession: session,
-                vpn: '', queue: 'q', signal: new AbortController().signal,
-            });
-            await Promise.resolve();
-            (browser as any)._handlers.UP();
-            (browser as any)._handlers.GM_DISABLED();
-            await vi.advanceTimersByTimeAsync(ACCUMULATE_IDLE_MS);
-            const result = await promise;
-            expect(result.sourceOk).toBe(true);
-            vi.useRealTimers();
         });
 
         it('disconnect during cleanup is swallowed when it throws', async () => {
@@ -828,38 +814,6 @@ describe('queue-copy/service-verify', () => {
         });
     });
 
-    describe('parseSempV1Response — DOMParser exception path', () => {
-        // The try/catch around `new DOMParser().parseFromString()` covers the
-        // (unlikely-but-possible) case where the parser itself throws rather
-        // than embedding a `<parsererror>` node in the result. We force this
-        // by stubbing DOMParser globally for the duration of the test.
-        it('parser throw is reported as a SEMP v1 parse error', () => {
-            const orig = (globalThis as any).DOMParser;
-            class ThrowingParser { parseFromString() { throw new Error('boom'); } }
-            (globalThis as any).DOMParser = ThrowingParser;
-            try {
-                const result = parseSempV1Response('<x/>', 'q', 'v', emptyResult('semp'));
-                expect(result.sourceOk).toBe(false);
-                expect(result.errors[0]).toContain('parse error');
-                expect(result.errors[0]).toContain('boom');
-            } finally {
-                (globalThis as any).DOMParser = orig;
-            }
-        });
-
-        it('parser throw without a message falls back to "unknown"', () => {
-            const orig = (globalThis as any).DOMParser;
-            class ThrowingParser { parseFromString() { throw {}; } }
-            (globalThis as any).DOMParser = ThrowingParser;
-            try {
-                const result = parseSempV1Response('<x/>', 'q', 'v', emptyResult('semp'));
-                expect(result.errors[0]).toContain('unknown');
-            } finally {
-                (globalThis as any).DOMParser = orig;
-            }
-        });
-    });
-
     describe('msgIdToString', () => {
         it('returns the message id as a decimal string', () => {
             const msg = { getGuaranteedMessageId: () => 1234567890 };
@@ -882,10 +836,6 @@ describe('queue-copy/service-verify', () => {
             expect(msgIdToString({ getGuaranteedMessageId: () => undefined })).toBeNull();
         });
 
-        it('returns null when getGuaranteedMessageId throws', () => {
-            const msg = { getGuaranteedMessageId: () => { throw new Error('not bound'); } };
-            expect(msgIdToString(msg)).toBeNull();
-        });
     });
 
     describe('compareMsgIds', () => {
@@ -921,9 +871,9 @@ describe('queue-copy/service-verify', () => {
             await Promise.resolve();
             (browser as any)._handlers.UP();
             // Fire MESSAGEs with IDs out-of-order to prove min/max tracking
-            // (vs trusting browse order). Includes a non-numeric ID for the
-            // lexicographic fallback path. smfHeader.messageLength contributes
-            // to size accumulation.
+            // (vs trusting browse order). A message with no ID counts toward
+            // messageCount but not toward min/max. smfHeader.messageLength
+            // contributes to size accumulation.
             const m = (id: any, len = 100) => ({
                 getGuaranteedMessageId: () => id,
                 smfHeader: { messageLength: len },

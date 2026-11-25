@@ -1,0 +1,123 @@
+/* Certificates module styles. Module-prefixed (.tls-*) so they never collide in
+ * the shared (inlined) cascade. Shipped only in the admin app and the
+ * Provisioned demo. Cards stack full width; only the key pair sits in columns. */
+
+.tls-hint {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin: 0.25rem 0 0.75rem;
+}
+
+.tls-details {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.35rem 1rem;
+    margin: 0 0 0.75rem;
+    font-size: 0.9rem;
+}
+
+.tls-details dt {
+    color: var(--text-secondary);
+}
+
+.tls-details dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.tls-names {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.tls-fingerprint {
+    font-family: monospace;
+    font-size: 0.8rem;
+}
+
+.tls-mark {
+    margin-left: 0.5rem;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.tls-mark-expired {
+    color: var(--status-error);
+}
+
+.tls-mark-soon {
+    color: var(--status-warning);
+}
+
+.tls-pair {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.75rem 1rem;
+}
+
+.tls-pem-label {
+    display: block;
+    margin-top: 0.5rem;
+}
+
+.tls-pem {
+    font-family: monospace;
+    font-size: 0.8rem;
+    resize: vertical;
+}
+
+.tls-preview {
+    border-left: 3px solid var(--status-connected);
+    padding: 0.25rem 0.75rem;
+    margin: 0 0 1rem;
+}
+
+.tls-trust-list {
+    margin: 0 0 0.5rem;
+}
+
+.tls-trust-file {
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.tls-trust-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.tls-trust-certs {
+    margin: 0.5rem 0 0;
+    padding-left: 1.25rem;
+    font-size: 0.85rem;
+}
+
+.tls-trust-certs li {
+    margin-bottom: 0.35rem;
+    overflow-wrap: anywhere;
+}
+
+.tls-trust-problem {
+    margin: 0.5rem 0 0;
+    font-size: 0.85rem;
+    color: var(--status-error);
+}
+
+.tls-name-field {
+    max-width: 360px;
+}
+
+.tls-standard-details summary {
+    cursor: pointer;
+    font-size: 0.9rem;
+}

@@ -1,0 +1,490 @@
+/**
+ * Backup & Restore Module (managed/RBAC variant, admin-only).
+ *
+ * Exports the gateway's configuration (users, connections, settings) as a
+ * passphrase-encrypted file, previews and imports one section by section,
+ * and manages the scheduled backups the gateway writes into its backup
+ * directory (go-web-proxy/backup.go, backup_api.go). Ships in the standalone
+ * `/solAdmin` app and the Provisioned demo; the id maps to `'admin'` in
+ * rbac.ts's MODULE_REQUIREMENTS, and it is never in the module catalog.
+ *
+ * The page holds no passphrase: each action sends the one typed for it, and
+ * the fields are cleared after it succeeds. Preview and import send the file
+ * (or a saved backup's name) each time. Imports only from `src/core/*` and
+ * its own service.
+ *
+ * Versions: the schedule's `rev` (0 when there is none) goes back with a save
+ * or a delete, and the preview's `basis` goes back untouched with the import.
+ * When the data moved on meanwhile the gateway answers `stale`: for the
+ * schedule a dialog with a Reload button (`src/core/admin-conflict.ts`), for an
+ * import a message asking for a new preview, with the old one cleared.
+ */
+import { required, setError } from '../../core/dom';
+import { createGate, gateOnAdminSession } from '../../core/components/module-gate';
+import { confirmDialog } from '../../core/components/confirm-dialog';
+import { downloadBlob } from '../../core/download';
+import { iconButton } from '../../core/icons';
+import { logger } from '../../core/logger';
+import { showToast } from '../../core/toast';
+import { formatBytes, formatUtc } from '../../core/utils';
+import { reportManagedFailure, SIGNED_OUT_TOAST_MS } from '../../core/services/managed-api';
+import { createSlideChoice } from '../../core/slide-choice';
+import { handleConflict, STALE_IMPORT_MESSAGE } from '../../core/admin-conflict';
+import {
+    createBackupService, type BackupSchedule, type BackupStatus, type ImportPreview, type ImportSource,
+    type NameDiff, type ScheduleKind, type SectionChoice,
+} from './service';
+import type { AppContext } from '../../core/types';
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * The gateway's cap on one import body (8 MiB). The file travels in it as a
+ * JSON string, so it is measured that way, with room left for the passphrase,
+ * the choices and the preview's basis; one that cannot fit is refused before
+ * it is sent.
+ */
+export const MAX_IMPORT_BYTES = 8 << 20;
+const IMPORT_BODY_HEADROOM = 64 << 10;
+
+const DOWNLOAD_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
+const RESTORE_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>';
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** A schedule in words: "Weekly on Monday at 02:15 UTC". */
+export function describeSchedule(s: BackupSchedule): string {
+    const at = `${pad(s.hour)}:${pad(s.minute)} UTC`;
+    switch (s.kind) {
+        case 'hourly': return `Hourly at ${pad(s.minute)} minutes past the hour`;
+        case 'daily': return `Daily at ${at}`;
+        case 'weekly': return `Weekly on ${WEEKDAYS[s.weekday]} at ${at}`;
+        default: return `Monthly on day ${s.day} at ${at}`;
+    }
+}
+
+/** One section's preview: what it adds, changes and, under Replace, removes. */
+export function diffLines(d: NameDiff, removedNote: string): string[] {
+    const lines: string[] = [];
+    if (d.added.length) lines.push(`Add: ${d.added.join(', ')}`);
+    if (d.changed.length) lines.push(`Change: ${d.changed.join(', ')}`);
+    if (d.removed.length) lines.push(`${removedNote}: ${d.removed.join(', ')}`);
+    return lines.length ? lines : ['No change.'];
+}
+
+export const BackupModule = {
+    name: 'Backup & Restore',
+    id: 'backup',
+    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>',
+
+    async install(app: AppContext) {
+        const { container, eventBus } = app;
+        const q = <T extends HTMLElement>(sel: string) => required<T>(container, sel);
+        const els = {
+            view: q<HTMLElement>('#backup-view'),
+            btnReload: q<HTMLButtonElement>('#btn-backup-reload'),
+            error: q<HTMLElement>('#backup-error'),
+            exportPass: q<HTMLInputElement>('#backup-export-pass'),
+            exportConfirm: q<HTMLInputElement>('#backup-export-confirm'),
+            exportError: q<HTMLElement>('#backup-export-error'),
+            btnExport: q<HTMLButtonElement>('#btn-backup-export'),
+            importFile: q<HTMLInputElement>('#backup-import-file'),
+            importSource: q<HTMLElement>('#backup-import-source'),
+            importPass: q<HTMLInputElement>('#backup-import-pass'),
+            importError: q<HTMLElement>('#backup-import-error'),
+            btnPreview: q<HTMLButtonElement>('#btn-backup-preview'),
+            preview: q<HTMLElement>('#backup-preview'),
+            previewMeta: q<HTMLElement>('#backup-preview-meta'),
+            choiceUsers: q<HTMLSelectElement>('#backup-choice-users'),
+            choiceConns: q<HTMLSelectElement>('#backup-choice-connections'),
+            choiceSettings: q<HTMLElement>('#backup-choice-settings'),
+            diffUsers: q<HTMLElement>('#backup-diff-users'),
+            diffConns: q<HTMLElement>('#backup-diff-connections'),
+            diffSettings: q<HTMLElement>('#backup-diff-settings'),
+            signout: q<HTMLElement>('#backup-signout'),
+            btnImport: q<HTMLButtonElement>('#btn-backup-import'),
+            dirProblem: q<HTMLElement>('#backup-dir-problem'),
+            scheduleStatus: q<HTMLElement>('#backup-schedule-status'),
+            kind: q<HTMLSelectElement>('#backup-kind'),
+            weekday: q<HTMLSelectElement>('#backup-weekday'),
+            day: q<HTMLInputElement>('#backup-day'),
+            time: q<HTMLInputElement>('#backup-time'),
+            minute: q<HTMLInputElement>('#backup-minute'),
+            keep: q<HTMLInputElement>('#backup-keep'),
+            schedPass: q<HTMLInputElement>('#backup-sched-pass'),
+            schedConfirm: q<HTMLInputElement>('#backup-sched-confirm'),
+            schedPassHint: q<HTMLElement>('#backup-sched-pass-hint'),
+            scheduleError: q<HTMLElement>('#backup-schedule-error'),
+            btnSaveSchedule: q<HTMLButtonElement>('#btn-backup-save-schedule'),
+            btnRun: q<HTMLButtonElement>('#btn-backup-run'),
+            btnRemoveSchedule: q<HTMLButtonElement>('#btn-backup-remove-schedule'),
+            rows: q<HTMLElement>('#backup-rows'),
+        };
+
+        const service = createBackupService();
+        // Settings are imported whole or not at all: a choice of two, so a slide choice.
+        const settingsChoice = createSlideChoice<'skip' | 'replace'>(els.choiceSettings, { choices: ['skip', 'replace'] });
+        const gate = createGate(container, {
+            id: 'backup-gate',
+            title: 'Administrator Sign-in Required',
+            message: 'Sign in as an administrator to back up or restore the gateway configuration.',
+        });
+
+        /** What Preview and Import send: an uploaded file's content or a saved backup's name. */
+        let source: ImportSource | null = null;
+        /** The last preview's sign-out flags, for the warning under the users choice. */
+        let signsOut: ImportPreview['signsOutCaller'] = { replace: false, merge: false };
+        /** The last preview's basis, sent back untouched with the import. */
+        let basis: unknown = null;
+        /** The rev of the schedule as last loaded: 0 when there is none. */
+        let scheduleRev = 0;
+
+        const fail = (el: HTMLElement) => (msg: string) => setError(el, msg);
+
+        // ---- status: the schedule, the directory, the saved backups ----
+
+        function showKindFields(): void {
+            const kind = els.kind.value;
+            container.querySelectorAll<HTMLElement>('[data-kinds]').forEach(group => {
+                group.classList.toggle('hidden', !(group.dataset.kinds as string).split(' ').includes(kind));
+            });
+        }
+
+        /**
+         * Shows the status. `fillForm` also writes the saved schedule into the
+         * form, with the rev it came from; without it (Back up now) the admin's
+         * unsaved edits stay, and so does the rev they were made against, so a
+         * save still answers stale if the schedule changed meanwhile.
+         */
+        function renderStatus(st: BackupStatus, fillForm: boolean): void {
+            const s = st.schedule;
+            if (fillForm) scheduleRev = s ? s.rev : 0;
+            const lines: string[] = [];
+            if (s) {
+                lines.push(`${describeSchedule(s)}; keeps the last ${s.keep}.`);
+                lines.push(`Next backup: ${formatUtc(st.nextRun as string)}.`);
+                if (fillForm) {
+                    els.kind.value = s.kind;
+                    els.weekday.value = String(s.weekday);
+                    els.day.value = String(s.day || 1);
+                    els.time.value = `${pad(s.hour)}:${pad(s.minute)}`;
+                    els.minute.value = String(s.minute);
+                    els.keep.value = String(s.keep);
+                }
+            } else {
+                lines.push('No schedule: the gateway writes no backups until you save one.');
+            }
+            const last = st.lastRun;
+            if (last) {
+                lines.push(last.error
+                    ? `Last backup, ${formatUtc(last.at)}, failed: ${last.error}`
+                    : `Last backup: ${last.file}, ${formatUtc(last.at)}.`);
+            }
+            els.scheduleStatus.textContent = lines.join(' ');
+            els.schedPassHint.textContent = s
+                ? 'Leave blank to keep the current passphrase.'
+                : 'Required: every scheduled backup is encrypted with it.';
+            els.btnRun.disabled = !s;
+            els.btnRemoveSchedule.disabled = !s;
+            els.dirProblem.textContent = st.dirProblem;
+            els.dirProblem.classList.toggle('hidden', !st.dirProblem);
+            showKindFields();
+            renderFiles(st);
+        }
+
+        function renderFiles(st: BackupStatus): void {
+            els.rows.replaceChildren();
+            if (!st.files.length) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = 4;
+                td.className = 'text-secondary';
+                td.textContent = st.dirProblem ? 'The backup directory cannot be read.' : 'No saved backups yet.';
+                tr.appendChild(td);
+                els.rows.appendChild(tr);
+                return;
+            }
+            for (const f of st.files) {
+                const tr = document.createElement('tr');
+                for (const text of [f.name, formatUtc(f.created), formatBytes(f.size)]) {
+                    const td = document.createElement('td');
+                    td.textContent = text;
+                    tr.appendChild(td);
+                }
+                const actions = document.createElement('td');
+                actions.className = 'data-table-actions';
+                actions.appendChild(iconButton(DOWNLOAD_ICON, `Download "${f.name}"`, 'backup-download', () => void downloadSaved(f.name)));
+                actions.appendChild(iconButton(RESTORE_ICON, `Restore "${f.name}"`, 'backup-restore', () => chooseSaved(f.name)));
+                tr.appendChild(actions);
+                els.rows.appendChild(tr);
+            }
+        }
+
+        async function load(fillForm = true): Promise<void> {
+            setError(els.error, null);
+            const res = await service.status();
+            if (!res.ok) {
+                reportManagedFailure(res, eventBus, fail(els.error));
+                return;
+            }
+            renderStatus(res.data, fillForm);
+        }
+
+        /** Saves a backup from the directory as it is: it opens with its schedule's passphrase. */
+        async function downloadSaved(name: string): Promise<void> {
+            setError(els.error, null);
+            const res = await service.download(name);
+            if (!res.ok) {
+                reportManagedFailure(res, eventBus, fail(els.error));
+                return;
+            }
+            downloadBlob(new Blob([res.data.content], { type: 'application/json' }), res.data.filename);
+        }
+
+        // ---- export ----
+
+        async function exportFile(): Promise<void> {
+            setError(els.exportError, null);
+            if (els.exportPass.value !== els.exportConfirm.value) {
+                setError(els.exportError, 'The passphrases do not match.');
+                return;
+            }
+            els.btnExport.disabled = true;
+            const res = await service.exportFile(els.exportPass.value);
+            els.btnExport.disabled = false;
+            if (!res.ok) {
+                reportManagedFailure(res, eventBus, fail(els.exportError));
+                return;
+            }
+            downloadBlob(new Blob([res.data.content], { type: 'application/json' }), res.data.filename);
+            els.exportPass.value = '';
+            els.exportConfirm.value = '';
+            showToast(`Exported ${res.data.filename}`, 'ok');
+        }
+
+        // ---- import ----
+
+        function setSource(next: ImportSource | null, label: string): void {
+            source = next;
+            els.importSource.textContent = label;
+            els.importSource.classList.toggle('hidden', !label);
+            els.preview.classList.add('hidden');
+            setError(els.importError, null);
+        }
+
+        async function pickFile(): Promise<void> {
+            const file = els.importFile.files?.[0];
+            if (!file) {
+                setSource(null, '');
+                return;
+            }
+            const tooLarge = `${file.name} is larger than the 8 MiB the gateway accepts in one import.`;
+            if (file.size > MAX_IMPORT_BYTES) {
+                setSource(null, '');
+                setError(els.importError, tooLarge);
+                return;
+            }
+            const text = await file.text();
+            if (new TextEncoder().encode(JSON.stringify(text)).length > MAX_IMPORT_BYTES - IMPORT_BODY_HEADROOM) {
+                setSource(null, '');
+                setError(els.importError, tooLarge);
+                return;
+            }
+            setSource({ file: text }, `File: ${file.name}`);
+        }
+
+        function chooseSaved(name: string): void {
+            els.importFile.value = '';
+            setSource({ backup: name }, `Saved backup: ${name}`);
+            els.importPass.focus();
+        }
+
+        function fillDiff(list: HTMLElement, lines: string[]): void {
+            list.replaceChildren();
+            for (const line of lines) {
+                const li = document.createElement('li');
+                li.textContent = line;
+                list.appendChild(li);
+            }
+        }
+
+        function showSignOutWarning(): void {
+            const users = els.choiceUsers.value as SectionChoice;
+            const warn = (users === 'replace' && signsOut.replace) || (users === 'merge' && signsOut.merge);
+            els.signout.classList.toggle('hidden', !warn);
+        }
+
+        async function preview(): Promise<void> {
+            setError(els.importError, null);
+            if (!source) {
+                setError(els.importError, 'Choose a backup file, or a saved backup below.');
+                return;
+            }
+            els.btnPreview.disabled = true;
+            const res = await service.preview(source, els.importPass.value);
+            els.btnPreview.disabled = false;
+            if (!res.ok) {
+                els.preview.classList.add('hidden');
+                reportManagedFailure(res, eventBus, fail(els.importError));
+                return;
+            }
+            const p = res.data;
+            els.previewMeta.textContent = `Backup made ${formatUtc(p.created)} by gateway ${p.gateway}. Choose what to import:`;
+            fillDiff(els.diffUsers, diffLines(p.users, 'Remove (Replace only)'));
+            fillDiff(els.diffConns, diffLines(p.connections, 'Remove (Replace only)'));
+            fillDiff(els.diffSettings, p.settings.length ? [`Change: ${p.settings.join(', ')}`] : ['No change.']);
+            for (const sel of [els.choiceUsers, els.choiceConns]) sel.value = 'skip';
+            settingsChoice.set('skip');
+            signsOut = p.signsOutCaller;
+            basis = p.basis;
+            showSignOutWarning();
+            els.preview.classList.remove('hidden');
+        }
+
+        async function importFile(): Promise<void> {
+            setError(els.importError, null);
+            const choices = {
+                users: els.choiceUsers.value as SectionChoice,
+                connections: els.choiceConns.value as SectionChoice,
+                settings: settingsChoice.value(),
+            };
+            const chosen = Object.entries(choices).filter(([, v]) => v !== 'skip').map(([k, v]) => `${k} (${v})`);
+            if (chosen.length && !(await confirmDialog(`Import ${chosen.join(', ')} from this backup? The gateway applies it at once.`, { confirmLabel: 'Import' }))) return;
+            els.btnImport.disabled = true;
+            const res = await service.importFile(source as ImportSource, els.importPass.value, choices, basis);
+            els.btnImport.disabled = false;
+            if (!res.ok) {
+                if (res.code === 'stale') {
+                    // The data moved on since the preview: it no longer says what the import would do.
+                    els.preview.classList.add('hidden');
+                    basis = null;
+                    setError(els.importError, STALE_IMPORT_MESSAGE);
+                    return;
+                }
+                reportManagedFailure(res, eventBus, fail(els.importError));
+                return;
+            }
+            forgetImport();
+            if (res.data.signedOut) {
+                showToast('Imported. Your own account changed: sign in again.', 'ok', SIGNED_OUT_TOAST_MS);
+                eventBus.emit('rbac:sign-out-requested');
+                return;
+            }
+            showToast('Imported', 'ok');
+            await load();
+        }
+
+        /** Forgets the loaded backup and its passphrase. */
+        function forgetImport(): void {
+            els.importFile.value = '';
+            els.importPass.value = '';
+            setSource(null, '');
+        }
+
+        // ---- schedule ----
+
+        /** The form as a schedule, or the reason it cannot be sent. */
+        function collectSchedule(): (BackupSchedule & { keep: number; passphrase: string }) | string {
+            const kind = els.kind.value as ScheduleKind;
+            const whole = (input: HTMLInputElement) => (input.value.trim() === '' ? NaN : Number(input.value));
+            const s: BackupSchedule = { kind, minute: 0, hour: 0, weekday: 0, day: 0 };
+            if (kind === 'hourly') {
+                s.minute = whole(els.minute);
+            } else {
+                const m = /^(\d{2}):(\d{2})$/.exec(els.time.value);
+                if (!m) return 'Enter a time.';
+                s.hour = Number(m[1]);
+                s.minute = Number(m[2]);
+            }
+            if (kind === 'weekly') s.weekday = Number(els.weekday.value);
+            if (kind === 'monthly') s.day = whole(els.day);
+            const keep = whole(els.keep);
+            if (![s.minute, s.day, keep].every(Number.isInteger)) return 'Enter whole numbers.';
+            if (els.schedPass.value !== els.schedConfirm.value) return 'The passphrases do not match.';
+            return { ...s, keep, passphrase: els.schedPass.value };
+        }
+
+        async function saveSchedule(): Promise<void> {
+            setError(els.scheduleError, null);
+            const body = collectSchedule();
+            if (typeof body === 'string') {
+                setError(els.scheduleError, body);
+                return;
+            }
+            els.btnSaveSchedule.disabled = true;
+            const res = await service.saveSchedule({ ...body, rev: scheduleRev });
+            els.btnSaveSchedule.disabled = false;
+            if (!res.ok) {
+                if (res.code === 'exists') {
+                    setError(els.scheduleError, 'Someone else saved a schedule since you opened this page. It is shown now; change it if you still want to.');
+                    await load();
+                    return;
+                }
+                if (await handleConflict(res, 'This schedule', load)) return;
+                reportManagedFailure(res, eventBus, fail(els.scheduleError));
+                return;
+            }
+            scheduleRev = res.data.rev;
+            els.schedPass.value = '';
+            els.schedConfirm.value = '';
+            showToast('Schedule saved', 'ok');
+            await load();
+        }
+
+        async function removeSchedule(): Promise<void> {
+            setError(els.scheduleError, null);
+            if (!(await confirmDialog('Remove the backup schedule? The saved backups stay.', { confirmLabel: 'Remove' }))) return;
+            const res = await service.removeSchedule(scheduleRev);
+            if (!res.ok) {
+                if (await handleConflict(res, 'This schedule', load)) return;
+                reportManagedFailure(res, eventBus, fail(els.scheduleError));
+                return;
+            }
+            showToast('Schedule removed', 'ok');
+            await load();
+        }
+
+        async function runNow(): Promise<void> {
+            setError(els.scheduleError, null);
+            els.btnRun.disabled = true;
+            const res = await service.runNow();
+            els.btnRun.disabled = false;
+            if (res.ok) showToast(`Backup written: ${res.data.file}`, 'ok');
+            else reportManagedFailure(res, eventBus, fail(els.scheduleError));
+            await load(false); // the last run, failed or not, and the files; the form keeps its edits
+        }
+
+        // Admin sessions only, like the other admin modules. Called at install
+        // and on an rbac:changed that changes the session.
+        const applyGate = gateOnAdminSession(app, {
+            onNoAdmin: () => {
+                // Signed out or no longer an administrator: the hidden page keeps
+                // no passphrase and no loaded backup.
+                forgetImport();
+                for (const input of [els.exportPass, els.exportConfirm, els.schedPass, els.schedConfirm]) input.value = '';
+                els.view.classList.add('hidden');
+                gate.show();
+            },
+            onAdmin: () => {
+                gate.hide();
+                els.view.classList.remove('hidden');
+                void load();
+            },
+        });
+
+        els.btnReload.addEventListener('click', () => void load());
+        els.btnExport.addEventListener('click', () => void exportFile());
+        els.importFile.addEventListener('change', () => void pickFile());
+        els.btnPreview.addEventListener('click', () => void preview());
+        els.choiceUsers.addEventListener('change', showSignOutWarning);
+        els.btnImport.addEventListener('click', () => void importFile());
+        els.kind.addEventListener('change', showKindFields);
+        els.btnSaveSchedule.addEventListener('click', () => void saveSchedule());
+        els.btnRemoveSchedule.addEventListener('click', () => void removeSchedule());
+        els.btnRun.addEventListener('click', () => void runNow());
+
+        showKindFields();
+        applyGate();
+        logger.info('Backup Module Setup Complete');
+    },
+};

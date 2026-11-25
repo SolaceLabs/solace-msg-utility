@@ -1,0 +1,313 @@
+/**
+ * Manifest-driven module registry plugin (shared by vite.config.ts and
+ * vitest.config.ts).
+ *
+ * The eager `import.meta.glob('./modules/*​/module.ts')` the registry used to
+ * use bundled EVERY module on disk into every build, regardless of the active
+ * variant manifest (verified: a module in no variant still landed in min.html).
+ * This plugin instead emits a `virtual:module-registry` module that statically
+ * imports ONLY the active variant's modules, so non-active modules (and their
+ * transitive imports) never enter the graph for a build that doesn't list them.
+ *
+ * Exclusion here is by NON-import (the files are simply never imported), which
+ * is stronger than tree-shaking and unaffected by `inlineDynamicImports`.
+ *
+ * Entry overrides: a manifest may also export `MODULE_ENTRIES`, mapping a
+ * module id to an entry name. `{ connections: 'managed' }` installs
+ * `src/modules/connections/module.managed.ts` and uses `index.managed.html` as
+ * its template. That is how the `managed` variant adds the Managed tab while
+ * every Release bundle installs the Direct-only `module.ts`, which never
+ * imports the managed files.
+ *
+ * The emitted `moduleFiles` map is keyed by module id; `src/registry.ts` finds
+ * the module object in each namespace by its `.id`.
+ *
+ * Stylesheets follow the manifest the same way: the virtual module also
+ * imports each active module's `styles.css` (where it has one), after the
+ * module code, so a variant's bundle carries exactly its modules' CSS and no
+ * other's. `src/css/main.css` keeps the design system and the core components'
+ * stylesheets, which `src/main.ts` imports ahead of the registry.
+ *
+ * The manual follows the manifest too. A module may hold one chapter of it,
+ * `src/modules/<id>/help.html`, with its figures in `src/modules/<id>/help/`.
+ * `readModuleView` puts the chapters of the variant's modules, in manifest
+ * order, where a template says `<!-- @module-help -->` (the About module's
+ * Help tab). A demo build, and a variant none of whose modules has a chapter,
+ * gets no manual: the template's `@help` blocks are removed instead.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+
+const VIRTUAL_ID = 'virtual:module-registry';
+const RESOLVED_ID = '\0' + VIRTUAL_ID;
+
+/** Marker an entry template uses to pull in the module's base `index.html`. */
+export const MODULE_BASE_MARKER = '<!-- @module-base -->';
+
+/** Marker a template uses for the manual: the chapters of the variant's modules. */
+export const MODULE_HELP_MARKER = '<!-- @module-help -->';
+
+/** A `<!-- @help:start -->` ... `<!-- @help:end -->` block of a template, with its own lines: what only a build with a manual keeps. */
+const HELP_BLOCK = /[ \t]*<!-- @help:start -->[\s\S]*?<!-- @help:end -->[ \t]*\n?/g;
+
+/** An `<img>` of a chapter, split around its `src` value. */
+const FIGURE_SRC = /(<img\b[^>]*?\bsrc=")([^"]*)(")/g;
+
+/** The only source a chapter's figure may name: an SVG file in the module's `help/` folder. */
+const FIGURE_FILE = /^help\/[\w-]+\.svg$/;
+
+function stripComments(src) {
+    return src
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/[^\n]*/g, '');
+}
+
+/**
+ * Extract the module ids declared in a variant manifest's `ACTIVE_MODULES`
+ * object literal. Comments are stripped first so commented-out lines or quotes
+ * inside comments can't pollute the result. Manifests are a controlled, flat
+ * `Record<string, number>`, so a tolerant key scan is reliable. A key may be
+ * quoted or not, as TypeScript (and `extractModuleEntries`) allows: an
+ * unquoted id that compiled but was never bundled would fail only at run time.
+ */
+export function extractModuleIds(src) {
+    const block = stripComments(src).match(/ACTIVE_MODULES[^=]*=\s*\{([\s\S]*?)\}/);
+    if (!block) {
+        throw new Error('[module-registry] could not locate the ACTIVE_MODULES object literal');
+    }
+    const ids = [];
+    const re = /['"]?([\w-]+)['"]?\s*:/g;
+    let m;
+    while ((m = re.exec(block[1])) !== null) ids.push(m[1]);
+    return ids;
+}
+
+/**
+ * Extract the optional `MODULE_ENTRIES` literal (`'id': 'entry'` pairs) from a
+ * variant manifest. A manifest without one maps nothing: every module uses its
+ * `module.ts` and `index.html`.
+ */
+export function extractModuleEntries(src) {
+    const block = stripComments(src).match(/MODULE_ENTRIES[^=]*=\s*\{([\s\S]*?)\}/);
+    const entries = {};
+    if (!block) return entries;
+    const re = /['"]?([\w-]+)['"]?\s*:\s*['"]([\w-]+)['"]/g;
+    let m;
+    while ((m = re.exec(block[1])) !== null) entries[m[1]] = m[2];
+    return entries;
+}
+
+function readVariant(root, variant) {
+    const name = variant || 'standard';
+    const variantPath = path.resolve(root, 'src/variants', `${name}.ts`);
+    if (!fs.existsSync(variantPath)) {
+        throw new Error(`[module-registry] variant "${name}" requested but ${variantPath} does not exist.`);
+    }
+    return { name, src: fs.readFileSync(variantPath, 'utf-8') };
+}
+
+/** Resolve the active variant's module ids from its manifest file on disk. */
+export function activeModuleIds(root, variant) {
+    return extractModuleIds(readVariant(root, variant).src);
+}
+
+/**
+ * Resolve the active variant's entry overrides. An override for a module the
+ * variant does not list is a typo, so it fails the build instead of being
+ * silently ignored.
+ * @returns {Record<string, string>} module id -> entry name
+ */
+export function activeModuleEntries(root, variant) {
+    const { name, src } = readVariant(root, variant);
+    const ids = extractModuleIds(src);
+    const entries = extractModuleEntries(src);
+    for (const id of Object.keys(entries)) {
+        if (!ids.includes(id)) {
+            throw new Error(
+                `[module-registry] variant "${name}" sets MODULE_ENTRIES["${id}"] but does not list "${id}" ` +
+                `in ACTIVE_MODULES. Add the module or remove the entry override.`
+            );
+        }
+    }
+    return entries;
+}
+
+/**
+ * Whether the active variant needs the shell's vendor scripts (the Solace SDK and
+ * JSZip loaders and the library banner). A manifest says `export const
+ * NEEDS_VENDOR_SCRIPTS = false;` to drop them; one without the export keeps them.
+ */
+export function variantNeedsVendorScripts(root, variant) {
+    return variantFlag(root, variant, 'NEEDS_VENDOR_SCRIPTS') !== false;
+}
+
+/**
+ * Whether the active variant's bundle only ever runs from the gateway, so its
+ * Content-Security-Policy lets it connect to its own origin only
+ * (scripts/csp.mjs). A manifest says `export const GATEWAY_ONLY = true;`; one
+ * without the export is a bundle that may run anywhere.
+ */
+export function variantGatewayOnly(root, variant) {
+    return variantFlag(root, variant, 'GATEWAY_ONLY') === true;
+}
+
+/** A boolean `export const <name> = true | false` of the variant's manifest, or null when it has none. */
+function variantFlag(root, variant, name) {
+    const m = stripComments(readVariant(root, variant).src).match(new RegExp(`\\b${name}\\b[^=]*=\\s*(true|false)\\b`));
+    return m ? m[1] === 'true' : null;
+}
+
+/**
+ * Remove every `<!-- @vendor:start -->` ... `<!-- @vendor:end -->` block from the
+ * shell HTML, with its own line. Without the flag the markers stay as comments.
+ */
+export function stripVendorBlocks(html) {
+    return html.replace(/[ \t]*<!-- @vendor:start -->[\s\S]*?<!-- @vendor:end -->[ \t]*\n?/g, '');
+}
+
+/** Absolute path of the module file a variant installs for `id`. */
+export function moduleEntryFile(root, id, entry) {
+    const file = entry ? `module.${entry}.ts` : 'module.ts';
+    return path.resolve(root, 'src/modules', id, file);
+}
+
+/** Absolute path of a module's stylesheet, `src/modules/<id>/styles.css`, or `null` when it has none. */
+export function moduleStylesheet(root, id) {
+    const file = path.resolve(root, 'src/modules', id, 'styles.css');
+    return fs.existsSync(file) ? file : null;
+}
+
+/**
+ * A module's `<stem>.html`, or `null` when it has none. With an entry,
+ * `<stem>.<entry>.html` is used when present; its `<!-- @module-base -->`
+ * marker is replaced by the base `<stem>.html`, so markup shared by both
+ * entries lives in one file.
+ */
+function readModuleFile(root, id, stem, entry) {
+    const dir = path.resolve(root, 'src/modules', id);
+    const basePath = path.join(dir, `${stem}.html`);
+    const base = fs.existsSync(basePath) ? fs.readFileSync(basePath, 'utf-8') : null;
+    const entryPath = entry ? path.join(dir, `${stem}.${entry}.html`) : null;
+    if (!entryPath || !fs.existsSync(entryPath)) return base;
+    const html = fs.readFileSync(entryPath, 'utf-8');
+    if (!html.includes(MODULE_BASE_MARKER)) return html;
+    if (base === null) {
+        throw new Error(
+            `[module-registry] ${entryPath} uses ${MODULE_BASE_MARKER} but ${basePath} does not exist. ` +
+            `Create the base template or remove the marker.`
+        );
+    }
+    return html.replace(MODULE_BASE_MARKER, () => base.replace(/\n$/, ''));
+}
+
+/**
+ * A module's own template, or `null` when it has none: `index.html`, or the
+ * entry template `index.<entry>.html` composed with it (see `readModuleFile`).
+ * A manual marker in it is left as written; `readModuleView` fills it.
+ */
+export function readModuleTemplate(root, id, entry) {
+    return readModuleFile(root, id, 'index', entry);
+}
+
+/**
+ * A module's chapter of the manual as its author wrote it, or `null` when the
+ * module has none: `help.html`, or `help.<entry>.html` composed with it. Its
+ * figures still name their files (`help/<name>.svg`), which is what the
+ * chapter's Markdown links to (scripts/manual-to-md.mjs).
+ */
+export function readModuleHelp(root, id, entry) {
+    return readModuleFile(root, id, 'help', entry);
+}
+
+/**
+ * A chapter with each figure's file written into the page as a `data:` URL:
+ * a bundle is one file, and its policy loads an image from nowhere else. A
+ * figure that names anything but an SVG file in the module's `help/` folder,
+ * or a file that is not there, fails the build.
+ */
+function inlineFigures(html, root, id) {
+    return html.replace(FIGURE_SRC, (_img, before, src, after) => {
+        const file = path.resolve(root, 'src/modules', id, src);
+        if (!FIGURE_FILE.test(src) || !fs.existsSync(file)) {
+            throw new Error(
+                `[module-registry] src/modules/${id}/help.html has a figure with src="${src}". ` +
+                `A figure is an SVG file in src/modules/${id}/help/, named as help/<name>.svg; create the file or correct the name.`
+            );
+        }
+        return `${before}data:image/svg+xml;base64,${fs.readFileSync(file).toString('base64')}${after}`;
+    });
+}
+
+/**
+ * The manual of a variant: the chapter of each of its modules that has one, in
+ * manifest order, figures inlined. Empty when no module has a chapter.
+ */
+export function moduleHelp(root, variant) {
+    const entries = activeModuleEntries(root, variant);
+    return activeModuleIds(root, variant)
+        .map(id => ({ id, html: readModuleHelp(root, id, entries[id]) }))
+        .filter(({ html }) => html !== null)
+        .map(({ id, html }) => inlineFigures(html, root, id).trim())
+        .join('\n');
+}
+
+/**
+ * The template a build injects for a module, or `null` when it has none:
+ * `readModuleTemplate`, with the variant's manual at its `<!-- @module-help -->`
+ * marker. A demo build (`demo`), and a variant with no chapter at all, ships no
+ * manual: the template loses its `@help` blocks, the marker with them. Shared
+ * by the Vite template injector and the tests' `loadModuleDOM`, so tests see
+ * exactly what ships.
+ *
+ * @param {string} root
+ * @param {string} id
+ * @param {string} [entry]
+ * @param {{ variant?: string, demo?: boolean }} [build]
+ * @returns {string | null}
+ */
+export function readModuleView(root, id, entry, { variant, demo = false } = {}) {
+    const template = readModuleTemplate(root, id, entry);
+    if (template === null || !template.includes(MODULE_HELP_MARKER)) return template;
+    const help = demo ? '' : moduleHelp(root, variant);
+    return help ? template.replace(MODULE_HELP_MARKER, () => help) : template.replace(HELP_BLOCK, '');
+}
+
+/**
+ * The Vite plugin behind `virtual:module-registry`: the active variant's
+ * module imports, entries and stylesheets (see the file header).
+ * @param {{ root?: string, variant?: string }} [opts]
+ * @returns {{ name: string, enforce: 'pre', resolveId(id: string): string | null, load(id: string): string | null }} a Vite plugin
+ */
+export function moduleRegistryPlugin({ root, variant } = {}) {
+    const projectRoot = root || process.cwd();
+    return {
+        name: 'module-registry',
+        enforce: 'pre',
+        resolveId(id) {
+            return id === VIRTUAL_ID ? RESOLVED_ID : null;
+        },
+        load(id) {
+            if (id !== RESOLVED_ID) return null;
+            const ids = activeModuleIds(projectRoot, variant);
+            const entries = activeModuleEntries(projectRoot, variant);
+            const imports = [];
+            const styles = [];
+            const map = [];
+            ids.forEach((mid, i) => {
+                const abs = moduleEntryFile(projectRoot, mid, entries[mid]).replace(/\\/g, '/');
+                if (!fs.existsSync(abs)) {
+                    const file = path.basename(abs);
+                    throw new Error(
+                        `[module-registry] variant lists "${mid}" but ${abs} does not exist. ` +
+                        `Create src/modules/${mid}/${file} or remove it from the variant manifest.`
+                    );
+                }
+                imports.push(`import * as m${i} from ${JSON.stringify(abs)};`);
+                map.push(`  ${JSON.stringify(mid)}: m${i},`);
+                const css = moduleStylesheet(projectRoot, mid);
+                if (css) styles.push(`import ${JSON.stringify(css.replace(/\\/g, '/'))};`);
+            });
+            return `${[...imports, ...styles].join('\n')}\nexport const moduleFiles = {\n${map.join('\n')}\n};\n`;
+        },
+    };
+}

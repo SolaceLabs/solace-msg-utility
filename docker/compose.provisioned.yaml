@@ -1,0 +1,92 @@
+# Solace Message Utility -- Provisioned mode, ready to deploy.
+#
+# Users sign in and get only the brokers and Message VPNs an administrator
+# granted; they never see or type a broker's address or credentials. See
+# docs/provisioned-mode.md.
+#
+#   1. Put the first administrator's password (12 to 128 characters; outside
+#      that the gateway generates one and logs it once) in a file
+#      named admin-password next to this one, readable by the gateway's UID
+#      and no one else: chmod 400 admin-password && sudo chown 65532 admin-password
+#   2. Make the backup directory next to this file, writable by the gateway's
+#      UID only (left to Docker, it would be root's and take no backups):
+#      mkdir -p backup && chmod 700 backup && sudo chown 65532 backup
+#   3. SMU_VERSION=3.6.0 docker compose -f compose.provisioned.yaml up -d
+#   4. Open https://<host>:9443/ and sign in as admin with that password. It
+#      stays the administrator's until someone changes it (Change password in
+#      the sidebar); a generated one must be changed at the first sign-in.
+#      The admin console is at https://<host>:9443/solAdmin.
+#   5. On the admin console's Backup & Restore page, set a backup schedule and
+#      its passphrase. A backup restores the users and connections on any
+#      deployment; keep the passphrase secret and apart from the backups.
+#
+# SMU_VERSION is required: pin a release, never `latest`, so an upgrade is a
+# deliberate change of this one value. The admin password is read only on the
+# first start, from a secret file, never from the environment or argv; remove
+# the file afterwards if you like.
+#
+# Posture: non-root UID 65532, privileged off, every capability dropped, no new
+# privileges, read-only root filesystem, the default bridge network. The
+# gateway writes only /tls (a self-signed certificate on the first start, when
+# none is there, and what the admin console's Certificates page replaces or
+# adds), /data (config.yaml, the encrypted user and connection stores, the
+# backup schedule, and their key), both named volumes, and /backup (the
+# scheduled backups, encrypted with their own passphrase), a directory on the
+# host.
+name: solace-msg-utility
+services:
+  gateway:
+    image: ghcr.io/solacelabs/solace-msg-utility:${SMU_VERSION:?set SMU_VERSION to a release, e.g. 3.6.0}
+    user: "65532:65532"
+    privileged: false
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges=true
+    restart: unless-stopped
+    ports:
+      - "9443:9443"
+    environment:
+      # Seed config.yaml on the first start only; afterwards an administrator
+      # changes the settings on the admin console's Gateway Settings page, and a
+      # different value here is ignored and logged.
+      # provisioned: everyone signs in, the recommended setting. both also
+      # offers the Direct form, where anyone can connect with credentials they
+      # know, outside their grants.
+      SMU_CONN_MODES: provisioned
+      LOG_LEVEL: warn
+      SMU_ADMIN_PASSWORD_FILE: /run/secrets/admin-password
+    secrets:
+      - source: admin-password
+        target: /run/secrets/admin-password
+    volumes:
+      # The gateway's certificate (tls.crt, tls.key) and, under trust/, the CAs
+      # your brokers' certificates chain to. Writable, as here, the admin
+      # console's Certificates page can replace the certificate and add or
+      # delete CA files, and each change applies at once with no restart. To
+      # lock the console out, mount the directory read-only (for example
+      # ./tls:/tls:ro, a host directory you fill yourself): the page then shows
+      # what is there, its actions are off, and a change is made on the host and
+      # takes a restart. Mount the directory, never tls.crt and tls.key as
+      # single files: a file mounted by itself cannot be replaced. The paths
+      # are SMU_SSL_CERTFILE, SMU_SSL_CERTKEYFILE and SMU_SSL_TRUSTDIR, read at
+      # every start; the certificate and its key must share one directory for
+      # the console to replace them.
+      - tls:/tls
+      # config.yaml, users.yaml, connections.yaml, backup.yaml and store.key.
+      # Without the store key the stores cannot be read; the backups below
+      # restore the users and connections on any deployment.
+      - data:/data
+      # Scheduled backups, kept on the host (step 2 above). Each file is
+      # encrypted with the passphrase set in the admin console, not the store
+      # key, so a file restores on any deployment that has that passphrase.
+      - ./backup:/backup
+
+secrets:
+  admin-password:
+    file: ./admin-password
+
+volumes:
+  tls:
+  data:

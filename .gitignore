@@ -29,6 +29,9 @@ solclient*
 */jszip*js
 */solclient*js
 node_modules
+*.exe
+all-test.html
+cert
 
 # SMU Reference
 Solace-JS-API
@@ -37,3 +40,27 @@ semp-samples
 # Test results
 coverage
 improvement-plan.md
+
+# Dev-script task logs (scripts/dev.sh, dev.ps1)
+scripts/logs
+
+# Build output (every bundle variant, both gateway binaries); Releases publish it
+/dist/
+
+# graphify: regenerated caches, dated snapshots and per-machine stamps
+graphify-out/20*/
+graphify-out/cache
+*/graphify-out/cache/
+**/cache/last_query_stamp
+graphify-out/*.sig
+graphify-out/.graphify_python
+graphify-out/.graphify_step_ast.py
+graphify-out/cost.json
+graphify-out/.graphify_labels.pending.json
+# The project's graph is the root graphify-out/ alone; a nested one is stale.
+go-web-proxy/graphify-out/
+
+# End-to-end broker details (scripts/e2e.mjs): may hold broker passwords
+docker/e2e-broker.env
+
+tmp

@@ -1,6 +1,7 @@
 import { state, defaultActiveFilters } from './state.js';
 import { formatBytes, generateUuid } from '../../core/utils';
 import { required } from '../../core/dom';
+import { createSlideChoice } from '../../core/slide-choice';
 import { showPayload } from './features.js';
 
 /** @type {any} */
@@ -9,10 +10,28 @@ export const ui = {};
 /** @type {any} */
 export const els = {};
 
+// How long an outcome toast (a delete result, a lost binding, a ZIP failure)
+// stays up: long enough to read a sentence that carries a reason.
+export const NOTICE_TOAST_MS = 6000;
+
+// The connection gate is the shared module-gate component, injected by module.ts
+// at install via ui.setGate(). updateVisibility() drives it (the module owns the
+// gate-vs-active-view mutual exclusion).
+/** @type {{ show(): void; hide(): void } | null} */
+let gate = null;
+/** @param {{ show(): void; hide(): void }} g */
+ui.setGate = function (g) { gate = g; };
+/** The injected gate; a loud error names the missing wiring instead of a null dereference. */
+function activeGate() {
+    if (!gate) throw new Error('queue-browser: ui.setGate() must run before ui.updateVisibility()');
+    return gate;
+}
+
 // Delegate to core/utils — keeps ui.formatBytes() / ui.generateUuid() call sites working
 ui.formatBytes = formatBytes;
 ui.generateUuid = generateUuid;
 
+/** @param {HTMLElement} container */
 ui.initElements = function (container) {
     els.container = container;
 
@@ -48,6 +67,9 @@ ui.initElements = function (container) {
     els.appPropertiesContainer = container.querySelector('#detail-app-properties-container');
     els.detailContent = container.querySelector('#detail-content');
     els.btnCopyContent = container.querySelector('#btn-copy-content');
+    els.btnShowContent = container.querySelector('#btn-show-content');
+    els.detailBinaryNote = container.querySelector('#detail-binary-note');
+    els.detailPreview = container.querySelector('#detail-preview');
 
     // Raw Content
     els.btnShowRaw = container.querySelector('#btn-show-raw');
@@ -66,6 +88,12 @@ ui.initElements = function (container) {
     els.listForwardMsgs = container.querySelector('#forward-msg-list');
     els.elForwardQueueCount = container.querySelector('#forward-queue-count');
 
+    // Delete Confirmation Modal
+    els.modalConfirmDelete = required(container, '#browser-confirm-delete-modal');
+    els.confirmDeleteMessage = required(container, '#browser-confirm-delete-message');
+    els.btnConfirmDelete = required(container, '#btn-confirm-delete');
+    els.btnConfirmDeleteCancel = required(container, '#btn-confirm-delete-cancel');
+
     // Filter Controls
     els.btnFilter = container.querySelector('#btn-browser-filter');
     els.modalFilter = container.querySelector('#browser-filter-modal');
@@ -79,7 +107,8 @@ ui.initElements = function (container) {
     els.inputFilterType = container.querySelector('#filter-destination-type');
     els.inputFilterNewerThan = required(container, '#filter-newer-than');
     els.inputFilterOlderThan = required(container, '#filter-older-than');
-    els.radFilterCriteria = container.querySelectorAll('input[name="filter-criteria"]');
+    // The match choice is a control, not an element: value() and set() are 'OR' or 'AND'.
+    els.filterCriteria = createSlideChoice(required(container, '#filter-criteria'), { choices: ['OR', 'AND'] });
     els.btnAddPropFilter = container.querySelector('#btn-add-prop-filter');
     els.filterPropsRows = container.querySelector('#filter-properties-rows');
 
@@ -92,8 +121,7 @@ ui.initElements = function (container) {
     // Error
     els.elBrowserError = container.querySelector('#browser-connect-error');
 
-    // Visibility
-    els.elPrompt = container.querySelector('#browser-connect-prompt');
+    // Visibility (the gate is the module-gate component; see ui.setGate)
     els.elActiveView = container.querySelector('#browser-active-view');
 
     return els;
@@ -103,6 +131,7 @@ ui.getElements = function () {
     return els;
 };
 
+/** @param {string | null} [msg] empty, null or missing hides the error */
 ui.showBrowserError = function (msg) {
     if (msg) {
         els.elBrowserError.textContent = msg;
@@ -112,6 +141,7 @@ ui.showBrowserError = function (msg) {
     }
 };
 
+/** @param {string | null} [msg] empty, null or missing hides the error */
 ui.showBindError = function (msg) {
     if (msg) {
         els.elBindError.textContent = msg;
@@ -125,13 +155,18 @@ ui.showBindError = function (msg) {
 };
 
 
+/**
+ * @param {boolean} isConnected
+ * @param {string} [vpnName]
+ */
 ui.updateVisibility = function (isConnected, vpnName) {
+    const g = activeGate();
     if (!isConnected) {
-        els.elPrompt.classList.remove('hidden');
+        g.show();
         els.elActiveView.classList.add('hidden');
         els.hdrVpnName.textContent = '';
     } else {
-        els.elPrompt.classList.add('hidden');
+        g.hide();
         els.elActiveView.classList.remove('hidden');
         els.hdrVpnName.textContent = vpnName;
 
@@ -171,17 +206,36 @@ ui.resetQueueSelection = function () {
     els.inputFilterMsgType.value = 'ANY';
     els.inputFilterNewerThan.value = '';
     els.inputFilterOlderThan.value = '';
-    els.radFilterCriteria.forEach(r => r.checked = (r.value === 'OR'));
+    els.filterCriteria.set('OR');
 
     els.btnFilter.classList.remove('filter-active');
     els.btnFilter.disabled = true;
 
-    // ui.renderList / ui.clearDetails are installed by initTable / initDetails respectively.
-    // Some unit tests import ui-core.js standalone without those installers, hence the guards.
-    if (ui.renderList) ui.renderList();
-    if (ui.clearDetails) ui.clearDetails();
+    // ui.renderList / ui.clearDetails are installed by initTable / initDetails at module install.
+    ui.renderList();
+    ui.clearDetails();
 };
 
+// Drop a bound queue from the dropdown (Unbind, or the broker ending the binding).
+// When it is the queue on screen, show the next bound queue, or clear the view
+// when none is left; a queue off screen leaves the view as it is.
+/** @param {string} queueName */
+ui.removeBoundQueue = function (queueName) {
+    const onScreen = els.selectBound.value === queueName;
+    Array.from(els.selectBound.options).forEach(opt => {
+        if (opt.value === queueName) opt.remove();
+    });
+    if (!onScreen) return;
+    if (els.selectBound.options.length > 1) {
+        els.selectBound.selectedIndex = 1;
+        els.selectBound.dispatchEvent(new Event('change'));
+    } else {
+        ui.resetQueueSelection();
+        els.selectBound.selectedIndex = 0;
+    }
+};
+
+/** @param {string} queueName */
 ui.addQueueToDropdown = function (queueName) {
     let exists = false;
     for (let i = 0; i < els.selectBound.options.length; i++) {

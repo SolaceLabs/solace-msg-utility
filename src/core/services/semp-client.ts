@@ -1,7 +1,18 @@
 import { logger } from '../logger';
 import { buildBrokerUrl } from '../hosted';
-import { normalizeUrlPath } from '../utils';
+import { basicAuthHeader, errMessage, normalizeUrlPath } from '../utils';
+import { deadlineSignal } from '../timing';
+import { SEMP_PROBE_TIMEOUT_MS } from '../connections/defaults';
+import { relayRefusal, statusLine, sempErrorText as errorText, sempFailureText as failureText } from './semp-errors';
 import type { SempConfig, SempContext } from '../connections/types';
+
+// The error texts for SEMP answers live in ./semp-errors.ts (callers that do
+// not need the client import them from there); exported here too, as part of
+// the SEMP client's API.
+export const sempErrorText = errorText;
+export const sempFailureText = failureText;
+
+const log = logger.withTag('semp-client');
 
 /**
  * Lifecycle hooks the caller wires to whatever state/UI/event-bus it owns.
@@ -15,23 +26,31 @@ export interface SempConnectionHooks {
     /**
      * Fires after credentials are validated against the SEMP endpoint.
      * `sempCtx` is bound to the just-validated creds — caller can store and reuse it.
-     * `creds` are returned so the caller can route to AppState.sempCredentials if desired.
+     * `creds` are returned so the caller can route to AppState.sempCredentials if desired;
+     * both are '' in relay mode, where the browser holds no SEMP credential.
      */
     onConnected: (sempCtx: SempContext, creds: { user: string; pass: string }) => void;
     /** Fires on explicit disconnect(). */
     onDisconnected: () => void;
-    /** Fires on HTTP 401 from the validation probe. */
+    /**
+     * Fires on HTTP 401 from the validation probe: the broker refused the
+     * credential, or in relay mode the gateway session has ended. In relay
+     * mode it also fires on a 401 from any later request through the returned
+     * `SempContext`, since the session can end at any time.
+     */
     onAuthFailed?: () => void;
     /**
      * Fires on any other failure (HTTP non-401, network, timeout, exception).
      * `baseUrl` is the URL the connect attempt was targeting, included so the
      * caller can construct a "trust this URL" help link without re-deriving it.
+     * `code` is the gateway's error code when the relay refused the probe.
      */
     onError?: (info: {
         message: string;
         isNetworkError: boolean;
         isTimeout: boolean;
         baseUrl: string;
+        code?: string;
     }) => void;
 }
 
@@ -50,30 +69,45 @@ export interface SempClient {
  *   - On success, constructs a `SempContext` whose `fetch` injects the
  *     just-validated auth header, and passes it to `hooks.onConnected`.
  *   - 401 routes to `onAuthFailed`. Anything else routes to `onError`.
+ *
+ * Relay mode (`cfg.relayBase`, managed sessions): every request goes to the
+ * gateway's SEMP relay with no Authorization header and the session cookie;
+ * the gateway adds the broker's stored account. `host` and `pass` are unused,
+ * and a failure carries the gateway's error code as text.
  */
 export function createServiceSemp(hooks: SempConnectionHooks): SempClient {
+    // The last connected target, for the disconnect log line.
+    let connectedTo = '(none)';
+
     async function connect(cfg: SempConfig, host: string, pass: string): Promise<void> {
-        const baseUrl = buildBrokerUrl(cfg.protocol, host, cfg.port, cfg.urlPath, false);
+        const relay = cfg.relayBase;
+        const hosted = cfg.hosted === true;
+        const baseUrl = relay ?? buildBrokerUrl(cfg.protocol, host, cfg.port, cfg.urlPath, false, hosted);
         const validationUrl = `${baseUrl}/SEMP/v2/monitor/msgVpns?count=1`;
-        const authHeader = 'Basic ' + btoa(unescape(encodeURIComponent(`${cfg.user}:${pass}`)));
+        // Where log lines say this connection goes: the relay names the broker
+        // already; a direct one adds the account.
+        const target = relay ? baseUrl : `${baseUrl} as "${cfg.user}"`;
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000);
+        const timeout = setTimeout(() => controller.abort(), SEMP_PROBE_TIMEOUT_MS);
 
         try {
-            // MOCK
-            if (host.includes('untrust.com')) {
-                throw new Error('Certificate Not Trusted (Mock)');
-            }
+            // Built inside the try: btoa throws on a character above U+00FF,
+            // which reaches onError like any other failure. Both forms that
+            // connect a SEMP account (connections, queue-copy's destination)
+            // refuse a non-ASCII credential before this (sempAccountError).
+            const authHeader = relay ? '' : basicAuthHeader(cfg.user, pass);
+            // One request shape for the probe and every later call: the session
+            // cookie for the relay, the Basic header for a broker.
+            const send = (url: string, opts: RequestInit = {}) => fetch(url, relay
+                ? { ...opts, credentials: 'same-origin' }
+                : { ...opts, headers: { ...(opts.headers || {}), Authorization: authHeader } });
 
-            const res = await fetch(validationUrl, {
-                method: 'GET',
-                headers: { 'Authorization': authHeader },
-                signal: controller.signal
-            });
+            const res = await send(validationUrl, { method: 'GET', signal: controller.signal });
 
             if (res.ok) {
-                logger.info('SEMP Connection Established');
+                log.info(`SEMP connected: ${target}`);
+                connectedTo = target;
 
                 // Build a SempContext bound to these creds. The caller stores
                 // and reuses this for all subsequent SEMP requests against
@@ -86,41 +120,39 @@ export function createServiceSemp(hooks: SempConnectionHooks): SempClient {
                 // buildBrokerUrl() on every call, so hosted-mode gateway routing
                 // is applied uniformly and broker-emitted URLs (nextPageUri,
                 // etc.) are never used as request targets — callers extract
-                // pathname+search from them before calling fetch().
-                const sempFetch = (path: string, opts: RequestInit = {}) => {
-                    const fullPath = normalizeUrlPath(cfg.urlPath) + path;
-                    const url = buildBrokerUrl(cfg.protocol, host, cfg.port, fullPath, false);
-                    return fetch(url, {
-                        ...opts,
-                        headers: { ...(opts.headers || {}), Authorization: authHeader }
-                    });
+                // pathname+search from them before calling fetch(). Every call
+                // has a deadline (REQUEST_TIMEOUT_MS), joined to the caller's
+                // own signal when it passes one.
+                const sempFetch = async (path: string, opts: RequestInit = {}) => {
+                    const later = await send(
+                        relay ? relay + path : buildBrokerUrl(cfg.protocol, host, cfg.port, normalizeUrlPath(cfg.urlPath) + path, false, hosted),
+                        { ...opts, signal: deadlineSignal(opts.signal) },
+                    );
+                    // Through the relay a 401 always means the gateway session
+                    // ended; a broker's own 401 reaches the caller as an answer.
+                    if (relay && later.status === 401) hooks.onAuthFailed?.();
+                    return later;
                 };
 
-                hooks.onConnected({ fetch: sempFetch, baseUrl }, { user: cfg.user, pass });
+                hooks.onConnected({ fetch: sempFetch, baseUrl }, relay ? { user: '', pass: '' } : { user: cfg.user, pass });
 
             } else if (res.status === 401) {
-                logger.error('SEMP Auth Failed');
+                log.error(`SEMP authentication failed (401): ${target}`);
                 hooks.onAuthFailed?.();
             } else {
-                logger.error(`SEMP Error: ${res.status}`);
-                hooks.onError?.({
-                    message: `${res.status} ${res.statusText}`,
-                    isNetworkError: false,
-                    isTimeout: false,
-                    baseUrl,
-                });
+                const { message, code } = relay ? await relayRefusal(res) : { message: statusLine(res), code: undefined };
+                log.error(`SEMP connect refused: ${target}: ${message}`);
+                hooks.onError?.({ message, isNetworkError: false, isTimeout: false, baseUrl, ...(code ? { code } : {}) });
             }
 
-        } catch (err: any) {
-            logger.error('SEMP Network Error', err);
-
-            const isTimeout = err.name === 'AbortError';
-            const isNetworkError = !!(
-                err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))
-            );
+        } catch (err: unknown) {
+            const isTimeout = Object(err).name === 'AbortError';
+            const text = errMessage(err);
+            const isNetworkError = text.includes('Failed to fetch') || text.includes('NetworkError');
             const message = isTimeout
-                ? 'Connection timed out (15s). Check host and port.'
-                : err.message;
+                ? `Connection timed out (${SEMP_PROBE_TIMEOUT_MS / 1000}s). Check host and port.`
+                : text;
+            log.error(`SEMP connect failed: ${target}: ${message}`);
 
             hooks.onError?.({ message, isNetworkError, isTimeout, baseUrl });
 
@@ -130,7 +162,7 @@ export function createServiceSemp(hooks: SempConnectionHooks): SempClient {
     }
 
     async function disconnect(): Promise<void> {
-        logger.info('Disconnecting SEMP...');
+        log.info(`SEMP disconnected: ${connectedTo}`);
         hooks.onDisconnected();
     }
 

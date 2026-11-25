@@ -1,0 +1,66 @@
+/* Gateway Settings module styles. Module-prefixed (.gw-set-*) so they never
+ * collide in the shared (inlined) cascade. Shipped only in the admin app
+ * (main-admin.css). */
+
+.gw-set-actions {
+    margin: 0 0 1rem;
+}
+
+/* Modules on offer: one toggle tile each; a pressed tile is on offer. */
+.gw-set-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+}
+
+.gw-set-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font: inherit;
+    color: var(--text-primary);
+    background-color: var(--bg-app);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+}
+
+.gw-set-tile[aria-pressed='true'] {
+    border-color: var(--accent-primary);
+    box-shadow: inset 0 0 0 1px var(--accent-primary);
+}
+
+.gw-set-tile:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+}
+
+.gw-set-tile-name {
+    font-weight: 600;
+}
+
+/* The tile's tick box, drawn as the design system's own. */
+.gw-set-tile-name::before {
+    content: '';
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    margin-right: 0.5rem;
+    vertical-align: -0.15rem;
+    border: 1px solid var(--text-muted);
+    border-radius: 4px;
+    background: var(--bg-input) center / 0.75rem no-repeat;
+}
+
+.gw-set-tile[aria-pressed='true'] .gw-set-tile-name::before {
+    border-color: var(--accent-primary);
+    background-color: var(--accent-primary);
+    background-image: var(--icon-tick);
+}
+
+.gw-set-tile-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}

@@ -1,0 +1,492 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { boot, type ManagedDemo } from '../../src/mock-broker/boot.managed';
+import { resetScenario, scenario, setBrokers } from '../../src/mock-broker/fixtures';
+import { setSocketGate } from '../../src/mock-broker/sdk/session';
+import { STEP_MS } from '../../src/mock-broker/gateway/authenticator';
+import { createKernel } from '../../src/core/kernel';
+import { ACTIVE_MODULES, MODULE_ENTRIES } from '../../src/variants/managed-demo';
+import { ConnectionsModule } from '../../src/modules/connections/module.managed';
+import { QueueBrowserModule } from '../../src/modules/queue-browser/module';
+import { QueueCopyModule } from '../../src/modules/queue-copy/module';
+import { QueueSubscriptionExplorerModule } from '../../src/modules/queue-subscription-explorer/module';
+import { UserManagementModule } from '../../src/modules/user-management/module';
+import { ConnectionManagementModule } from '../../src/modules/connection-management/module';
+import { GatewaySettingsModule } from '../../src/modules/gateway-settings/module';
+import { TlsCertificatesModule } from '../../src/modules/tls-certificates/module';
+import { BackupModule } from '../../src/modules/backup/module';
+import { AboutModule } from '../../src/modules/about/module';
+import { loadModuleDOM } from '../helpers/loadModuleDOM';
+import { answerConfirm } from '../helpers/confirmDialog';
+import type { AppContext, PwaModule } from '../../src/core/types';
+
+/**
+ * provisioned-demo.html end to end, in process: the demo's boot, then the real
+ * Kernel with the managed-demo variant's modules, each from its real template.
+ * Only the reload a sign-in causes is simulated, by booting a second time over
+ * what the first boot saved, as the browser would.
+ *
+ * The parts have their own suites (the fake gateway in
+ * tests/mock-broker/gateway/, the boot in boot.managed.test.ts, each module in
+ * tests/modules/); this one proves they agree on a whole session.
+ */
+const MODULES: Record<string, PwaModule> = {
+    'connections': ConnectionsModule,
+    'queue-browser': QueueBrowserModule,
+    'queue-copy': QueueCopyModule,
+    'queue-subscription-explorer': QueueSubscriptionExplorerModule,
+    'user-management': UserManagementModule,
+    'connection-management': ConnectionManagementModule,
+    'gateway-settings': GatewaySettingsModule,
+    'tls-certificates': TlsCertificatesModule,
+    'backup': BackupModule,
+    'about': AboutModule,
+};
+
+/** A module that only keeps the AppContext, so the test can read AppState. */
+const PROBE = 'demo-flow-probe';
+let ctx: AppContext;
+const probe: PwaModule = { name: 'Probe', id: PROBE, install: async (c) => { ctx = c; } };
+
+let realFetch: typeof window.fetch;
+let demos: ManagedDemo[];
+const saved = { WebSocket: window.WebSocket, EventSource: (window as any).EventSource, open: XMLHttpRequest.prototype.open };
+
+beforeEach(() => {
+    realFetch = window.fetch;
+    document.body.innerHTML = '';
+    sessionStorage.clear();
+    resetScenario();
+    demos = [];
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+});
+
+afterEach(() => {
+    demos.forEach(d => d.dispose());
+    window.fetch = realFetch;
+    delete (window as any).solace;
+    Object.defineProperty(window, 'WebSocket', { configurable: true, writable: true, value: saved.WebSocket });
+    Object.defineProperty(window, 'EventSource', { configurable: true, writable: true, value: saved.EventSource });
+    XMLHttpRequest.prototype.open = saved.open;
+    delete (navigator as any).sendBeacon;
+    setSocketGate(null);
+    setBrokers({});
+    vi.useRealTimers();
+});
+
+const startDemo = () => {
+    const demo = boot({ reload: () => {} });
+    demos.push(demo);
+    scenario.latencyMs = 0;
+    return demo;
+};
+
+const panelButton = (label: string) =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>('#mock-controls .mockctl-btn')).find(b => b.textContent === label)!;
+const q = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
+const shown = (sel: string) => !q(sel).classList.contains('hidden');
+const navItems = () => Array.from(document.querySelectorAll<HTMLElement>('#sidebar-nav .nav-item'), n => n.dataset.moduleId)
+    .filter(id => id !== PROBE);
+
+/**
+ * Open the demo the way a visitor does: a first load, whatever `before` does
+ * on it (sign in from the demo panel, change a setting), the reload, and the
+ * app over the second load.
+ */
+async function openDemo(before: (first: ManagedDemo) => void | Promise<void> = () => {}): Promise<ManagedDemo> {
+    const first = startDemo();
+    await before(first);
+    first.pages.hide();
+    first.save();
+    first.dispose();
+
+    document.body.innerHTML = '';
+    const demo = startDemo();
+    const shell = document.createElement('div');
+    shell.innerHTML = `
+        <div id="main-sidebar"><nav id="sidebar-nav"></nav><div id="sidebar-account"></div></div>
+        <button id="btn-sidebar-toggle"></button><span id="page-title"></span>
+        <span id="status-indicator-client"></span><span id="status-indicator-semp"></span>
+        <div id="module-container"><div id="app-loading"></div></div>
+        <div id="notification-bell-slot"></div><div id="toast-container"></div>`;
+    document.body.appendChild(shell);
+    for (const id of [...Object.keys(MODULES), PROBE]) {
+        const tpl = document.createElement('template');
+        tpl.dataset.moduleId = id;
+        if (id !== PROBE) {
+            const c = loadModuleDOM(id, MODULE_ENTRIES[id], { variant: 'managed-demo', demo: true });
+            c.remove();
+            tpl.innerHTML = c.innerHTML;
+        }
+        document.body.appendChild(tpl);
+    }
+    const registered = Object.entries(ACTIVE_MODULES).map(([id, priority]) => ({ module: MODULES[id], priority }));
+    await createKernel([...registered, { module: probe, priority: 0 }]).start();
+    return demo;
+}
+
+const signInAs = (username: string) => () => panelButton(`Sign in as ${username}`).click();
+
+/** Choose a broker and VPN on the Provisioned card and press Connect. */
+function pressConnect(broker: string, vpn: string): void {
+    q<HTMLSelectElement>('#managed-broker-select').value = broker;
+    q('#managed-broker-select').dispatchEvent(new Event('change'));
+    q<HTMLSelectElement>('#managed-vpn-select').value = vpn;
+    q('#managed-vpn-select').dispatchEvent(new Event('change'));
+    q<HTMLButtonElement>('#btn-managed-connect').click();
+}
+
+async function connect(broker: string, vpn: string): Promise<void> {
+    pressConnect(broker, vpn);
+    await vi.waitFor(() => expect([ctx.appState.isSempConnected, ctx.appState.isConnected]).toEqual([true, true]));
+}
+
+describe('managed demo end to end', () => {
+    it('covers every module of the managed-demo variant', () => {
+        expect(Object.keys(MODULES).sort()).toEqual(Object.keys(ACTIVE_MODULES).sort());
+    });
+
+    it('loads signed out under connModes both: no sign-in page, the Provisioned tab\'s Sign in, Direct offered', async () => {
+        await openDemo(async first => {
+            const put = await first.gateway.handle({
+                method: 'PUT', path: '/managed/settings', query: '',
+                body: JSON.stringify({ ...first.gateway.settings.current(), connModes: 'both', rev: first.gateway.settings.rev() }),
+                session: first.gateway.openSession('admin', false),
+            });
+            expect(put.status).toBe(200);
+        });
+
+        expect(document.querySelector('.mgw-page')).toBeNull();
+        expect([shown('#conn-tabs'), shown('#conn-tab-direct')]).toEqual([true, true]);
+        expect(q('#conn-tab-managed').getAttribute('aria-selected')).toBe('true');   // defaultConn: managed
+        expect(shown('#managed-login-view')).toBe(true);
+        expect(q('#btn-managed-login').getAttribute('href')).toBe('/login');
+        expect(ctx.appState.managed ?? null).toBeNull();
+    });
+
+    it('signs the operator in, shows only what the gateway grants, connects, and reads queues through the relay', async () => {
+        await openDemo(signInAs('operator'));
+
+        await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
+        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer', 'about']);
+        expect(Array.from(q<HTMLSelectElement>('#managed-broker-select').options, o => o.value)).toEqual(['east-prod', 'lab']);
+        expect(q('#sidebar-account').textContent).toContain('operator');
+
+        await connect('east-prod', 'orders');
+        expect(shown('#managed-connected-view')).toBe(true);
+        const res = await ctx.sempFetch('/SEMP/v2/monitor/msgVpns/orders/queues?count=100');
+        const names = ((await res.json()).data as { queueName: string }[]).map(d => d.queueName);
+        expect(names).toContain('orders.new');
+    });
+
+    it('a broker the gateway cannot reach fails the SEMP half, closes the messaging half again, and the card names both', async () => {
+        const demo = await openDemo(signInAs('operator'));
+        await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
+        demo.gateway.faults.relayUnreachable = true;
+        ctx.notifications.clear();   // the center keeps its entries across reloads
+
+        pressConnect('east-prod', 'orders');
+        await vi.waitFor(() => expect(shown('#managed-connect-error')).toBe(true));
+
+        expect(q('#managed-connect-error').textContent).toBe(
+            'SEMP (management): broker not reachable\nMessaging (client): connected, closed because SEMP failed',
+        );
+        expect([ctx.appState.isSempConnected, ctx.appState.isConnected]).toEqual([false, false]);
+        expect(shown('#managed-select-view')).toBe(true);
+        expect(q<HTMLButtonElement>('#btn-managed-connect').disabled).toBe(false);
+        expect(ctx.notifications.entries().map(e => [e.level, e.module])).toEqual([['error', 'Connections']]);
+        expect(ctx.notifications.entries()[0].text).toMatch(/^SEMP \(management\): /);
+    });
+
+    it('a rate-limited dial fails the messaging half with the short line and closes the SEMP half again', async () => {
+        const demo = await openDemo(signInAs('operator'));
+        await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
+        demo.gateway.faults.dialRateLimited = true;
+        ctx.notifications.clear();   // the center keeps its entries across reloads
+
+        pressConnect('east-prod', 'orders');
+        await vi.waitFor(() => expect(shown('#managed-connect-error')).toBe(true));
+
+        expect(q('#managed-connect-error').textContent).toBe(
+            'Messaging (client): too many attempts, wait a minute\nSEMP (management): connected, closed because messaging failed',
+        );
+        expect([ctx.appState.isSempConnected, ctx.appState.isConnected]).toEqual([false, false]);
+        expect(ctx.notifications.entries().map(e => e.text)).toEqual(['Messaging (client): Too many requests. Wait a minute and try again.']);
+    });
+
+    it('Queue Copy follows the Provisioned connection: one destination card dials a VPN of the same broker through the fake gateway', async () => {
+        await openDemo(signInAs('operator'));
+        await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
+        await connect('east-prod', 'orders');
+
+        // The typed destination cards give way to the shared card (Another VPN, so its Broker list is east-prod alone).
+        q<HTMLButtonElement>('#copy-dest-scope [data-dest-scope="another-vpn"]').click();
+        expect(shown('#copy-dest-prov-card')).toBe(true);
+        expect(q('#copy-dest-semp-card').classList.contains('hidden')).toBe(true);
+        expect(q('#copy-dest-sol-card').classList.contains('hidden')).toBe(true);
+        expect(Array.from(q<HTMLSelectElement>('#copy-dest-prov-broker').options, o => o.value)).toEqual(['east-prod']);
+        expect(Array.from(q<HTMLSelectElement>('#copy-dest-prov-vpn').options, o => o.value)).toEqual(['orders', 'payments']);
+
+        q<HTMLSelectElement>('#copy-dest-prov-vpn').value = 'payments';
+        q('#copy-dest-prov-vpn').dispatchEvent(new Event('change'));
+        q<HTMLButtonElement>('#copy-btn-dest-prov-connect').click();
+        await vi.waitFor(() => expect(q('#copy-dest-prov-card .prov-conn-status').textContent).toBe('Broker "east-prod", VPN "payments"'));
+        expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').textContent).toBe('Disconnect');
+
+        q<HTMLButtonElement>('#copy-btn-dest-prov-connect').click();
+        await vi.waitFor(() => expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').textContent).toBe('Connect'));
+    });
+
+    /** Queue Copy's destination card pointed at another provisioned broker (lab, VPN sandbox), with the primary on east-prod. */
+    async function pointDestinationAtLab(): Promise<void> {
+        await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
+        await connect('east-prod', 'orders');
+        q<HTMLButtonElement>('#copy-dest-scope [data-dest-scope="another-broker"]').click();
+        expect(Array.from(q<HTMLSelectElement>('#copy-dest-prov-broker').options, o => o.value)).toEqual(['east-prod', 'lab']);
+        q<HTMLSelectElement>('#copy-dest-prov-broker').value = 'lab';
+        q('#copy-dest-prov-broker').dispatchEvent(new Event('change'));
+        expect(Array.from(q<HTMLSelectElement>('#copy-dest-prov-vpn').options, o => o.value)).toEqual(['sandbox']);
+    }
+
+    it('Queue Copy dials another provisioned broker: SEMP through its relay, then the VPN, installed together', async () => {
+        await openDemo(signInAs('operator'));
+        await pointDestinationAtLab();
+        // No destination SEMP yet, so no queue picker.
+        expect(shown('#copy-btn-dest-pick')).toBe(false);
+
+        q<HTMLButtonElement>('#copy-btn-dest-prov-connect').click();
+        await vi.waitFor(() => expect(q('#copy-dest-prov-card .prov-conn-status').textContent).toBe('Broker "lab", VPN "sandbox"'));
+        expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').textContent).toBe('Disconnect');
+        expect(shown('#copy-btn-dest-pick')).toBe(true);
+
+        q<HTMLButtonElement>('#copy-btn-dest-prov-connect').click();
+        await vi.waitFor(() => expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').textContent).toBe('Connect'));
+        expect(shown('#copy-btn-dest-pick')).toBe(false);
+    });
+
+    it('a destination broker the gateway cannot reach fails SEMP, closes the session that came up, and the card and the bell say so', async () => {
+        const demo = await openDemo(signInAs('operator'));
+        await pointDestinationAtLab();
+        demo.gateway.faults.relayUnreachable = true;
+        ctx.notifications.clear();   // the center keeps its entries across reloads
+
+        q<HTMLButtonElement>('#copy-btn-dest-prov-connect').click();
+        await vi.waitFor(() => expect(q('#copy-dest-prov-error').textContent).not.toBe(''));
+
+        expect(q('#copy-dest-prov-error').textContent).toBe(
+            'SEMP (management): broker not reachable\nMessaging (client): connected, closed because SEMP failed',
+        );
+        expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').textContent).toBe('Connect');
+        expect(q<HTMLButtonElement>('#copy-btn-dest-prov-connect').disabled).toBe(false);
+        expect(shown('#copy-btn-dest-pick')).toBe(false);
+        expect(ctx.notifications.entries().map(e => [e.level, e.module])).toEqual([['error', 'Queue Copy']]);
+        expect(ctx.notifications.entries()[0].text).toMatch(/^SEMP \(management\): /);
+    });
+
+    it("lists only the viewer's subscriptions in Queue Subscriptions: east-prod's payments VPN is left out", async () => {
+        await openDemo(signInAs('viewer'));
+        await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('viewer'));
+        await connect('east-prod', 'orders');
+        q('#sidebar-nav .nav-item[data-module-id="queue-subscription-explorer"]').click();
+        q<HTMLButtonElement>('#btn-subexp-load').click();
+        // Every filter blank: the explorer shows totals, not rows, so ask for every VPN.
+        const vpnFilter = q<HTMLInputElement>('#subexp-filter-vpn');
+        vpnFilter.value = '*';
+        vpnFilter.dispatchEvent(new Event('input'));
+        const vpns = () => Array.from(document.querySelectorAll<HTMLTableRowElement>('#subexp-tbody tr'), tr => tr.cells[0]?.textContent);
+        // Two pages (PAGE_DELAY_MS apart) and the filter's debounce.
+        await vi.waitFor(() => expect(vpns()).toContain('orders'), { timeout: 3000 });
+        // The demo broker answers for both east-prod VPNs; the browser keeps the viewer's.
+        expect(new Set(vpns())).toEqual(new Set(['orders']));
+    });
+
+    it('closes the operator\'s live connection when the VPN access is revoked, and Refresh shows nothing left', async () => {
+        await openDemo(signInAs('operator'));
+        await vi.waitFor(() => expect(ctx.appState.managed?.username).toBe('operator'));
+        await connect('east-prod', 'orders');
+
+        panelButton('Revoke my VPN access').click();
+        await vi.waitFor(() => expect(ctx.appState.isConnected).toBe(false));
+        expect(shown('#managed-select-view')).toBe(true);
+        // One connection: the dropped messaging session takes SEMP with it, and the card says why.
+        await vi.waitFor(() => expect(ctx.appState.isSempConnected).toBe(false));
+        expect(q('#managed-connect-error').textContent).toBe('Messaging (client): connection dropped, so SEMP was closed too');
+
+        q<HTMLButtonElement>('#btn-managed-refresh').click();
+        await vi.waitFor(() => expect(shown('#managed-empty-state')).toBe(true));
+        expect(ctx.appState.managed?.operate).toEqual([]);
+    });
+
+    const SELF_EDITS: [string, () => void][] = [
+        ['clearing their own Administrator flag', () => {
+            q<HTMLInputElement>('#user-mgmt-admin').checked = false;
+            q<HTMLButtonElement>('#btn-user-mgmt-save').click();
+        }],
+        ['changing their own password', () => {
+            q<HTMLInputElement>('#user-mgmt-password').value = 'a-new-demo-password-01';
+            q<HTMLButtonElement>('#btn-user-mgmt-save').click();
+        }],
+    ];
+
+    async function openOwnRow(): Promise<HTMLTableRowElement> {
+        await openDemo(signInAs('admin'));
+        await vi.waitFor(() => expect(ctx.appState.managed?.admin).toBe(true));
+        expect(navItems()).toEqual(['connections', 'queue-browser', 'queue-copy', 'queue-subscription-explorer', 'user-management', 'connection-management', 'gateway-settings', 'tls-certificates', 'backup', 'about']);
+        q('#sidebar-nav .nav-item[data-module-id="user-management"]').click();
+        const own = () => Array.from(document.querySelectorAll<HTMLTableRowElement>('#user-mgmt-rows tr'))
+            .find(tr => tr.querySelector('td')?.textContent === 'admin');
+        await vi.waitFor(() => expect(own()).toBeTruthy());
+        return own()!;
+    }
+
+    async function expectSignedOut(demo: ManagedDemo): Promise<void> {
+        await vi.waitFor(() => expect(ctx.appState.managed ?? null).toBeNull());
+        expect(demo.gateway.session()).toBeNull();
+        expect(shown('#managed-login-view')).toBe(true);
+        expect(q('#sidebar-account .account-control').classList.contains('hidden')).toBe(true);
+    }
+
+    for (const [what, edit] of SELF_EDITS) {
+        it(`signs an administrator out at once for ${what}`, async () => {
+            const row = await openOwnRow();
+            row.querySelector<HTMLButtonElement>('.user-mgmt-edit')!.click();
+            edit();
+            await expectSignedOut(demos[demos.length - 1]);
+        });
+    }
+
+    it('signs an administrator out at once for deleting their own account', async () => {
+        const row = await openOwnRow();
+        row.querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
+        await answerConfirm(true);
+        const demo = demos[demos.length - 1];
+        await expectSignedOut(demo);
+        expect(demo.gateway.store.findUser('admin')).toBeFalsy();
+    });
+    it('exports the configuration as an administrator, and a Merge import brings a deleted user back', async () => {
+        const demo = await openDemo(signInAs('admin'));
+        await vi.waitFor(() => expect(ctx.appState.managed?.admin).toBe(true));
+        q('#sidebar-nav .nav-item[data-module-id="backup"]').click();
+        await vi.waitFor(() => expect(q('#backup-schedule-status').textContent).toContain('No schedule'));
+
+        q<HTMLInputElement>('#backup-export-pass').value = 'a demo backup passphrase';
+        q<HTMLInputElement>('#backup-export-confirm').value = 'a demo backup passphrase';
+        q<HTMLButtonElement>('#btn-backup-export').click();
+        await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled());
+        const exported = await ((URL.createObjectURL as any).mock.calls[0][0] as Blob).text();
+        expect(exported).not.toContain('demo-viewer-0001'); // sealed, not in clear
+
+        expect(demo.gateway.store.deleteUser('viewer')).toBe('deleted');
+        const input = q<HTMLInputElement>('#backup-import-file');
+        Object.defineProperty(input, 'files', { configurable: true, value: [new File([exported], 'smu-backup.json')] });
+        input.dispatchEvent(new Event('change'));
+        await vi.waitFor(() => expect(q('#backup-import-source').textContent).toBe('File: smu-backup.json'));
+        q<HTMLInputElement>('#backup-import-pass').value = 'a demo backup passphrase';
+        q<HTMLButtonElement>('#btn-backup-preview').click();
+        await vi.waitFor(() => expect(shown('#backup-preview')).toBe(true), { timeout: 5000 });
+        expect(q('#backup-diff-users').textContent).toBe('Add: viewer');
+
+        q<HTMLSelectElement>('#backup-choice-users').value = 'merge';
+        q<HTMLButtonElement>('#btn-backup-import').click();
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(demo.gateway.store.findUser('viewer')).toBeTruthy(), { timeout: 5000 });
+        expect(demo.gateway.signIn('viewer', 'demo-viewer-0001').ok).toBe(true);
+    }, 20_000);
+});
+
+describe('managed demo two-factor sign-in', () => {
+    const PASSWORD = 'demo-viewer-0001';
+    /** The reload a sign-in or sign-out causes: what `navigate` saved, booted again. */
+    const reload = (demo: ManagedDemo): ManagedDemo => {
+        demo.dispose();
+        document.body.innerHTML = '';
+        return startDemo();
+    };
+    const title = () => document.querySelector('.mgw-page h1')?.textContent ?? null;
+    const alertText = () => document.querySelector('.mgw-page [role="alert"]')?.textContent ?? null;
+    function submitPage(values: Record<string, string>): void {
+        for (const [id, v] of Object.entries(values)) q<HTMLInputElement>(`#mgw-${id}`).value = v;
+        q('.mgw-page form').dispatchEvent(new Event('submit', { cancelable: true }));
+    }
+    /** The code the panel's Authenticator shows for a row, as a visitor reads it off. */
+    const panelCode = (who: string) => Array.from(document.querySelectorAll('#mock-controls .mockctl-account'))
+        .find(r => r.querySelector('.mockctl-key')?.textContent === who)?.querySelector('.mockctl-copy')?.textContent;
+    const setMode = async (demo: ManagedDemo, mode: string) => {
+        const res = await demo.gateway.handle({
+            method: 'PUT', path: '/managed/settings', query: '',
+            body: JSON.stringify({ login: { twoFactor: mode }, rev: demo.gateway.settings.rev() }),
+            session: demo.gateway.openSession('admin', false),
+        });
+        expect(res.status).toBe(200);
+    };
+    const signOutAndBackIn = (demo: ManagedDemo): ManagedDemo => {
+        panelButton('Sign out').click();
+        return reload(demo);
+    };
+
+    it('is made mandatory, enrols with the panel\'s code, signs in with a code and then a recovery code, and loses it to an administrator\'s reset', async () => {
+        // The clock is held, so each code is known to come from the step it is read in.
+        vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-01-01T00:00:05Z') });
+        let demo = startDemo();
+        await setMode(demo, 'mandatory');
+
+        // Setting it up: the panel holds the code, the page shows the secret.
+        panelButton('Sign in as viewer').click();
+        demo = reload(demo);
+        expect([title(), demo.gateway.session()]).toEqual(['Set up two-factor sign-in', null]);
+        expect(q('#two-factor-secret').textContent!.replace(/ /g, '')).toBe(demo.gateway.ticket()!.secret);
+        submitPage({ code: '000000' });
+        expect(alertText()).toBe('The code is not correct.');
+        expect(demo.gateway.store.totpOf('viewer')).toBeUndefined();
+        submitPage({ code: panelCode('viewer (setting up)')! });
+        expect(title()).toBe('Recovery codes');
+        const recovery = Array.from(document.querySelectorAll('#recovery-codes li'), li => li.textContent!);
+        expect(recovery).toHaveLength(10);
+        q('#two-factor-continue').click();
+        demo = reload(demo);
+        expect([demo.gateway.session(), title()]).toEqual([{ user: 'viewer', mustChange: false }, null]);
+
+        // Signed out, the password leads to the code page, and only the code opens a session.
+        // A code cannot be used twice, so the sign-in waits for the next step's code.
+        vi.setSystemTime(Date.now() + STEP_MS);
+        demo = signOutAndBackIn(demo);
+        expect(title()).toBe('Sign in');
+        submitPage({ username: 'viewer', password: PASSWORD });
+        expect([title(), demo.gateway.session()]).toEqual(['Two-factor sign-in', null]);
+        submitPage({ code: '000000' });
+        expect([alertText(), demo.gateway.session()]).toEqual(['The code is not correct.', null]);
+        submitPage({ code: panelCode('viewer')! });
+        demo = reload(demo);
+        expect(demo.gateway.session()!.user).toBe('viewer');
+
+        // A recovery code signs in once.
+        demo = signOutAndBackIn(demo);
+        submitPage({ username: 'viewer', password: PASSWORD });
+        submitPage({ code: recovery[0] });
+        demo = reload(demo);
+        expect(demo.gateway.session()!.user).toBe('viewer');
+        demo = signOutAndBackIn(demo);
+        submitPage({ username: 'viewer', password: PASSWORD });
+        submitPage({ code: recovery[0] });
+        expect([alertText(), demo.gateway.session()]).toEqual(['The code is not correct.', null]);
+
+        // An administrator resets it (two-factor optional again, so the administrator is not asked), and the panel lets go of the account.
+        await setMode(demo, 'optional');
+        panelButton('Sign in as admin').click();
+        demo = reload(demo);
+        expect(demo.gateway.session()!.user).toBe('admin');
+        expect(panelCode('viewer')).toBeDefined();
+        const res = await fetch('/managed/users/viewer/totp', { method: 'DELETE' });
+        expect(res.status).toBe(200);
+        expect(demo.gateway.store.totpOf('viewer')).toBeUndefined();
+        Array.from(document.querySelectorAll('#mock-controls .mockctl-section'))
+            .find(s => s.querySelector('.mockctl-title')!.textContent === 'Authenticator')!.dispatchEvent(new Event('pointerenter'));
+        expect(panelCode('viewer')).toBeUndefined();
+
+        // The user signs in with the password alone.
+        demo = signOutAndBackIn(demo);
+        submitPage({ username: 'viewer', password: PASSWORD });
+        demo = reload(demo);
+        expect(demo.gateway.session()!.user).toBe('viewer');
+    }, 20_000);
+});

@@ -1,104 +1,102 @@
 # Solace Message Utility
 
-A browser-based tool for managing Solace PubSub+ Event Brokers events/messages. Browse queues, inspect messages, forward, delete, copy across brokers, and search subscriptions — all from a single self-contained HTML page. No installer, no backend.
+Solace Message Utility is a browser-based tool for people who work with Solace PubSub+ Event Brokers: developers, testers and support teams who need to look at messages and queues, and the administrators who decide who may do that. Browse queues, inspect messages, forward or delete them, copy them across brokers and search subscriptions, all from one self-contained HTML page. There is nothing to install on your machine.
+
+This page says what the tool does, shows the three ways to run it and points to the document for each audience.
 
 ![Queue Browser](images/browser.png)
 
-## Quick Start
+## Contents
 
-Pick whichever path fits — none of them require a build toolchain.
+- [Three ways to run it](#three-ways-to-run-it)
+  - [Try it without a broker](#try-it-without-a-broker)
+- [Quick start](#quick-start)
+  - [Standalone: the hosted page](#standalone-the-hosted-page)
+  - [Standalone: self-host the static files](#standalone-self-host-the-static-files)
+  - [Gateway: one container](#gateway-one-container)
+  - [Provisioned: sign-in and administration](#provisioned-sign-in-and-administration)
+- [Features](#features)
+- [Documentation](#documentation)
+- [License](#license)
 
-### Option 1 — Use the hosted version (zero install)
+## Three ways to run it
 
-Open <https://solacelabs.github.io/solace-msg-utility/> in a browser. Done. (You'll still need network reachability to your broker, and the broker must allow CORS for SEMP.)
+| Mode | What it is | Broker credentials | Start | Try it offline |
+| --- | --- | --- | --- | --- |
+| **Standalone** | The app as a single HTML file, from GitHub Pages or any web server. Your browser connects to the broker. | Each user types them | Open the page | `demo.html` |
+| **Gateway** | The app served by the gateway container, which connects to your brokers for it. Browsers reach and trust only the gateway. | Each user types them | `SMU_VERSION=<release> docker compose -f docker/compose.gateway.yaml up -d` | `demo.html` |
+| **Provisioned** | Gateway mode plus sign-in. An administrator stores the broker credentials and grants each user brokers, VPNs and queues. | Stored on the gateway; users sign in | `SMU_VERSION=<release> docker compose -f docker/compose.provisioned.yaml up -d`, after [its setup](#provisioned-sign-in-and-administration) | `provisioned-demo.html` |
 
-### Option 2 — Run as a container (one command)
+Both container modes run the same image: Gateway mode by default, Provisioned mode with `SMU_CONN_MODES=provisioned`. [deployment.md](docs/deployment.md#choosing-a-mode) compares the modes. [provisioned-mode.md](docs/provisioned-mode.md) covers Provisioned mode in full.
 
-Download [solclient.js](https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/deployment.md#1-solace-javascript-sdk-solclientjs) and start the container with `solclient.js` mounted:
+### Try it without a broker
+
+Both demos are attached to every Release. They run from disk with nothing else: no broker, no gateway and no network request.
+
+- `demo.html` -- Standalone and Gateway mode: the Direct connection form and every module, against a broker inside the page. Use Broker Host `broker.solace.com` and any non-empty credentials, or **Fill the connection form** in its Demo controls panel. See [demo.md](docs/demo.md#direct-demo-demohtml).
+- `provisioned-demo.html` -- Provisioned mode: sign in with a demo account, then browse, copy and administer against a fake gateway. See [demo.md](docs/demo.md#provisioned-demo-provisioned-demohtml).
+
+## Quick start
+
+None of these need a build toolchain. [deployment.md](docs/deployment.md) has the full detail for Standalone and Gateway mode.
+
+### Standalone: the hosted page
+
+Open <https://solacelabs.github.io/solace-msg-utility/> in a browser. Your browser needs network access to the broker, and the broker must allow CORS for SEMP.
+
+### Standalone: self-host the static files
+
+Take `index.html` from the latest [GitHub Release](https://github.com/SolaceLabs/solace-msg-utility/releases) and the two vendor libraries `solclient.js` and `jszip.min.js` from the `dist` branch. Put them in one folder served over HTTP (`npx http-server`, nginx, IIS, ...). Sources and supported layouts are in [deployment.md](docs/deployment.md#self-host-the-static-files).
+
+### Gateway: one container
+
+The image includes the Solace JavaScript API and JSZip, so you need no other files. To try the newest release:
 
 ```bash
-docker run --rm -p 9443:9443 -e HOSTED=true -v solace-tls:/tls \
-  -v ./solclient.js:/SolaceMsgUtility/solclient.js:ro \
+docker run --rm -p 9443:9443 -v solace-tls:/tls \
   ghcr.io/solacelabs/solace-msg-utility:latest
 ```
 
-Then open <https://localhost:9443/>. The container ships a built-in HTTPS gateway that also reverse-proxies SEMP/SMF to your broker, so the browser only needs to trust one cert. See [deployment.md → Containerised Gateway](docs/deployment.md#containerised-gateway) for the full env-var list.
+Open <https://localhost:9443/>. The container connects to your brokers for the app, so the browser needs to reach and trust only the container. The image trusts the standard public root CAs, so a broker with a certificate from a public CA works as it is; for a broker whose certificate comes from a private CA, put that CA in `/tls/trust`: see [TLS and trusted CAs](docs/deployment.md#tls-and-trusted-cas). For production, pin a release and never use `latest`: run `SMU_VERSION=<release> docker compose -f docker/compose.gateway.yaml up -d` from a checkout of that release. Compose refuses to start without `SMU_VERSION`. See [deployment.md](docs/deployment.md#gateway-mode).
 
-### Option 3 — Self-host the static files
+### Provisioned: sign-in and administration
 
-Download [index.html](https://raw.githubusercontent.com/SolaceLabs/solace-msg-utility/refs/heads/main/dist/index.html) and [solclient.js](https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/deployment.md#1-solace-javascript-sdk-solclientjs). Drop them in any folder served over HTTP (`npx http-server`, nginx, IIS, …). See [deployment.md → Self-host](docs/deployment.md#self-host-the-static-files) for sources and supported layouts.
+From a checkout of the release you deploy, write the first administrator's password to `docker/admin-password`, give it and a backup directory to the gateway's UID (65532) alone, and start the gateway:
 
-> **Try it without a broker:** open `mock.html` instead. Use Broker Host `broker.solace.com` and any non-empty credentials — every module works against deterministic mock data. See [Demo Mode](docs/user-guide.md#demo-mode-mockhtml) for details.
+```bash
+cd docker
+chmod 400 admin-password && sudo chown 65532 admin-password
+mkdir -p backup && chmod 700 backup && sudo chown 65532 backup
+SMU_VERSION=<release> docker compose -f compose.provisioned.yaml up -d
+```
 
-## Connecting to a broker
-
-Once the app is loaded:
-
-1. **Fill in two connections** (both share the same Broker Host):
-   - **Solace Client** (WebSocket, for message operations) — VPN, username, password, port `8008` (ws) or `1443` (wss).
-   - **SEMP** (REST, for management operations) — admin username, password, port `8080` (http) or `1943` (https).
-2. **Click Connect** on each. The two dots in the sidebar turn green when ready.
-3. **Save All Config** — your settings persist in the browser for next time.
-4. **Use the sidebar** to switch between Queue Browser, Queue Copy, and Queue Subscriptions.
-
-> **Self-signed TLS certificates:** if `wss://` connection is blocked, the app shows a helper dialog with one-click instructions to trust the broker certificate.
+Then open `https://<host>:9443/`, sign in as `admin` with that password, and add brokers and users at `/solAdmin`. The password rules, settings, recommended values, two-factor sign-in, certificates and backups are in [provisioned-mode.md](docs/provisioned-mode.md#start-it).
 
 ## Features
 
-### Connections
-- Two independent connections (Solace Web Messaging + SEMP REST), shared broker host.
-- **Basic** or **OAuth2** authentication for the Solace client.
-- **Save / Load / Reset** connection profiles (localStorage).
-- **Advanced settings** — connect/reconnect retries, timeouts, per-queue message cap (1–10 000).
-- Live status dots in the sidebar for both connections.
-- SSL trust helper for self-signed broker certificates.
+Every screen, field and shortcut is described click by click in the [user guide](docs/user-guide.md).
 
-### Queue Browser
-- Bind up to **3 queues simultaneously** and switch between them; each keeps its own message history.
-- Real-time message arrival into a sortable, scrollable table.
-- Per-message **details panel** — properties, application properties, destination, payload preview, raw dump.
-- One-click **copy** for destination, replication-group ID, and content.
-- **Filter modal** with AND/OR matching across Message ID, type, destination, body content, and standard or application properties. Supports `*` wildcards; body filter is auto-substring.
-- **Forward** one or many messages to a topic, queue, or each message's original destination. Per-message status (QUEUED → SENDING → SUCCESS / FAILED) with retry-only-failed.
-- **Delete** single or bulk messages (read-write queues only; hidden on read-only).
-- **Download** as ZIP — payload-only or full JSON (properties + payload).
-- Keyboard shortcuts: **Enter** to bind, **Enter** to send forward.
-- Modals dismiss on **Escape** or backdrop click.
-
-### Queue Copy
-- Copy or **move** messages between queues, on the same broker or **across brokers**.
-- Two-column form — read-only Source mirror + editable Destination with **Same Broker** / **Same VPN** shortcuts.
-- Destination can be a **queue** (with SEMP-driven picker) or a **topic**.
-- Bounded runs — snapshots the source before starting so the run has a defined end.
-- Pre-flight verification (count, size, quota, oldest/newest message ID) via SEMP, with QueueBrowser fallback if SEMP is unavailable.
-- Live progress with per-message ACK and a **Continue beyond** prompt for messages that arrive during the run.
-- Stops on the first error (quota, permission, rejection) so partial state is visible.
-
-### Queue Subscriptions
-- Lists every `(VPN, queue, topic-subscription)` triple visible to your SEMP user — answer "which queues subscribe to topic X?" without walking each queue manually.
-- Three column filters, AND-combined.
-- VPN / Queue filters: case-insensitive substring by default; `*` switches to anchored wildcard (`def*`, `*ult`, `def*ult`).
-- Subscription filter uses **Solace topic-set intersection** (`*` = one level, `>` = trailing levels) — typing `orders/new` matches a stored `orders/*`.
-- Loaded list is cached in memory; **Refresh** re-fetches.
-
-### Cross-cutting
-- **SEMP queue picker** — used by Browser, Copy, and Subscriptions to select queues without leaving the current module.
-- **Toasts** for every success / failure.
-- **Self-contained HTML** — `index.html` includes all app code; the two vendor scripts `solclient.js` and `jszip.min.js` sit alongside it (see [deployment.md](docs/deployment.md#external-runtime-dependencies)).
-- **Demo bundle** (`mock.html`) — every module exercised against mock data, no broker required.
-- **Containerised gateway** — optional single-binary Go HTTPS gateway serves the PWA, exposes a `/hosted` probe, and reverse-proxies SEMP/SMF traffic so browsers only need to trust one cert. Distroless image at `ghcr.io/solacelabs/solace-msg-utility`; see [deployment.md](docs/deployment.md#containerised-gateway).
+- **Connections** -- two independent connections, Solace Web Messaging for messages and SEMP REST for management, with Basic or OAuth2 sign-in, saved profiles and live status dots. In Provisioned mode you sign in and pick from the brokers and VPNs you may use, with no credentials to type.
+- **Queue Browser** -- bind up to three queues at once and watch messages arrive in a sortable table. Inspect each message, filter by properties and body, forward messages to a topic or queue with per-message status, delete them (read-write queues only) and download them as a ZIP.
+- **Queue Copy** -- copy or move messages between queues on one broker or across brokers. A verify step checks count, size and quota first, a run is bounded to the snapshot taken at verify time, and it stops on the first error so partial state stays visible.
+- **Queue Subscriptions** -- list every VPN, queue and topic subscription your SEMP user can see, filter each column, and answer "which queues subscribe to topic X?" with Solace topic matching.
+- **Administration (Provisioned mode)** -- manage users, brokers, grants, gateway settings, certificates and encrypted backups from `/solAdmin`.
+- **Self-signed certificates** -- a helper dialog explains how to trust a broker certificate that the browser blocks.
+- **Built-in manual** -- the About page shows the version you run, and its Help tab holds an illustrated chapter for each page of your build.
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [user-guide.md](docs/user-guide.md) | Full UI walkthrough, every field, every screen |
-| [deployment.md](docs/deployment.md) | Hosting options, network requirements, TLS |
-| [developer-guide.md](docs/developer-guide.md) | Setup, build, testing, adding modules, code conventions |
-| [architecture.md](docs/architecture.md) | System diagrams, module structure (developers) |
-| [contributing.md](docs/contributing.md) | PR workflow, coding standards, test requirements |
-| [test-report.md](docs/test-report.md) | Test methodology, coverage strategy |
-| [git.md](docs/git.md) | Release process, CI workflow, image tags (maintainers) |
+| Document | For whom | What it covers |
+| --- | --- | --- |
+| [user-guide.md](docs/user-guide.md) | Users and administrators | Every screen and field, click by click |
+| [demo.md](docs/demo.md) | Anyone evaluating the tool | The two offline demos: what they hold, accept and simulate |
+| [deployment.md](docs/deployment.md) | Operators | Choosing a mode, hosting, the image and its settings, network requirements, updating |
+| [provisioned-mode.md](docs/provisioned-mode.md) | Operators and administrators | Provisioned mode: setup, settings, two-factor, certificates, backups, security model, troubleshooting |
+| [developer-guide.md](docs/developer-guide.md) | Developers | Setup, build, project structure, adding a module, code conventions |
+| [architecture.md](docs/architecture.md) | Developers | System design, module isolation, events and the gateway internals |
+| [testing.md](docs/testing.md) | Developers | How the tests are organized, coverage policy, how to run each suite |
+| [contributing.md](docs/contributing.md) | Contributors | Workflow, dev-script tasks and the pull request checklist |
+| [git.md](docs/git.md) | Maintainers | Branching, releases, image tags and the tag workflow |
 
 ## License
 

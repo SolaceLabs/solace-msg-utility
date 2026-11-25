@@ -1,9 +1,18 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Kernel } from '../../src/core/kernel';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createKernel } from '../../src/core/kernel';
 import { getLogLevel, setLogLevel } from '../../src/core/logger';
-import { setHosted } from '../../src/core/hosted';
+import { REQUEST_TIMEOUT_MS } from '../../src/core/timing';
+import { showToast } from '../../src/core/toast';
 import { LogLevel, DEFAULT_LOG_LEVEL } from '../../src/core/constants';
-import type { PwaModule, RegisteredModule, AppContext } from '../../src/core/types';
+import type { PwaModule, RegisteredModule, AppContext, ManagedSession } from '../../src/core/types';
+
+function managedSession(over: Partial<ManagedSession> = {}): ManagedSession {
+    return {
+        admin: false, username: 'u', broker: 'b',
+        vpns: [], operate: [], readOnly: [], modules: ['queue-browser'],
+        ...over,
+    };
+}
 
 function createMockModule(overrides: Partial<PwaModule> = {}): PwaModule {
     return {
@@ -15,7 +24,7 @@ function createMockModule(overrides: Partial<PwaModule> = {}): PwaModule {
 }
 
 /**
- * Wrap a module in a {module, priority} tuple for the Kernel constructor.
+ * Wrap a module in a {module, priority} tuple for createKernel.
  * Priority defaults to 50 — tests that care about ordering pass an explicit
  * value (`reg(modA, 100)`).
  */
@@ -27,10 +36,13 @@ function setupDOM(moduleIds: string[]) {
     document.body.innerHTML = `
         <div id="main-sidebar">
             <button id="btn-sidebar-toggle"></button>
+            <div id="sidebar-account"></div>
+            <nav id="sidebar-nav"></nav>
         </div>
-        <nav id="sidebar-nav"></nav>
-        <div id="module-container"></div>
+        <div id="module-container"><div id="app-loading" role="status">Loading...</div></div>
         <h1 id="page-title"></h1>
+        <div id="notification-bell-slot"></div>
+        <div id="toast-container"></div>
         <div id="status-indicator-client"></div>
         <div id="status-indicator-semp"></div>
         ${moduleIds.map(id => `
@@ -46,7 +58,7 @@ describe('Kernel', () => {
         it('installs modules and renders sidebar', async () => {
             const mod = createMockModule({ id: 'test-module', name: 'Test' });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
 
             await kernel.start();
 
@@ -55,51 +67,31 @@ describe('Kernel', () => {
             expect(nav?.innerHTML).toContain('Test');
         });
 
-        it('applies ?logLevel= URL override before any kernel logging (closes COV-6)', async () => {
+        it('applies ?logLevel= URL override before any kernel logging', async () => {
             // The kernel parses `?logLevel=DEBUG` from window.location.search
             // at start time and calls setLogLevel(...) BEFORE the first
             // banner log fires. Without this test, the truthy branch of
-            // `if (fromUrl !== null) setLogLevel(fromUrl)` at kernel.ts:69
+            // `if (fromUrl !== null) setLogLevel(fromUrl)` in start()
             // is unexercised — regression would silently strand users at
             // INFO level even when they pass ?logLevel=DEBUG in the URL.
             const priorLevel = getLogLevel();
-            const priorSearch = window.location.search;
-            // jsdom doesn't allow direct assignment to .search; redefine.
-            Object.defineProperty(window, 'location', {
-                value: { ...window.location, search: '?logLevel=DEBUG' },
-                writable: true,
-                configurable: true,
-            });
+            const priorUrl = window.location.href;
+            setLogLevel(DEFAULT_LOG_LEVEL);
+            // history.replaceState changes the real jsdom location in place, so
+            // the original URL is restored exactly.
+            window.history.replaceState(null, '', '?logLevel=DEBUG');
             try {
+                expect(window.location.search).toBe('?logLevel=DEBUG');
                 const mod = createMockModule({ id: 'test-module', name: 'Test' });
                 setupDOM(['test-module']);
-                const kernel = new Kernel([reg(mod)]);
+                const kernel = createKernel([reg(mod)]);
                 await kernel.start();
                 expect(getLogLevel()).toBe(LogLevel.DEBUG);
             } finally {
-                // Restore the original location.search + log level for test isolation.
-                Object.defineProperty(window, 'location', {
-                    value: { ...window.location, search: priorSearch },
-                    writable: true,
-                    configurable: true,
-                });
+                window.history.replaceState(null, '', priorUrl);
                 setLogLevel(priorLevel);
             }
-        });
-
-        it('does NOT change log level when ?logLevel= is absent', async () => {
-            // Falsy-branch anchor for the same gate. Default search is ''.
-            const priorLevel = getLogLevel();
-            setLogLevel(DEFAULT_LOG_LEVEL);
-            try {
-                const mod = createMockModule({ id: 'test-module', name: 'Test' });
-                setupDOM(['test-module']);
-                const kernel = new Kernel([reg(mod)]);
-                await kernel.start();
-                expect(getLogLevel()).toBe(DEFAULT_LOG_LEVEL);
-            } finally {
-                setLogLevel(priorLevel);
-            }
+            expect(window.location.href).toBe(priorUrl);
         });
 
         it('installs modules in priority order', async () => {
@@ -114,7 +106,7 @@ describe('Kernel', () => {
             });
 
             setupDOM(['a', 'b']);
-            const kernel = new Kernel([reg(modA, 10), reg(modB, 100)]);
+            const kernel = createKernel([reg(modA, 10), reg(modB, 100)]);
             await kernel.start();
 
             expect(order).toEqual(['b', 'a']);
@@ -123,7 +115,7 @@ describe('Kernel', () => {
         it('activates the first module after install', async () => {
             const mod = createMockModule({ id: 'test-module', name: 'Test Module' });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const pageTitle = document.getElementById('page-title');
@@ -136,7 +128,7 @@ describe('Kernel', () => {
         it('sets up sidebar toggle', async () => {
             const mod = createMockModule({ id: 'test-module' });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const sidebar = document.getElementById('main-sidebar')!;
@@ -147,6 +139,23 @@ describe('Kernel', () => {
             expect(sidebar.classList.contains('collapsed')).toBe(false);
         });
 
+        it('mounts a module\'s account control in the sidebar\'s account slot, one at a time', async () => {
+            let capturedCtx: AppContext | null = null;
+            const mod = createMockModule({
+                id: 'test-module',
+                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
+            });
+            setupDOM(['test-module']);
+            const kernel = createKernel([reg(mod)]);
+            await kernel.start();
+
+            const first = document.createElement('span');
+            const second = document.createElement('span');
+            capturedCtx!.mountSidebarAccount(first);
+            capturedCtx!.mountSidebarAccount(second);
+            expect(Array.from(document.getElementById('sidebar-account')!.children)).toEqual([second]);
+        });
+
         it('bridges jszip:loaded window event to EventBus', async () => {
             let capturedCtx: AppContext | null = null;
             const mod = createMockModule({
@@ -154,7 +163,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const handler = vi.fn();
@@ -173,53 +182,208 @@ describe('Kernel', () => {
             });
             setupDOM(['test-module']);
             (window as any).jszipLoaded = true;
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             expect(handler).toHaveBeenCalledTimes(1);
             delete (window as any).jszipLoaded;
         });
 
-        it('clears module container on start', async () => {
+        it('does not empty the module container at start: content already there stays, module views are appended', async () => {
             setupDOM(['test-module']);
-            document.getElementById('module-container')!.innerHTML = '<div>old stuff</div>';
+            document.getElementById('module-container')!.insertAdjacentHTML('afterbegin', '<div id="pre-existing">old stuff</div>');
             const mod = createMockModule({ id: 'test-module' });
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
-            // Old content should be gone
-            expect(document.getElementById('module-container')!.innerHTML).not.toContain('old stuff');
+            const children = Array.from(document.getElementById('module-container')!.children).map(c => c.id);
+            expect(children).toEqual(['pre-existing', 'module-view-test-module']);
+        });
+
+        describe('loading placeholder and start-up failures', () => {
+            it.each(['sidebar-account', 'toast-container', 'status-indicator-semp'])(
+                'refuses to start over a shell without #%s, before any module installs', async (id) => {
+                    const mod = createMockModule({ id: 'test-module' });
+                    setupDOM(['test-module']);
+                    document.getElementById(id)!.remove();
+
+                    await expect(createKernel([reg(mod)]).start()).rejects.toThrow(`Required element missing: #${id}`);
+                    expect(mod.install).not.toHaveBeenCalled();
+                });
+
+            it('keeps the placeholder while modules install and removes it when the first view is shown', async () => {
+                let presentDuringInstall = false;
+                const mod = createMockModule({
+                    id: 'test-module',
+                    install: vi.fn(async () => { presentDuringInstall = !!document.getElementById('app-loading'); }),
+                });
+                setupDOM(['test-module']);
+                await createKernel([reg(mod)]).start();
+
+                expect(presentDuringInstall).toBe(true);
+                expect(document.getElementById('app-loading')).toBeNull();
+                expect(document.getElementById('module-view-test-module')!.classList.contains('hidden')).toBe(false);
+            });
+
+            it('replaces the placeholder text with a message when no module is registered', async () => {
+                setupDOM([]);
+                await createKernel([]).start();
+
+                const loading = document.getElementById('app-loading')!;
+                expect(loading.textContent).toBe('No modules are available. Check the browser console.');
+                expect(document.getElementById('sidebar-nav')!.innerHTML).toBe('');
+            });
+
+            it('replaces the placeholder text with a message when every module fails to install', async () => {
+                const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+                setupDOM(['a']);
+                const failing = createMockModule({ id: 'a', name: 'A', install: vi.fn(async () => { throw new Error('boom'); }) });
+                await createKernel([reg(failing)]).start();
+
+                expect(document.getElementById('app-loading')!.textContent)
+                    .toBe('No modules are available. Check the browser console.');
+                expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('No modules installed successfully'));
+                expect(document.getElementById('page-title')!.textContent).toBe('');
+                errSpy.mockRestore();
+            });
+
+            it('shows one error toast naming a module whose install throws, and still installs the others', async () => {
+                const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+                const failing = createMockModule({
+                    id: 'a', name: 'Alpha',
+                    install: vi.fn(async () => { throw new Error('boom'); }),
+                });
+                const healthy = createMockModule({ id: 'b', name: 'Beta' });
+                setupDOM(['a', 'b']);
+                await createKernel([reg(failing, 100), reg(healthy, 50)]).start();
+
+                const toasts = Array.from(document.querySelectorAll('#toast-container .toast--error'));
+                expect(toasts.map(t => t.textContent)).toEqual([
+                    'Module "Alpha" failed to install. See the browser console for details.',
+                ]);
+                expect(healthy.install).toHaveBeenCalledTimes(1);
+                expect(document.getElementById('page-title')!.textContent).toBe('Beta');
+                errSpy.mockRestore();
+            });
+
+            it('names each failed module in its own toast', async () => {
+                const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+                const bad = (id: string, name: string) => createMockModule({
+                    id, name, install: vi.fn(async () => { throw new Error('boom'); }),
+                });
+                setupDOM(['a', 'b']);
+                await createKernel([reg(bad('a', 'Alpha'), 100), reg(bad('b', 'Beta'), 50)]).start();
+
+                const texts = Array.from(document.querySelectorAll('#toast-container .toast--error')).map(t => t.textContent);
+                expect(texts).toEqual([
+                    'Module "Alpha" failed to install. See the browser console for details.',
+                    'Module "Beta" failed to install. See the browser console for details.',
+                ]);
+                errSpy.mockRestore();
+            });
+
+            it('releases the event bus even when an install path throws outside the module', async () => {
+                // importNode runs in installModule before mod.install's own try/catch,
+                // so its throw escapes the loop: the finally must still flush the bus.
+                const handler = vi.fn();
+                const first = createMockModule({
+                    id: 'a', name: 'A',
+                    install: vi.fn(async (ctx: AppContext) => {
+                        ctx.eventBus.on('semp:connected', handler);
+                        ctx.eventBus.emit('semp:connected');
+                    }),
+                });
+                const second = createMockModule({ id: 'b', name: 'B' });
+                setupDOM(['a', 'b']);
+
+                const realImport = document.importNode.bind(document);
+                let calls = 0;
+                const importSpy = vi.spyOn(document, 'importNode').mockImplementation(((node: Node, deep?: boolean) => {
+                    if (++calls === 2) throw new Error('importNode blew up');
+                    return realImport(node, deep);
+                }) as typeof document.importNode);
+                try {
+                    await expect(createKernel([reg(first, 100), reg(second, 50)]).start())
+                        .rejects.toThrow('importNode blew up');
+                } finally {
+                    importSpy.mockRestore();
+                }
+
+                // Held during the install of a, delivered on release: not lost, not stuck.
+                expect(handler).toHaveBeenCalledTimes(1);
+            });
+
+            it('hands every module the same EventBus, so what one emits another hears', async () => {
+                const buses: Record<string, AppContext['eventBus']> = {};
+                const heardByB: string[] = [];
+                const modA = createMockModule({ id: 'mod-a', name: 'A', install: vi.fn(async (ctx: AppContext) => { buses.a = ctx.eventBus; }) });
+                const modB = createMockModule({
+                    id: 'mod-b', name: 'B',
+                    install: vi.fn(async (ctx: AppContext) => {
+                        buses.b = ctx.eventBus;
+                        ctx.eventBus.on('connection:check-connection', ({ queue }) => heardByB.push(queue));
+                    }),
+                });
+                setupDOM(['mod-a', 'mod-b']);
+
+                await createKernel([reg(modA, 10), reg(modB, 5)]).start();
+
+                expect(buses.a).toBe(buses.b);
+                buses.a.emit('connection:check-connection', { vpn: 'v', queue: 'q1' });
+                expect(heardByB).toEqual(['q1']);
+            });
+
+            it('delivers an event emitted in a higher-priority install to a lower-priority module that subscribes only in its own install', async () => {
+                // The hold-and-replay guarantee: connections (priority 100) emits while
+                // installing, before queue-copy (70) has subscribed; the bus holds the
+                // emit and replays it once every install has finished.
+                const received = vi.fn();
+                const emitter = createMockModule({
+                    id: 'emitter', name: 'Emitter',
+                    install: vi.fn(async (ctx: AppContext) => { ctx.eventBus.emit('semp:connected'); }),
+                });
+                const late = createMockModule({
+                    id: 'late', name: 'Late',
+                    install: vi.fn(async (ctx: AppContext) => { ctx.eventBus.on('semp:connected', received); }),
+                });
+                setupDOM(['emitter', 'late']);
+                const kernel = createKernel([reg(late, 70), reg(emitter, 100)]);
+
+                await kernel.start();
+
+                expect(received).toHaveBeenCalledTimes(1);
+            });
         });
 
         it('handles missing template gracefully', async () => {
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
             const mod = createMockModule({ id: 'nonexistent' });
             setupDOM([]); // No templates
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Template for module'));
+            expect(mod.install).not.toHaveBeenCalled();
         });
 
         it('handles module install failure gracefully', async () => {
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
             const mod = createMockModule({
-                id: 'failing',
+                id: 'failing', name: 'Failing',
                 install: vi.fn(async () => { throw new Error('install failed'); })
             });
-            setupDOM(['failing']);
-            const kernel = new Kernel([reg(mod)]);
+            const good = createMockModule({ id: 'good', name: 'Good' });
+            setupDOM(['failing', 'good']);
+            const kernel = createKernel([reg(mod, 100), reg(good, 50)]);
             await kernel.start();
 
             expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to install'), expect.any(Error));
-        });
-
-        it('works with no modules', async () => {
-            setupDOM([]);
-            const kernel = new Kernel([]);
-            await kernel.start();
-            const nav = document.getElementById('sidebar-nav');
-            expect(nav?.innerHTML).toBe('');
+            // The failed module is not registered: the next module is active, its view
+            // stays hidden and the nav omits it.
+            expect(document.getElementById('page-title')?.textContent).toBe('Good');
+            expect(document.getElementById('module-view-failing')!.classList.contains('hidden')).toBe(true);
+            expect(document.getElementById('module-view-good')!.classList.contains('hidden')).toBe(false);
+            expect(document.getElementById('sidebar-nav')?.innerHTML).not.toContain('Failing');
         });
 
         it('skips failed-to-install first module and activates the next', async () => {
@@ -233,7 +397,7 @@ describe('Kernel', () => {
             setupDOM(['b']);
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
+            const kernel = createKernel([reg(modA, 100), reg(modB, 50)]);
             await kernel.start();
 
             // `a` never installed (no template). `b` should be active.
@@ -243,53 +407,28 @@ describe('Kernel', () => {
             consoleSpy.mockRestore();
         });
 
-        it('logs an error and navigates nowhere when every module fails to install', async () => {
-            const modA = createMockModule({ id: 'a', name: 'A' });
-            setupDOM([]); // no templates at all → nothing installs
-            const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-            const kernel = new Kernel([reg(modA)]);
-            await kernel.start();
-
-            expect(errSpy).toHaveBeenCalledWith(
-                expect.stringContaining('No modules installed successfully')
-            );
-            errSpy.mockRestore();
-        });
-
-        it('is idempotent — second start() is a no-op that logs a warning', async () => {
-            const mod = createMockModule({ id: 'test-module' });
+        it('is idempotent -- second start() is a no-op that logs a warning and bridges window events once', async () => {
+            let ctx: AppContext | null = null;
+            const mod = createMockModule({ id: 'test-module', install: vi.fn(async c => { ctx = c; }) });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
 
             await kernel.start();
             expect(mod.install).toHaveBeenCalledTimes(1);
 
             const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
             await kernel.start();
-            // install() must NOT run a second time — the guard's whole point.
+            await kernel.start();
+            // install() must NOT run again -- the guard's whole point.
             expect(mod.install).toHaveBeenCalledTimes(1);
             expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('called more than once'));
             warnSpy.mockRestore();
-        });
 
-        it('idempotency prevents window listener accumulation across start() calls', async () => {
-            const mod = createMockModule({ id: 'test-module' });
-            setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
-            await kernel.start();
-
-            // Snapshot the current jszip:loaded listener count via a probe: calling
-            // start() again and dispatching the event should not cause the EventBus
-            // to emit twice. We can observe this via the bus — but the bus isn't
-            // exposed, so instead we rely on the fact that install() is gated.
-            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-            await kernel.start();
-            await kernel.start();
-            // install stays at 1 call — transitively proves no second window
-            // listener was registered either (both happen inside the same start() block).
-            expect(mod.install).toHaveBeenCalledTimes(1);
-            warnSpy.mockRestore();
+            // A repeated start() that re-ran the bridge would forward the window event twice.
+            const handler = vi.fn();
+            ctx!.eventBus.on('jszip:loaded', handler);
+            window.dispatchEvent(new Event('jszip:loaded'));
+            expect(handler).toHaveBeenCalledTimes(1);
         });
     });
 
@@ -298,7 +437,7 @@ describe('Kernel', () => {
             const modA = createMockModule({ id: 'a', name: 'A' });
             const modB = createMockModule({ id: 'b', name: 'B' });
             setupDOM(['a', 'b']);
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
+            const kernel = createKernel([reg(modA, 100), reg(modB, 50)]);
             await kernel.start();
 
             kernel.navigateTo('b');
@@ -310,7 +449,7 @@ describe('Kernel', () => {
         it('does nothing for unknown module id', async () => {
             const mod = createMockModule({ id: 'a', name: 'A' });
             setupDOM(['a']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             kernel.navigateTo('nonexistent');
@@ -322,7 +461,7 @@ describe('Kernel', () => {
             const modA = createMockModule({ id: 'a', name: 'A' });
             const modB = createMockModule({ id: 'b', name: 'B' });
             setupDOM(['a', 'b']);
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
+            const kernel = createKernel([reg(modA, 100), reg(modB, 50)]);
             await kernel.start();
 
             kernel.navigateTo('b');
@@ -341,7 +480,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const handler = vi.fn();
@@ -359,7 +498,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const indClient = document.getElementById('status-indicator-client')!;
@@ -383,7 +522,7 @@ describe('Kernel', () => {
             });
             const modB = createMockModule({ id: 'b', name: 'B' });
             setupDOM(['a', 'b']);
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
+            const kernel = createKernel([reg(modA, 100), reg(modB, 50)]);
             await kernel.start();
 
             kernel.navigateTo('b');
@@ -404,7 +543,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const mockResponse = { status: 200, ok: true };
@@ -438,7 +577,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
@@ -462,19 +601,21 @@ describe('Kernel', () => {
             // The kernel applies this transformation uniformly for every
             // SEMP call, regardless of which path the caller asked for —
             // including paths extracted from a broker-emitted nextPageUri.
-            setHosted(true);
-            try {
+            // The hosted verdict's one home is AppState.connConfig, which the
+            // connections module publishes from its /hosted probe.
+            {
                 let capturedCtx: AppContext | null = null;
                 const mod = createMockModule({
                     id: 'test-module',
                     install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
                 });
                 setupDOM(['test-module']);
-                const kernel = new Kernel([reg(mod)]);
+                const kernel = createKernel([reg(mod)]);
                 await kernel.start();
 
                 (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
 
+                capturedCtx!.setState('connConfig', { connModes: 'direct', defaultConn: 'direct', hosted: true });
                 capturedCtx!.setState('sempCredentials', {
                     user: 'admin', pass: 'admin', baseUrl: '(diagnostic)',
                     protocol: 'https', host: 'broker-internal', port: '943', urlPath: '',
@@ -488,9 +629,54 @@ describe('Kernel', () => {
                 // exact host so the assertion is robust to test-runner config.
                 const calledWith = (globalThis.fetch as any).mock.calls[0][0] as string;
                 expect(calledWith).toMatch(/^https?:\/\/[^/]+\/https\/943\/broker-internal\/SEMP\/v2\/monitor\/msgVpns\?cursor=xyz$/);
-            } finally {
-                setHosted(false);
             }
+        });
+
+        describe('sempFetch deadline', () => {
+            async function directCtx(): Promise<AppContext> {
+                let capturedCtx: AppContext | null = null;
+                const mod = createMockModule({
+                    id: 'test-module',
+                    install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
+                });
+                setupDOM(['test-module']);
+                await createKernel([reg(mod)]).start();
+                capturedCtx!.setState('sempCredentials', {
+                    user: 'admin', pass: 'admin', baseUrl: 'http://test:8080',
+                    protocol: 'http', host: 'test', port: '8080', urlPath: '',
+                });
+                return capturedCtx!;
+            }
+
+            it("gives every request a REQUEST_TIMEOUT_MS deadline joined to the caller's own signal", async () => {
+                const ctx = await directCtx();
+                const timeout = vi.spyOn(AbortSignal, 'timeout');
+                const cancel = new AbortController();
+                (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
+
+                await ctx.sempFetch('/SEMP', { method: 'POST', signal: cancel.signal });
+
+                expect(timeout).toHaveBeenCalledWith(REQUEST_TIMEOUT_MS);
+                const { signal } = (globalThis.fetch as any).mock.calls[0][1];
+                expect(signal.aborted).toBe(false);
+                cancel.abort();
+                expect(signal.aborted).toBe(true);
+            });
+
+            it('a broker that never answers rejects the request with a TimeoutError', async () => {
+                const ctx = await directCtx();
+                const deadline = new AbortController();
+                vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal);
+                (globalThis.fetch as any).mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+                    init.signal!.addEventListener('abort', () => reject(init.signal!.reason));
+                }));
+
+                const pending = ctx.sempFetch('/SEMP/v2/monitor/msgVpns');
+                deadline.abort(new DOMException('The operation timed out.', 'TimeoutError'));
+
+                await expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
+                expect(ctx.appState.sempCredentials).not.toBeNull();
+            });
         });
 
         it('sempFetch handles 401 by disconnecting SEMP', async () => {
@@ -500,7 +686,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             capturedCtx!.setState('sempCredentials', {
@@ -512,12 +698,66 @@ describe('Kernel', () => {
             const disconnectHandler = vi.fn();
             capturedCtx!.eventBus.on('semp:disconnected', disconnectHandler);
 
+            const signOut = vi.fn();
+            capturedCtx!.eventBus.on('rbac:sign-out-requested', signOut);
+
             (globalThis.fetch as any).mockResolvedValue({ status: 401, ok: false });
             await capturedCtx!.sempFetch('/SEMP');
 
             expect(capturedCtx!.appState.isSempConnected).toBe(false);
             expect(capturedCtx!.appState.sempCredentials).toBe(null);
             expect(disconnectHandler).toHaveBeenCalled();
+            // A broker refusing a Direct credential is not a gateway sign-out.
+            expect(signOut).not.toHaveBeenCalled();
+        });
+
+        // A managed session's SEMP goes to the gateway relay, which adds the
+        // broker's stored account; the browser holds no SEMP credential.
+        describe('sempFetch in a managed session (relay)', () => {
+            async function relayCtx(): Promise<AppContext> {
+                let capturedCtx: AppContext | null = null;
+                const mod = createMockModule({
+                    id: 'test-module',
+                    install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
+                });
+                setupDOM(['test-module']);
+                await createKernel([reg(mod)]).start();
+                capturedCtx!.setState('sempCredentials', {
+                    user: '', pass: '', baseUrl: '/managed/relay/b1', protocol: 'https', host: 'b1', port: '', urlPath: '',
+                    relay: '/managed/relay/b1',
+                });
+                capturedCtx!.setState('isSempConnected', true);
+                return capturedCtx!;
+            }
+
+            it('sends to the relay base with no Authorization header', async () => {
+                const ctx = await relayCtx();
+                (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
+                await ctx.sempFetch('/SEMP/v2/monitor/msgVpns?count=10', { headers: { Accept: 'application/json' } });
+                const [url, opts] = (globalThis.fetch as any).mock.calls[0];
+                expect(url).toBe('/managed/relay/b1/SEMP/v2/monitor/msgVpns?count=10');
+                expect(opts.headers).toEqual({ Accept: 'application/json' });
+            });
+
+            it('a relay 401 (the gateway session ended) also asks the session owner to sign out', async () => {
+                const ctx = await relayCtx();
+                const signOut = vi.fn();
+                ctx.eventBus.on('rbac:sign-out-requested', signOut);
+                (globalThis.fetch as any).mockResolvedValue({ status: 401, ok: false });
+                await ctx.sempFetch('/SEMP');
+                expect(ctx.appState.sempCredentials).toBeNull();
+                expect(signOut).toHaveBeenCalledTimes(1);
+            });
+
+            it.each([403, 502])("a relay %i (read_only, upstream_*) leaves the connection up", async (status) => {
+                const ctx = await relayCtx();
+                const signOut = vi.fn();
+                ctx.eventBus.on('rbac:sign-out-requested', signOut);
+                (globalThis.fetch as any).mockResolvedValue({ status, ok: false });
+                await ctx.sempFetch('/SEMP');
+                expect(ctx.appState.isSempConnected).toBe(true);
+                expect(signOut).not.toHaveBeenCalled();
+            });
         });
 
         it('sempFetch without credentials does not assemble or add auth header', async () => {
@@ -533,7 +773,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             (globalThis.fetch as any).mockResolvedValue({ status: 200, ok: true });
@@ -542,39 +782,13 @@ describe('Kernel', () => {
             const callArgs = (globalThis.fetch as any).mock.calls[0];
             expect(callArgs[0]).toBe('/SEMP');
             expect(callArgs[1].headers.Authorization).toBeUndefined();
-        });
 
-        it('sempFetch propagates fetch errors', async () => {
-            let capturedCtx: AppContext | null = null;
-            const mod = createMockModule({
-                id: 'test-module',
-                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
-            });
-            setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
-            await kernel.start();
-
-            (globalThis.fetch as any).mockRejectedValue(new Error('Network error'));
-            await expect(capturedCtx!.sempFetch('/SEMP')).rejects.toThrow('Network error');
-        });
-
-        it('sempFetch propagates synchronous URL construction TypeError', async () => {
-            // fetch() can throw synchronously (not via a rejected Promise) when the URL
-            // is unparseable — e.g. contains a NUL byte. The wrapper must let that throw
-            // propagate so the caller can handle it, same as it does for rejections.
-            let capturedCtx: AppContext | null = null;
-            const mod = createMockModule({
-                id: 'test-module',
-                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
-            });
-            setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
-            await kernel.start();
-
-            (globalThis.fetch as any).mockImplementation(() => {
-                throw new TypeError("Failed to construct 'URL': Invalid URL");
-            });
-            await expect(capturedCtx!.sempFetch('/\0bad')).rejects.toThrow(TypeError);
+            // A 401 with nothing connected tears down and asks nobody to sign out.
+            const signOut = vi.fn();
+            capturedCtx!.eventBus.on('rbac:sign-out-requested', signOut);
+            (globalThis.fetch as any).mockResolvedValue({ status: 401, ok: false });
+            await capturedCtx!.sempFetch('/SEMP');
+            expect(signOut).not.toHaveBeenCalled();
         });
 
         it('provides copyToClipboard that writes to clipboard', async () => {
@@ -584,7 +798,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             await capturedCtx!.copyToClipboard('test text');
@@ -599,7 +813,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const btn = document.createElement('button');
@@ -627,7 +841,7 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             await capturedCtx!.copyToClipboard('');
@@ -642,30 +856,12 @@ describe('Kernel', () => {
                 install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             (navigator.clipboard.writeText as any).mockRejectedValueOnce(new Error('denied'));
             await capturedCtx!.copyToClipboard('text');
             expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('clipboard'), expect.any(Error));
-        });
-
-        it('provides config from window.APP_CONFIG', async () => {
-            (window as any).APP_CONFIG = { useMocks: true, custom: 'value' };
-            let capturedCtx: AppContext | null = null;
-            const mod = createMockModule({
-                id: 'test-module',
-                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
-            });
-            setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
-            await kernel.start();
-
-            expect(capturedCtx!.config.useMocks).toBe(true);
-            expect(capturedCtx!.config.custom).toBe('value');
-
-            // Restore
-            (window as any).APP_CONFIG = { useMocks: false };
         });
     });
 
@@ -676,7 +872,7 @@ describe('Kernel', () => {
                 icon: '<svg class="custom-icon"></svg>'
             });
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const nav = document.getElementById('sidebar-nav')!;
@@ -688,7 +884,7 @@ describe('Kernel', () => {
             // Explicitly no icon
             delete (mod as any).icon;
             setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
+            const kernel = createKernel([reg(mod)]);
             await kernel.start();
 
             const nav = document.getElementById('sidebar-nav')!;
@@ -699,7 +895,7 @@ describe('Kernel', () => {
             const modA = createMockModule({ id: 'a', name: 'A' });
             const modB = createMockModule({ id: 'b', name: 'B' });
             setupDOM(['a', 'b']);
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
+            const kernel = createKernel([reg(modA, 100), reg(modB, 50)]);
             await kernel.start();
 
             const navItems = document.querySelectorAll('.nav-item');
@@ -708,146 +904,251 @@ describe('Kernel', () => {
 
             expect(document.getElementById('page-title')?.textContent).toBe('B');
         });
-
-        it('does nothing if sidebarNav is missing', async () => {
-            document.body.innerHTML = `
-                <div id="module-container"></div>
-                <h1 id="page-title"></h1>
-                <template data-module-id="test-module"><div>content</div></template>
-            `;
-            const mod = createMockModule({ id: 'test-module' });
-            const kernel = new Kernel([reg(mod)]);
-            await kernel.start();
-
-            // Despite the missing sidebar nav, the module pipeline must not
-            // short-circuit: install() runs, the wrapper is mounted, and the
-            // first module is activated by navigateTo (hidden class removed).
-            expect(mod.install).toHaveBeenCalled();
-            const wrapper = document.getElementById('module-view-test-module');
-            expect(wrapper).not.toBeNull();
-            expect(wrapper?.classList.contains('hidden')).toBe(false);
-        });
     });
 
-    describe('updateGlobalUI', () => {
-        it('handles missing status indicators gracefully', async () => {
-            document.body.innerHTML = `
-                <nav id="sidebar-nav"></nav>
-                <div id="module-container"></div>
-                <h1 id="page-title"></h1>
-                <template data-module-id="test-module"><div>content</div></template>
-            `;
-            let capturedCtx: AppContext | null = null;
-            const mod = createMockModule({
-                id: 'test-module',
-                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
+    describe('managed RBAC visibility', () => {
+        const nav = () => document.getElementById('sidebar-nav')!;
+
+        it('hides admin-only modules from the sidebar for a non-admin session', async () => {
+            let ctx: AppContext | null = null;
+            const qb = createMockModule({ id: 'queue-browser', name: 'Browser', install: vi.fn(async c => { ctx = c; }) });
+            const mgr = createMockModule({ id: 'user-management', name: 'Users' });
+            setupDOM(['queue-browser', 'user-management']);
+            const kernel = createKernel([reg(qb, 80), reg(mgr, 20)]);
+            await kernel.start();
+
+            // No managed session yet → both visible.
+            expect(nav().innerHTML).toContain('Users');
+
+            ctx!.setState('managed', managedSession({ admin: false }));
+            ctx!.eventBus.emit('rbac:changed');
+
+            expect(nav().innerHTML).toContain('Browser');
+            expect(nav().innerHTML).not.toContain('Users');
+        });
+
+        it('shows admin-only modules for an admin session', async () => {
+            let ctx: AppContext | null = null;
+            const qb = createMockModule({ id: 'queue-browser', name: 'Browser', install: vi.fn(async c => { ctx = c; }) });
+            const mgr = createMockModule({ id: 'user-management', name: 'Users' });
+            setupDOM(['queue-browser', 'user-management']);
+            const kernel = createKernel([reg(qb, 80), reg(mgr, 20)]);
+            await kernel.start();
+
+            ctx!.setState('managed', managedSession({ admin: true }));
+            ctx!.eventBus.emit('rbac:changed');
+
+            expect(nav().innerHTML).toContain('Users');
+            // Active module (queue-browser) keeps its highlight across the re-render.
+            const active = Array.from(document.querySelectorAll('.nav-item')).filter(el => el.classList.contains('active'));
+            expect(active.length).toBe(1);
+            expect((active[0] as HTMLElement).dataset.moduleId).toBe('queue-browser');
+            // Active module still visible → no navigation away.
+            expect(document.getElementById('page-title')?.textContent).toBe('Browser');
+        });
+
+        it('the admin order: an administrator\'s session moves the console to user-management, and signing out brings the sign-in page back', async () => {
+            let ctx: AppContext | null = null;
+            const login = createMockModule({ id: 'admin-login', name: 'Sign in', install: vi.fn(async c => { ctx = c; }) });
+            const mgr = createMockModule({ id: 'user-management', name: 'Users' });
+            setupDOM(['admin-login', 'user-management']);
+            const kernel = createKernel([reg(login, 100), reg(mgr, 20)]);
+            await kernel.start();
+            expect(document.getElementById('page-title')?.textContent).toBe('Sign in');
+
+            ctx!.setState('managed', managedSession({ admin: true }));
+            ctx!.eventBus.emit('rbac:changed');
+            expect(document.getElementById('page-title')?.textContent).toBe('Users');
+            expect(document.getElementById('module-view-admin-login')?.classList.contains('hidden')).toBe(true);
+
+            ctx!.setState('managed', null);
+            ctx!.loadSelf();   // the sign-in module asks for its own page
+            expect(document.getElementById('page-title')?.textContent).toBe('Sign in');
+            expect(document.getElementById('module-view-admin-login')?.classList.contains('hidden')).toBe(false);
+        });
+
+        it('navigates away from a now-hidden active module on rbac:changed', async () => {
+            let ctx: AppContext | null = null;
+            const qb = createMockModule({ id: 'queue-browser', name: 'Browser', install: vi.fn(async c => { ctx = c; }) });
+            const mgr = createMockModule({ id: 'user-management', name: 'Users' });
+            setupDOM(['queue-browser', 'user-management']);
+            const kernel = createKernel([reg(qb, 80), reg(mgr, 20)]);
+            await kernel.start();
+
+            kernel.navigateTo('user-management');
+            expect(document.getElementById('page-title')?.textContent).toBe('Users');
+
+            ctx!.setState('managed', managedSession({ admin: false }));
+            ctx!.eventBus.emit('rbac:changed');
+
+            // user-management hidden → kernel falls back to the highest-priority visible module.
+            expect(document.getElementById('page-title')?.textContent).toBe('Browser');
+            expect(document.getElementById('module-view-user-management')?.classList.contains('hidden')).toBe(true);
+            expect(document.getElementById('module-view-queue-browser')?.classList.contains('hidden')).toBe(false);
+        });
+
+        it('skips a hidden module when choosing the first module to activate at start', async () => {
+            // user-management installs first (priority 100) and sets a non-admin
+            // session during install; first-activation must skip it and land on
+            // queue-browser.
+            const mgr = createMockModule({
+                id: 'user-management', name: 'Users',
+                install: vi.fn(async (c: AppContext) => { c.setState('managed', managedSession({ admin: false })); })
             });
-            const kernel = new Kernel([reg(mod)]);
+            const qb = createMockModule({ id: 'queue-browser', name: 'Browser' });
+            setupDOM(['user-management', 'queue-browser']);
+            const kernel = createKernel([reg(mgr, 100), reg(qb, 80)]);
             await kernel.start();
 
-            // Should not throw even without status indicators, and state should still update
-            expect(() => capturedCtx!.setState('isConnected', true)).not.toThrow();
-            expect(capturedCtx!.appState.isConnected).toBe(true);
+            expect(document.getElementById('page-title')?.textContent).toBe('Browser');
+            expect(nav().innerHTML).not.toContain('Users');
+        });
+
+        it('hides a module the managed session was not granted', async () => {
+            let ctx: AppContext | null = null;
+            const qb = createMockModule({ id: 'queue-browser', name: 'Browser', install: vi.fn(async c => { ctx = c; }) });
+            const qc = createMockModule({ id: 'queue-copy', name: 'Copy' });
+            setupDOM(['queue-browser', 'queue-copy']);
+            const kernel = createKernel([reg(qb, 80), reg(qc, 70)]);
+            await kernel.start();
+            expect(nav().innerHTML).toContain('Copy');
+
+            ctx!.setState('managed', managedSession({ modules: ['queue-browser'] }));
+            ctx!.eventBus.emit('rbac:changed');
+
+            expect(nav().innerHTML).toContain('Browser');
+            expect(nav().innerHTML).not.toContain('Copy');
+        });
+
+        it('does not navigate when no module is visible after the session changes', async () => {
+            let ctx: AppContext | null = null;
+            const mgr = createMockModule({ id: 'user-management', name: 'Users', install: vi.fn(async c => { ctx = c; }) });
+            setupDOM(['user-management']);
+            const kernel = createKernel([reg(mgr, 100)]);
+            await kernel.start();
+            expect(document.getElementById('page-title')?.textContent).toBe('Users');
+
+            // The bus swallows handler errors into console.error, so spy on it.
+            const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            try {
+                ctx!.setState('managed', managedSession({ admin: false }));
+                ctx!.eventBus.emit('rbac:changed');
+
+                // The only module is now hidden; sidebar empties and there's nowhere
+                // to navigate -- the kernel leaves the (now-hidden) view as-is without throwing.
+                expect(nav().innerHTML).toBe('');
+                expect(document.getElementById('page-title')?.textContent).toBe('Users');
+                expect(errSpy).not.toHaveBeenCalled();
+            } finally {
+                errSpy.mockRestore();
+            }
         });
     });
 
-    describe('navigateTo edge cases', () => {
-        it('navigates when pageTitle is missing', async () => {
-            document.body.innerHTML = `
-                <nav id="sidebar-nav"></nav>
-                <div id="module-container"></div>
-                <template data-module-id="a"><div>A</div></template>
-                <template data-module-id="b"><div>B</div></template>
-            `;
-            const modA = createMockModule({ id: 'a', name: 'A' });
-            const modB = createMockModule({ id: 'b', name: 'B' });
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
-            await kernel.start();
-
-            kernel.navigateTo('b');
-            expect(document.getElementById('module-view-a')?.classList.contains('hidden')).toBe(true);
-            expect(document.getElementById('module-view-b')?.classList.contains('hidden')).toBe(false);
-        });
-
-        it('navigates when moduleContainer is missing', async () => {
-            document.body.innerHTML = `
-                <nav id="sidebar-nav"></nav>
-                <h1 id="page-title"></h1>
-                <template data-module-id="a"><div>A</div></template>
-            `;
-            const mod = createMockModule({ id: 'a', name: 'A' });
-            const kernel = new Kernel([reg(mod)]);
-            await kernel.start();
-
-            kernel.navigateTo('a');
-
-            // installModule bails when moduleContainer is null (kernel.ts:119),
-            // so 'a' is never added to loadedModules — navigateTo must early-return
-            // at kernel.ts:157 WITHOUT mutating page title or DOM.
-            expect(document.getElementById('page-title')?.textContent).toBe('');
-            expect(document.getElementById('module-view-a')).toBeNull();
-        });
-
-        it('navigates when moduleContainer is removed after start', async () => {
-            const modA = createMockModule({ id: 'a', name: 'A' });
-            const modB = createMockModule({ id: 'b', name: 'B' });
+    // The queue picker every module opens (AppContext.queuePicker).
+    describe('queue picker', () => {
+        it('hands every module the same picker, so they share its cache', async () => {
+            const seen: AppContext[] = [];
+            const a = createMockModule({ id: 'a', name: 'A', install: vi.fn(async c => { seen.push(c); }) });
+            const b = createMockModule({ id: 'b', name: 'B', install: vi.fn(async c => { seen.push(c); }) });
             setupDOM(['a', 'b']);
-            const kernel = new Kernel([reg(modA, 100), reg(modB, 50)]);
-            await kernel.start();
+            await createKernel([reg(a), reg(b)]).start();
 
-            // Remove module-container from DOM after modules are loaded
-            const mc = document.getElementById('module-container')!;
-            mc.parentNode!.removeChild(mc);
-
-            // Forcibly null out the private moduleContainer reference
-            (kernel as any).moduleContainer = null;
-
-            // navigateTo should still work without throwing when moduleContainer is null
-            kernel.navigateTo('b');
-            expect(document.getElementById('page-title')?.textContent).toBe('B');
+            expect(seen).toHaveLength(2);
+            expect(seen[0].queuePicker).toBe(seen[1].queuePicker);
         });
     });
 
-    describe('start() edge cases', () => {
-        it('starts with no sidebar toggle', async () => {
-            document.body.innerHTML = `
-                <nav id="sidebar-nav"></nav>
-                <div id="module-container"></div>
-                <h1 id="page-title"></h1>
-                <template data-module-id="test-module"><div>content</div></template>
-            `;
-            const mod = createMockModule({ id: 'test-module' });
-            const kernel = new Kernel([reg(mod)]);
-            await kernel.start();
-            // No toggle button, should not throw
+    // The notification center behind the header bell (AppContext.notifications).
+    describe('notification center', () => {
+        beforeEach(() => {
+            sessionStorage.clear();
         });
 
-        it('starts with no module container', async () => {
-            document.body.innerHTML = `
-                <nav id="sidebar-nav"></nav>
-                <h1 id="page-title"></h1>
-                <template data-module-id="test-module"><div>content</div></template>
-            `;
-            const mod = createMockModule({ id: 'test-module' });
-            const kernel = new Kernel([reg(mod)]);
-            await kernel.start();
+        it('mounts the bell into #notification-bell-slot and hands every module the same center', async () => {
+            const seen: AppContext[] = [];
+            const a = createMockModule({ id: 'a', name: 'A', install: vi.fn(async c => { seen.push(c); }) });
+            const b = createMockModule({ id: 'b', name: 'B', install: vi.fn(async c => { seen.push(c); }) });
+            setupDOM(['a', 'b']);
+            await createKernel([reg(a), reg(b)]).start();
+
+            expect(document.querySelector('#notification-bell-slot .notif-bell')).not.toBeNull();
+            expect(document.querySelector('dialog.notif-drawer')).not.toBeNull();
+            expect(seen[0].notifications).toBe(seen[1].notifications);
+            seen[0].notifications.add('warn', 'A', 'from a module, no toast');
+            expect(document.querySelector('.notif-badge')!.textContent).toBe('1');
         });
 
-        it('uses default config when APP_CONFIG is missing', async () => {
-            const saved = (window as any).APP_CONFIG;
-            delete (window as any).APP_CONFIG;
-
-            let capturedCtx: AppContext | null = null;
+        it('records ok/warn/error toasts tagged with the module the user is on (App during install), and skips info toasts', async () => {
+            let ctx: AppContext | null = null;
             const mod = createMockModule({
-                id: 'test-module',
-                install: vi.fn(async (ctx: AppContext) => { capturedCtx = ctx; })
+                id: 'queue-browser', name: 'Queue Browser',
+                install: vi.fn(async c => { ctx = c; showToast('Saved scheme moved to wss', 'warn'); }),
             });
-            setupDOM(['test-module']);
-            const kernel = new Kernel([reg(mod)]);
-            await kernel.start();
+            setupDOM(['queue-browser']);
+            await createKernel([reg(mod)]).start();
 
-            expect(capturedCtx!.config.useMocks).toBe(false);
-            (window as any).APP_CONFIG = saved;
+            showToast('Queue "orders" bound', 'ok');
+            showToast('Loading saved config', 'info');
+            showToast('Broker rejected message', 'error');
+
+            expect(ctx!.notifications.entries().map(e => [e.level, e.module, e.text])).toEqual([
+                ['warn', 'App', 'Saved scheme moved to wss'],
+                ['ok', 'Queue Browser', 'Queue "orders" bound'],
+                ['error', 'Queue Browser', 'Broker rejected message'],
+            ]);
+        });
+
+        it('records the connection lifecycle from the bus, naming broker and VPN', async () => {
+            let ctx: AppContext | null = null;
+            const mod = createMockModule({ id: 'connections', install: vi.fn(async c => { ctx = c; }) });
+            setupDOM(['connections']);
+            await createKernel([reg(mod)]).start();
+            const c = ctx!;
+
+            // Events with no published identity still read sensibly. First, so
+            // the empty broker is not a "new broker" that clears the list.
+            c.eventBus.emit('client:connected', { session: {} });
+            c.eventBus.emit('semp:connected');
+            c.setState('solaceConnection', { host: 'b1', protocol: 'wss', port: '443', urlPath: '', vpn: 'v1', user: 'u', pass: 'p' });
+            c.eventBus.emit('client:connected', { session: {} });
+            c.setState('solaceConnection', null);
+            c.eventBus.emit('client:disconnected');
+            c.setState('sempCredentials', { user: 'u', pass: 'p', baseUrl: 'https://b1:943', protocol: 'https', host: 'b1', port: '943', urlPath: '' });
+            c.eventBus.emit('semp:connected');
+            c.setState('sempCredentials', null);
+            c.eventBus.emit('semp:disconnected');
+
+            expect(c.notifications.entries().map(e => [e.level, e.module, e.text])).toEqual([
+                ['info', 'Connections', 'Connected to broker "", VPN "".'],
+                ['info', 'Connections', 'SEMP connected to "".'],
+                ['info', 'Connections', 'Connected to broker "b1", VPN "v1".'],
+                ['info', 'Connections', 'Disconnected from broker "b1", VPN "v1".'],
+                ['info', 'Connections', 'SEMP connected to "b1".'],
+                ['info', 'Connections', 'SEMP disconnected.'],
+            ]);
+        });
+
+        it('a Direct connect to a new broker starts a fresh list; a Provisioned session keeps it', async () => {
+            let ctx: AppContext | null = null;
+            const mod = createMockModule({ id: 'connections', install: vi.fn(async c => { ctx = c; }) });
+            setupDOM(['connections']);
+            await createKernel([reg(mod)]).start();
+            const c = ctx!;
+            const connect = (host: string) => {
+                c.setState('solaceConnection', { host, protocol: 'wss', port: '443', urlPath: '', vpn: 'v1', user: 'u', pass: '' });
+                c.eventBus.emit('client:connected', { session: {} });
+            };
+
+            connect('b1');
+            c.notifications.add('ok', 'Queue Browser', 'bound on b1');
+            c.setState('managed', managedSession({ broker: 'b2' }));
+            connect('b2');
+            expect(c.notifications.entries().map(e => e.text)).toContain('bound on b1');
+
+            c.setState('managed', null);
+            connect('b3');
+            expect(c.notifications.entries().map(e => e.text)).toEqual(['Connected to broker "b3", VPN "v1".']);
         });
     });
 });

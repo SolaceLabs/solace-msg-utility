@@ -1,0 +1,20 @@
+{
+  "_comment": "A backup file both gateways must open (go-web-proxy/backup_test.go TestBackup_SharedVector, tests/mock-broker/gateway/backup.test.ts); cases.json previews and imports it against seed.json. Its users hash admin-password-2, viewer-password-2 and newbie-password-1 at one iteration.",
+  "passphrase": "contract-vector-passphrase",
+  "file": "{\n  \"format\": \"smu-backup\",\n  \"version\": 1,\n  \"kdf\": {\n    \"name\": \"pbkdf2-sha256\",\n    \"iter\": 1000,\n    \"salt\": \"oKGio6SlpqeoqaqrrK2urw==\"\n  },\n  \"data\": \"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\"\n}\n",
+  "expect": {
+    "created": "2026-11-09T02:00:00Z",
+    "gateway": "v3.7.0",
+    "users": [
+      "admin",
+      "viewer",
+      "newbie"
+    ],
+    "connections": [
+      "b1",
+      "b2",
+      "b4"
+    ],
+    "connModes": "both"
+  }
+}

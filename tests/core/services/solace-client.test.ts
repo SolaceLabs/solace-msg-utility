@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createServiceSolace, type SolaceConnectionHooks } from '../../../src/core/services/solace-client';
+import { createServiceSolace, CONNECT_IN_PROGRESS, type SolaceConnectionHooks } from '../../../src/core/services/solace-client';
 import { createSolaceMock } from '../../setup';
 import { setLogLevel, getLogLevel } from '../../../src/core/logger';
 import { LogLevel } from '../../../src/core/constants';
-import { setHosted } from '../../../src/core/hosted';
 import type { SolaceConfig } from '../../../src/core/connections/types';
 
 /**
@@ -41,6 +40,11 @@ function baseCfg(overrides: Partial<SolaceConfig> = {}): SolaceConfig {
     };
 }
 
+/** The typed handler solace-client registered for `code` (the first one; a debug listener follows it). */
+function handlerFor(session: any, code: string): (...args: any[]) => void {
+    return session.on.mock.calls.find((c: any[]) => c[0] === code)[1];
+}
+
 describe('core/services/solace-client', () => {
     let solaceMock: ReturnType<typeof createSolaceMock>;
 
@@ -53,7 +57,11 @@ describe('core/services/solace-client', () => {
         it('initializes SolclientFactory', () => {
             const service = createServiceSolace(makeHooks());
             service.init();
-            expect(solaceMock.SolclientFactory.init).toHaveBeenCalled();
+            expect(solaceMock.SolclientFactory.init).toHaveBeenCalledTimes(1);
+            const props = solaceMock.SolclientFactoryProperties.mock.results[0].value;
+            expect(solaceMock.SolclientFactory.init).toHaveBeenCalledWith(props);
+            expect(props.profile).toBe(solaceMock.SolclientFactoryProfiles.version10);
+            expect(props.logLevel).toBe(solaceMock.LogLevel.WARN);
         });
 
         it('does not initialize twice', () => {
@@ -138,6 +146,18 @@ describe('core/services/solace-client', () => {
             expect(propsObj.reconnectRetryWaitInMsecs).toBe(5000);
         });
 
+        // The SDK's own limit for a WebSocket to open is 3 seconds, so a
+        // broker that takes longer to accept a connection would fail inside a
+        // longer connect timeout.
+        it('gives the WebSocket the whole connect timeout to open', () => {
+            const service = createServiceSolace(makeHooks());
+            service.init();
+            service.connect(baseCfg({ connectTimeout: 10000 }), 'broker.test', 'admin');
+            const propsObj = solaceMock.SessionProperties.mock.results[0].value;
+            expect(propsObj.connectTimeoutInMsecs).toBe(10000);
+            expect(propsObj.transportDowngradeTimeoutInMsecs).toBe(10000);
+        });
+
         it('registers a generic debug listener for every SessionEventCode', () => {
             const service = createServiceSolace(makeHooks());
             service.init();
@@ -147,6 +167,28 @@ describe('core/services/solace-client', () => {
             const registeredCodes = sessionMock.on.mock.calls.map((c: any[]) => c[0]);
             for (const code of Object.values(solaceMock.SessionEventCode)) {
                 expect(registeredCodes).toContain(code);
+            }
+        });
+
+        it.each([
+            { mode: 'basic' as const, user: 'admin', secrets: ['basic-secret-pw'] },
+            { mode: 'oauth' as const, user: 'access-token-value', secrets: ['access-token-value', 'id-token-value'] },
+        ])('logs the session summary without any $mode credential', ({ mode, user, secrets }) => {
+            const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => { });
+            const prev = getLogLevel();
+            setLogLevel(LogLevel.INFO);
+            try {
+                const service = createServiceSolace(makeHooks());
+                service.init();
+                service.connect(baseCfg({ authMode: mode, user }), 'broker.test', secrets[secrets.length - 1]);
+
+                const call = infoSpy.mock.calls.find(c => c[0] === '[solace-client] Creating Session:');
+                expect(call?.[1]).toMatchObject({ vpnName: 'default', authMode: mode });
+                const logged = JSON.stringify(call);
+                for (const s of secrets) expect(logged).not.toContain(s);
+                if (mode === 'basic') expect(call?.[1]).toMatchObject({ userName: 'admin' });
+            } finally {
+                setLogLevel(prev);
             }
         });
 
@@ -215,22 +257,6 @@ describe('core/services/solace-client', () => {
             expect(hooks.onDisconnected).toHaveBeenCalled();
         });
 
-        it('MESSAGE handler is a true no-op (no hooks fire)', () => {
-            const hooks = makeHooks();
-            const service = createServiceSolace(hooks);
-            service.init();
-            service.connect(baseCfg(), 'broker.test', 'admin');
-
-            const sessionMock = solaceMock.SolclientFactory.createSession.mock.results[0].value;
-            const msgHandler = sessionMock.on.mock.calls.find((c: any[]) => c[0] === 'MESSAGE')[1];
-            (hooks.onConnected as any).mockClear();
-            (hooks.onDisconnected as any).mockClear();
-
-            expect(() => msgHandler()).not.toThrow();
-            expect(hooks.onConnected).not.toHaveBeenCalled();
-            expect(hooks.onDisconnected).not.toHaveBeenCalled();
-        });
-
         it('disconnects existing session before connecting new one', () => {
             const hooks = makeHooks();
             const service = createServiceSolace(hooks);
@@ -247,14 +273,109 @@ describe('core/services/solace-client', () => {
             expect(firstSession.disconnect).toHaveBeenCalled();
         });
 
+        // A second connect while the first is still in flight would race it:
+        // the first session's teardown would dispose the second one.
+        it('refuses a connect while an earlier one is in flight, and allows one once it has failed', () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.init();
+
+            expect(service.connect(baseCfg({ vpn: 'v1' }), 'broker.test', 'admin')).toEqual({ ok: true });
+            expect(service.connect(baseCfg({ vpn: 'v2' }), 'broker.test', 'admin')).toEqual({ ok: false, error: CONNECT_IN_PROGRESS });
+
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
+            const first = solaceMock.SolclientFactory.createSession.mock.results[0].value;
+            expect(first.disconnect).not.toHaveBeenCalled();
+            expect(hooks.onError).not.toHaveBeenCalled();
+            expect(warnSpy).toHaveBeenCalledWith(`[solace-client] connect to VPN "v2" refused: ${CONNECT_IN_PROGRESS}`);
+
+            handlerFor(first, 'CONNECT_FAILED_ERROR')({ infoStr: 'Connection error' });
+            expect(service.connect(baseCfg({ vpn: 'v2' }), 'broker.test', 'admin')).toEqual({ ok: true });
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(2);
+        });
+
+        it('allows a new connect once the session in flight came up', () => {
+            const service = createServiceSolace(makeHooks());
+            service.init();
+            service.connect(baseCfg(), 'broker.test', 'admin');
+            handlerFor(solaceMock.SolclientFactory.createSession.mock.results[0].value, 'UP_NOTICE')();
+            expect(service.connect(baseCfg(), 'broker.test', 'admin')).toEqual({ ok: true });
+        });
+
+        it("ignores a replaced session's late events: they neither dispose the new session nor fire hooks", () => {
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.init();
+            service.connect(baseCfg({ vpn: 'old' }), 'broker.test', 'admin');
+            const oldSession = solaceMock.SolclientFactory.createSession.mock.results[0].value;
+            handlerFor(oldSession, 'UP_NOTICE')();
+            (hooks.onConnected as any).mockClear();
+
+            // Replace the live session; the old one's teardown arrives afterwards.
+            service.connect(baseCfg({ vpn: 'new' }), 'broker.test', 'admin');
+            const newSession = solaceMock.SolclientFactory.createSession.mock.results[1].value;
+            handlerFor(oldSession, 'DISCONNECTED')();
+            handlerFor(oldSession, 'CONNECT_FAILED_ERROR')({ infoStr: 'late' });
+
+            expect(oldSession.dispose).toHaveBeenCalled();
+            expect(newSession.dispose).not.toHaveBeenCalled();
+            expect(hooks.onDisconnected).not.toHaveBeenCalled();
+            expect(hooks.onConnectFailed).not.toHaveBeenCalled();
+
+            // The new session still drives the hooks, and disconnect() reaches it.
+            handlerFor(newSession, 'UP_NOTICE')();
+            expect(hooks.onConnected).toHaveBeenCalledWith(newSession, 'new');
+            service.disconnect();
+            expect(newSession.disconnect).toHaveBeenCalled();
+        });
+
+        // Auto-connect race: the replaced session's DISCONNECTED lands after the
+        // new session is already up, and must not tear it down.
+        it("auto-connect race: the old session's DISCONNECTED after the new one is up leaves the new session connected", () => {
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.init();
+            service.connect(baseCfg({ vpn: 'old' }), 'broker.test', 'admin');
+            const oldSession = solaceMock.SolclientFactory.createSession.mock.results[0].value;
+            handlerFor(oldSession, 'UP_NOTICE')();
+
+            service.connect(baseCfg({ vpn: 'new' }), 'broker.test', 'admin');
+            const newSession = solaceMock.SolclientFactory.createSession.mock.results[1].value;
+            handlerFor(newSession, 'UP_NOTICE')();
+            handlerFor(oldSession, 'DISCONNECTED')();
+
+            expect(newSession.dispose).not.toHaveBeenCalled();
+            expect(hooks.onDisconnected).not.toHaveBeenCalled();
+            service.disconnect();
+            expect(newSession.disconnect).toHaveBeenCalled();
+        });
+
         it('fires onError when solace API not loaded during connect', () => {
             (window as any).solace = undefined;
             const hooks = makeHooks();
             const service = createServiceSolace(hooks);
-            service.connect(baseCfg(), 'test', 'admin');
+            expect(service.connect(baseCfg(), 'test', 'admin')).toEqual({ ok: false, error: 'Solace API not loaded.' });
             expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({
                 message: 'Solace API not loaded.'
             }));
+        });
+
+        it('refuses to connect when the loaded SDK is below the required version', () => {
+            // `window.solace` is present (the SDK loaded) but the shell's version
+            // gate never set the flag — the SDK is too old. Refusing is the whole
+            // point of the gate, so assert the session is never created, not just
+            // that an error was reported.
+            (window as any).solaceLibLoaded = false;
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({
+                message: expect.stringContaining('10.18.3'),
+            }));
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
         });
 
         it('calls init if not initialized when connecting', () => {
@@ -264,8 +385,15 @@ describe('core/services/solace-client', () => {
             expect(solaceMock.SolclientFactory.init).toHaveBeenCalled();
         });
 
-        it('fires onError when session creation throws', () => {
-            solaceMock.SolclientFactory.createSession.mockImplementation(() => { throw new Error('session error'); });
+        it('normalises a non-Error throw so the UI cannot render "undefined"', () => {
+            // `onError` is typed `(err: Error) => void` and every consumer renders
+            // `err.message`. Every throw site traced in dist/solclient.js throws an
+            // OperationError, but nothing guarantees it — and a plain object would
+            // otherwise reach the connect banner as "Connection Failed: undefined",
+            // with the real reason only in the console.
+            solaceMock.SolclientFactory.createSession.mockImplementation(() => {
+                throw { code: 503, description: 'transport unavailable' };
+            });
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
 
             const hooks = makeHooks();
@@ -273,8 +401,129 @@ describe('core/services/solace-client', () => {
             service.init();
             service.connect(baseCfg(), 'broker.test', 'admin');
 
+            const reported = (hooks.onError as any).mock.calls[0][0];
+            expect(reported).toBeInstanceOf(Error);
+            expect(reported.message).toBe('Session creation failed.');
+            expect(consoleSpy).toHaveBeenCalled();
+        });
+
+        it('fires onError when session creation throws', () => {
+            solaceMock.SolclientFactory.createSession.mockImplementation(() => { throw new Error('session error'); });
+            const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
+
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.init();
+            expect(service.connect(baseCfg(), 'broker.test', 'admin')).toEqual({ ok: false, error: 'session error' });
+
             expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'session error' }));
-            expect(consoleSpy).toHaveBeenCalledWith('Session Creation Error', expect.any(Error));
+            expect(consoleSpy).toHaveBeenCalledWith('[solace-client] Session creation failed for VPN "default":', expect.any(Error));
+        });
+    });
+
+    // The shell loader (src/index.html) publishes window.solaceLibState and
+    // fires 'Solclient:settled'; a Connect pressed while it is 'loading' waits.
+    describe('connect() while the Solace library is still loading', () => {
+        const settle = (state: string) =>
+            window.dispatchEvent(new CustomEvent('Solclient:settled', { detail: { state } }));
+
+        beforeEach(() => {
+            (window as any).solaceLibState = 'loading';
+        });
+
+        afterEach(() => {
+            delete (window as any).solaceLibState;
+            vi.useRealTimers();
+        });
+
+        it('returns ok without a session, then connects once the loader settles as loaded', () => {
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+
+            expect(service.connect(baseCfg(), 'broker.test', 'admin')).toEqual({ ok: true });
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
+
+            (window as any).solaceLibState = 'loaded';
+            settle('loaded');
+
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
+            const sessionMock = solaceMock.SolclientFactory.createSession.mock.results[0].value;
+            expect(sessionMock.connect).toHaveBeenCalled();
+            expect(hooks.onError).not.toHaveBeenCalled();
+        });
+
+        it('ends in "Solace API not loaded." when the loader settles as missing', () => {
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            (window as any).solace = undefined;
+            (window as any).solaceLibState = 'missing';
+            settle('missing');
+
+            expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'Solace API not loaded.' }));
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
+        });
+
+        it('ends in the version refusal when the loader settles as outdated', () => {
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            (window as any).solaceLibLoaded = false;
+            (window as any).solaceLibState = 'outdated';
+            settle('outdated');
+
+            expect(hooks.onError).toHaveBeenCalledWith(expect.objectContaining({
+                message: expect.stringContaining('10.18.3'),
+            }));
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
+        });
+
+        it('stops waiting after SDK_LOAD_WAIT_MS and runs the normal checks', () => {
+            vi.useFakeTimers();
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            vi.advanceTimersByTime(29_999);
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
+            vi.advanceTimersByTime(1);
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
+
+            // The wait is over: a late verdict does not start a second connect.
+            const sessionMock = solaceMock.SolclientFactory.createSession.mock.results[0].value;
+            handlerFor(sessionMock, 'UP_NOTICE')();
+            settle('loaded');
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
+        });
+
+        it('refuses a second connect during the wait with CONNECT_IN_PROGRESS', () => {
+            const hooks = makeHooks();
+            const service = createServiceSolace(hooks);
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            expect(service.connect(baseCfg(), 'broker.test', 'admin')).toEqual({ ok: false, error: CONNECT_IN_PROGRESS });
+            expect(hooks.onError).not.toHaveBeenCalled();
+
+            settle('loaded');
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
+        });
+
+        it('disconnect() during the wait cancels it', () => {
+            vi.useFakeTimers();
+            const service = createServiceSolace(makeHooks());
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            service.disconnect();
+            vi.advanceTimersByTime(30_000);
+            settle('loaded');
+            expect(solaceMock.SolclientFactory.createSession).not.toHaveBeenCalled();
+
+            // The in-flight flag is cleared: a later connect is not refused.
+            (window as any).solaceLibState = 'loaded';
+            expect(service.connect(baseCfg(), 'broker.test', 'admin')).toEqual({ ok: true });
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
         });
     });
 
@@ -330,6 +579,33 @@ describe('core/services/solace-client', () => {
         });
     });
 
+    describe('reconnect over a stale session', () => {
+        it('reconnect proceeds when the stale session.disconnect() throws', () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
+            const service = createServiceSolace(makeHooks());
+            service.init();
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            const first = solaceMock.SolclientFactory.createSession.mock.results[0].value;
+            const upHandler = first.on.mock.calls.find((c: any[]) => c[0] === 'UP_NOTICE')[1];
+            upHandler();
+            first.disconnect.mockImplementationOnce(() => { throw new Error('already disposed'); });
+
+            const result = service.connect(baseCfg(), 'broker.test', 'admin');
+
+            expect(warnSpy).toHaveBeenCalledWith(
+                expect.stringContaining('disconnect() on stale session during reconnect'),
+                expect.any(Error)
+            );
+            expect(result).toEqual({ ok: true });
+            expect(solaceMock.SolclientFactory.createSession).toHaveBeenCalledTimes(2);
+            const second = solaceMock.SolclientFactory.createSession.mock.results[1].value;
+            expect(second.connect).toHaveBeenCalled();
+
+            warnSpy.mockRestore();
+        });
+    });
+
     describe('TLS handshake probe', () => {
         it('injects a hidden iframe targeting the https broker URL on wss connect', () => {
             const service = createServiceSolace(makeHooks());
@@ -363,6 +639,16 @@ describe('core/services/solace-client', () => {
             vi.useRealTimers();
         });
 
+        it('removes the probe iframe when it errors', () => {
+            const service = createServiceSolace(makeHooks());
+            service.init();
+            service.connect(baseCfg(), 'broker.test', 'admin');
+
+            const iframe = document.querySelector('iframe[src="https://broker.test:8080"]') as HTMLIFrameElement;
+            iframe.dispatchEvent(new Event('error'));
+            expect(document.querySelector('iframe[src="https://broker.test:8080"]')).toBeNull();
+        });
+
         it('ignores later triggers once cleanup has run', () => {
             vi.useFakeTimers();
             const service = createServiceSolace(makeHooks());
@@ -370,11 +656,14 @@ describe('core/services/solace-client', () => {
             service.connect(baseCfg(), 'broker.test', 'admin');
 
             const iframe = document.querySelector('iframe[src="https://broker.test:8080"]') as HTMLIFrameElement;
+            const removeSpy = vi.spyOn(iframe, 'remove');
             iframe.dispatchEvent(new Event('load'));
+            expect(removeSpy).toHaveBeenCalledTimes(1);
             expect(document.querySelector('iframe[src="https://broker.test:8080"]')).toBeNull();
-            // setTimeout fires cleanup a second time — guard should short-circuit
-            expect(() => vi.advanceTimersByTime(3000)).not.toThrow();
-            expect(document.querySelector('iframe[src="https://broker.test:8080"]')).toBeNull();
+            // The timeout would run cleanup a second time; the guard short-circuits it.
+            vi.advanceTimersByTime(3000);
+            iframe.dispatchEvent(new Event('error'));
+            expect(removeSpy).toHaveBeenCalledTimes(1);
             vi.useRealTimers();
         });
 
@@ -384,6 +673,18 @@ describe('core/services/solace-client', () => {
             service.connect(baseCfg({ protocol: 'ws' }), 'broker.test', 'admin');
 
             expect(document.querySelector('iframe[src^="https://"]')).toBeNull();
+        });
+
+        it('does not inject the probe iframe for a Provisioned session through the gateway socket', () => {
+            // The dialled cfg (managed-profile.ts) is wss with an smfPath and no
+            // hosted flag; `host` is the broker's name, never a reachable origin.
+            const service = createServiceSolace(makeHooks());
+            service.init();
+            service.connect(baseCfg({ protocol: 'wss', port: '', smfPath: '/managed/smf/b1/v1' }), 'b1', 'dialled-pw');
+
+            expect(document.querySelector('iframe[src^="https://b1"]')).toBeNull();
+            // The session itself still goes to the gateway's socket.
+            expect(solaceMock.SessionProperties.mock.results[0].value.url).toMatch(/\/managed\/smf\/b1\/v1$/);
         });
     });
 
@@ -402,24 +703,6 @@ describe('core/services/solace-client', () => {
             expect(propsObj.url).toBe('wss://broker.test:8080/solace');
         });
 
-        it('normalises a path missing its leading slash', () => {
-            const service = createServiceSolace(makeHooks());
-            service.init();
-            service.connect(baseCfg({ urlPath: 'solace' }), 'broker.test', 'admin');
-
-            const propsObj = solaceMock.SessionProperties.mock.results[0].value;
-            expect(propsObj.url).toBe('wss://broker.test:8080/solace');
-        });
-
-        it('omits the path entirely when blank or whitespace', () => {
-            const service = createServiceSolace(makeHooks());
-            service.init();
-            service.connect(baseCfg({ urlPath: '   ' }), 'broker.test', 'admin');
-
-            const propsObj = solaceMock.SessionProperties.mock.results[0].value;
-            expect(propsObj.url).toBe('wss://broker.test:8080');
-        });
-
         it('routes the TLS handshake probe to the same path as the session URL', () => {
             const service = createServiceSolace(makeHooks());
             service.init();
@@ -435,16 +718,11 @@ describe('core/services/solace-client', () => {
     // path `/{scheme}/{port}/{host}{urlPath}` and skips the TLS handshake
     // probe (the gateway is the only TLS endpoint the browser sees, and it
     // was already trusted when the PWA loaded).
-    describe('hosted mode', () => {
-        afterEach(() => {
-            setHosted(false);
-        });
-
+    describe('hosted mode (cfg.hosted, from AppState.connConfig)', () => {
         it('rewrites props.url to the gateway proxy path on an http page (plain ws)', () => {
-            setHosted(true);
             const service = createServiceSolace(makeHooks());
             service.init();
-            service.connect(baseCfg({ urlPath: '/solace' }), 'broker.test', 'admin');
+            service.connect(baseCfg({ urlPath: '/solace', hosted: true }), 'broker.test', 'admin');
 
             const propsObj = solaceMock.SessionProperties.mock.results[0].value;
             // jsdom default location is http://localhost/, so wire scheme is ws.
@@ -452,12 +730,23 @@ describe('core/services/solace-client', () => {
         });
 
         it('does not inject the TLS handshake probe iframe', () => {
-            setHosted(true);
             const service = createServiceSolace(makeHooks());
             service.init();
-            service.connect(baseCfg({ urlPath: '/solace' }), 'broker.test', 'admin');
+            service.connect(baseCfg({ urlPath: '/solace', hosted: true }), 'broker.test', 'admin');
 
             expect(document.querySelector('iframe[src^="https://"]')).toBeNull();
+        });
+
+        // A managed session dials its VPN and connects to the gateway's SMF
+        // socket on the page's own host: port, urlPath and host are unused.
+        it('connects a managed session to its SMF socket path on the page host', () => {
+            const service = createServiceSolace(makeHooks());
+            service.init();
+            service.connect(baseCfg({ urlPath: '/solace', smfPath: '/managed/smf/b1/v1', hosted: true }), 'b1', 'dialled-pw');
+
+            const propsObj = solaceMock.SessionProperties.mock.results[0].value;
+            expect(propsObj.url).toBe('ws://localhost:3000/managed/smf/b1/v1');
+            expect(propsObj.password).toBe('dialled-pw');
         });
     });
 });

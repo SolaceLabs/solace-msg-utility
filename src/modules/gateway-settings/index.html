@@ -1,0 +1,235 @@
+<!-- The admin gate is created at install by createGate() (see module.ts). -->
+
+<!-- Every section is its own card, stacked full width. A card's opening
+     paragraph keeps a gap (mb-3) before the controls under it. Each .form-group's
+     data-key is its settings key. Fields share a row (.form-cols); an on/off
+     setting is a switch on a line of its own. A setting with two answers is a
+     segmented button or a slide choice, each answer naming its value in
+     data-choice. The page's title is the module's name in the
+     sidebar; the first card holds only what the page is for and Reload. -->
+<div id="gw-set-view" class="hidden">
+    <div class="card">
+        <div class="flex-row justify-between items-center gap-4">
+            <p class="text-secondary text-body-sm m-0">
+                The gateway's settings. A saved setting applies at once. The gateway's certificate and the
+                trusted broker CAs are managed under Certificates.
+            </p>
+            <button id="btn-gw-set-reload" class="btn btn-secondary" title="Reload the settings from the gateway">Reload</button>
+        </div>
+        <div id="gw-set-disk" class="banner-warning hidden">
+            config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load
+            that edit; saving here is blocked until then.
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 class="card-title mb-3">Connections</h3>
+        <!-- Provisioned mode is what serves this page, so neither choice here turns
+             it off: Direct alone (Gateway mode) is a fresh start of the settings, with
+             SMU_CONN_MODES=direct and no config.yaml. -->
+        <div class="form-cols">
+            <div class="form-group" data-key="connModes">
+                <label id="gw-set-connModes-label">Connection modes the app offers</label>
+                <div class="segmented" id="gw-set-connModes" role="group" aria-labelledby="gw-set-connModes-label">
+                    <button type="button" class="segmented-option" data-choice="provisioned" aria-pressed="true">Provisioned only</button>
+                    <button type="button" class="segmented-option" data-choice="both" aria-pressed="false">Direct and Provisioned</button>
+                </div>
+            </div>
+            <div class="form-group" data-key="defaultConn">
+                <label id="gw-set-defaultConn-label">Tab shown first when both are offered</label>
+                <div class="slide-choice" id="gw-set-defaultConn" role="group" aria-labelledby="gw-set-defaultConn-label">
+                    <span class="slide-choice-label active" data-choice="direct">Direct</span>
+                    <span class="switch" title="Toggle between Direct and Provisioned">
+                        <input type="checkbox" aria-label="Show the Provisioned tab first">
+                        <span class="switch-slider"></span>
+                    </span>
+                    <span class="slide-choice-label" data-choice="provisioned">Provisioned</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 class="card-title mb-3">Access</h3>
+        <p id="gw-set-client" class="text-secondary text-body-sm mb-3"></p>
+        <div class="form-cols">
+            <div class="form-group" data-key="access.allow">
+                <label for="gw-set-access-allow">Allowed clients: CIDR ranges, one per line (empty admits every client)</label>
+                <textarea id="gw-set-access-allow" class="form-control" rows="3" spellcheck="false"></textarea>
+            </div>
+            <div class="form-group" data-key="access.trustedProxies">
+                <label for="gw-set-access-trustedProxies">Trusted reverse proxies: CIDR ranges, one per line</label>
+                <textarea id="gw-set-access-trustedProxies" class="form-control" rows="3" spellcheck="false"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 class="card-title mb-3">Sessions</h3>
+        <div class="form-cols">
+            <div class="form-group" data-key="session.idleMinutes">
+                <label for="gw-set-session-idleMinutes">Idle limit (minutes)</label>
+                <input type="number" id="gw-set-session-idleMinutes" class="form-control" min="1" step="1">
+            </div>
+            <div class="form-group" data-key="session.absoluteMinutes">
+                <label for="gw-set-session-absoluteMinutes">Absolute limit (minutes)</label>
+                <input type="number" id="gw-set-session-absoluteMinutes" class="form-control" min="1" step="1">
+            </div>
+            <div class="form-group" data-key="session.connectsPerMinute">
+                <label for="gw-set-session-connectsPerMinute">Broker connects per user per minute</label>
+                <input type="number" id="gw-set-session-connectsPerMinute" class="form-control" min="1" max="1000" step="1">
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 class="card-title mb-3">Sign-in throttle</h3>
+        <div class="form-group" data-key="login.perClient">
+            <label class="switch-field"><span class="switch"><input type="checkbox" id="gw-set-login-perClient"><span class="switch-slider"></span></span> Count failures per client address</label>
+        </div>
+        <div class="form-cols">
+            <div class="form-group" data-key="login.maxFailures">
+                <label for="gw-set-login-maxFailures">Failed sign-ins per account before a back-off</label>
+                <input type="number" id="gw-set-login-maxFailures" class="form-control" min="1" step="1">
+            </div>
+            <div class="form-group" data-key="login.clientMaxFailures">
+                <label for="gw-set-login-clientMaxFailures">Failed sign-ins per client before a back-off</label>
+                <input type="number" id="gw-set-login-clientMaxFailures" class="form-control" min="1" max="1000" step="1">
+            </div>
+            <div class="form-group" data-key="login.resetMinutes">
+                <label for="gw-set-login-resetMinutes">Forget failures after (minutes)</label>
+                <input type="number" id="gw-set-login-resetMinutes" class="form-control" min="1" max="1440" step="1">
+            </div>
+            <div class="form-group" data-key="login.backoffSeconds">
+                <label for="gw-set-login-backoffSeconds">First back-off (seconds)</label>
+                <input type="number" id="gw-set-login-backoffSeconds" class="form-control" min="1" step="1">
+            </div>
+            <div class="form-group" data-key="login.maxBackoffSeconds">
+                <label for="gw-set-login-maxBackoffSeconds">Longest back-off (seconds)</label>
+                <input type="number" id="gw-set-login-maxBackoffSeconds" class="form-control" min="1" step="1">
+            </div>
+            <div class="form-group" data-key="login.unauthenticatedPerMinute">
+                <label for="gw-set-login-unauthenticatedPerMinute">Requests and sign-in attempts per minute per client</label>
+                <input type="number" id="gw-set-login-unauthenticatedPerMinute" class="form-control" min="1" step="1">
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 class="card-title mb-3">Passwords and two-factor sign-in</h3>
+        <p class="text-secondary text-body-sm mb-3">
+            A raised minimum length applies at the next password change; passwords already set keep working.
+        </p>
+        <div class="form-cols">
+            <div class="form-group" data-key="login.passwordMinLength">
+                <label for="gw-set-login-passwordMinLength">Minimum password length</label>
+                <input type="number" id="gw-set-login-passwordMinLength" class="form-control" min="12" max="128" step="1">
+            </div>
+            <div class="form-group" data-key="login.twoFactor">
+                <label for="gw-set-login-twoFactor">Two-factor sign-in (code from an authenticator app)</label>
+                <select id="gw-set-login-twoFactor" class="form-control">
+                    <option value="optional">Optional</option>
+                    <option value="admins">Administrators must use it</option>
+                    <option value="mandatory">Everyone must use it</option>
+                </select>
+            </div>
+            <div class="form-group" data-key="login.twoFactorMinutes">
+                <label for="gw-set-login-twoFactorMinutes">Time to finish two-factor after the password (minutes)</label>
+                <input type="number" id="gw-set-login-twoFactorMinutes" class="form-control" min="1" max="60" step="1">
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 class="card-title mb-3">Modules</h3>
+        <div class="form-group" data-key="modules.offered">
+            <label id="gw-set-modules-offered-label">Modules signed-in users may be given</label>
+            <div id="gw-set-modules-offered" class="gw-set-tiles" role="group" aria-labelledby="gw-set-modules-offered-label"></div>
+        </div>
+        <div class="form-cols">
+            <div class="form-group" data-key="modules.userDefault">
+                <label id="gw-set-modules-userDefault-label">A user without a list of their own gets</label>
+                <div class="segmented" id="gw-set-modules-userDefault" role="group" aria-labelledby="gw-set-modules-userDefault-label">
+                    <button type="button" class="segmented-option" data-choice="all" aria-pressed="true">Every offered module</button>
+                    <button type="button" class="segmented-option" data-choice="none" aria-pressed="false">No modules</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 class="card-title mb-3">Logging</h3>
+        <div class="form-cols">
+            <div class="form-group" data-key="logLevel">
+                <label for="gw-set-logLevel">Log level</label>
+                <select id="gw-set-logLevel" class="form-control">
+                    <option value="debug">debug</option>
+                    <option value="info">info</option>
+                    <option value="warn">warn</option>
+                    <option value="error">error</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 class="card-title mb-3">Audit trail</h3>
+        <p class="text-secondary text-body-sm mb-3">
+            The audit trail itself is always written to /data/audit.log on the gateway; these settings only add to it.
+        </p>
+        <div class="form-group" data-key="audit.stdout">
+            <label class="switch-field"><span class="switch"><input type="checkbox" id="gw-set-audit-stdout"><span class="switch-slider"></span></span> Copy audit lines to the gateway log (stdout)</label>
+        </div>
+        <div class="form-group" data-key="audit.access">
+            <label class="switch-field"><span class="switch"><input type="checkbox" id="gw-set-audit-access"><span class="switch-slider"></span></span> Also audit broker access: dials, SMF sockets and SEMP relay requests</label>
+        </div>
+        <div class="form-cols">
+            <div class="form-group" data-key="audit.onFailure">
+                <label id="gw-set-audit-onFailure-label">If the audit log cannot be written</label>
+                <div class="slide-choice" id="gw-set-audit-onFailure" role="group" aria-labelledby="gw-set-audit-onFailure-label">
+                    <span class="slide-choice-label active" data-choice="continue">Carry on</span>
+                    <span class="switch" title="Toggle between Carry on and Refuse changes">
+                        <input type="checkbox" aria-label="Refuse changes while the audit log cannot be written">
+                        <span class="switch-slider"></span>
+                    </span>
+                    <span class="slide-choice-label" data-choice="refuse">Refuse changes</span>
+                </div>
+                <small class="text-secondary text-xs">Carry on logs each lost record in the gateway log. Refuse changes stops every change until the audit log can be written.</small>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 class="card-title mb-3">Broker trust</h3>
+        <p class="text-secondary text-body-sm mb-3">
+            Applies on Save. The standard root CAs are the public root CAs the gateway image carries (Mozilla's
+            list); with them off, only the CA files are trusted. Certificates lists both.
+        </p>
+        <div class="form-group" data-key="tls.standardRoots">
+            <label class="switch-field"><span class="switch"><input type="checkbox" id="gw-set-tls-standardRoots"><span class="switch-slider"></span></span> Trust the standard root CAs</label>
+        </div>
+        <div class="form-group" data-key="tls.insecureSkipVerify">
+            <label class="switch-field"><span class="switch"><input type="checkbox" id="gw-set-tls-insecureSkipVerify"><span class="switch-slider"></span></span> Skip broker certificate checks (insecure)</label>
+        </div>
+    </div>
+
+    <div class="gw-set-actions">
+        <div class="flex-row gap-4">
+            <button id="btn-gw-set-save" class="btn btn-primary">Save</button>
+        </div>
+        <div id="gw-set-error" class="text-error text-body-sm mt-2 hidden"></div>
+    </div>
+
+    <div id="gw-set-restart-card" class="card">
+        <h3 class="card-title mb-3">Gateway</h3>
+        <p class="text-secondary text-body-sm mb-3">
+            Restart starts the gateway's program again in place, with the same arguments and environment.
+            Everyone is signed out and open broker connections close.
+        </p>
+        <div class="flex-row gap-4">
+            <button id="btn-gw-set-restart" type="button" class="btn btn-danger">Restart gateway</button>
+        </div>
+        <div id="gw-set-restarting" class="banner-warning mt-2 hidden" role="status"></div>
+        <div id="gw-set-restart-error" class="text-error text-body-sm mt-2 hidden"></div>
+    </div>
+</div>

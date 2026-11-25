@@ -1,0 +1,151 @@
+package main
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"net/netip"
+	"strings"
+)
+
+// accessConfig is the client access list from config.yaml (`access:`). It has
+// no environment variable. An empty allow list admits every client, which is
+// the default; trustedProxies names the reverse proxies whose X-Forwarded-For
+// header is believed when resolving the client address.
+type accessConfig struct {
+	allow          []netip.Prefix
+	trustedProxies []netip.Prefix
+}
+
+type clientCtxKey struct{}
+
+type resolvedClient struct {
+	addr netip.Addr
+	ok   bool
+}
+
+// withClient resolves the client address once per request (clientIP, with the
+// current trusted proxies) and puts it on the context, where the access log,
+// the access list and the managed sign-in throttle read it with clientOf. It
+// also puts the requestInfo there that the gates fill with the signed-in user
+// for the log lines around the request (logging.go). The writer is passed
+// through untouched.
+func withClient(lv *live, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip, ok := clientIP(r.RemoteAddr, r.Header.Values("X-Forwarded-For"), lv.get().access.trustedProxies)
+		ctx := withRequestInfo(context.WithValue(r.Context(), clientCtxKey{}, resolvedClient{ip, ok}))
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// clientOf returns the address withClient resolved; ok is false when it could
+// not be resolved or withClient is not in the chain.
+func clientOf(r *http.Request) (netip.Addr, bool) {
+	c, _ := r.Context().Value(clientCtxKey{}).(resolvedClient)
+	return c.addr, c.ok
+}
+
+// forwardedHeaders are the request headers that say whom a proxied request is
+// for. A client can send any of them, so setForwarded drops them all.
+var forwardedHeaders = []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto"}
+
+// setForwarded tells the broker which client a relayed request is for, in
+// X-Forwarded-For and in the Forwarded header of RFC 7239. The address is the
+// one withClient resolved, which the access list, the throttle and the audit
+// trail use, so a trusted proxy's hops are already taken into account. What
+// the client sent in any of forwardedHeaders is dropped first: a client
+// cannot name another address to the broker. An address that did not resolve
+// (a trusted proxy sent an X-Forwarded-For that does not parse) is sent as
+// for=unknown, the RFC's word for it, with no X-Forwarded-For.
+func setForwarded(h http.Header, r *http.Request) {
+	for _, k := range forwardedHeaders {
+		h.Del(k)
+	}
+	ip, ok := clientOf(r)
+	switch {
+	case !ok:
+		h.Set("Forwarded", "for=unknown")
+	case ip.Is4():
+		h.Set("X-Forwarded-For", ip.String())
+		h.Set("Forwarded", "for="+ip.String())
+	default:
+		// An IPv6 address is a quoted string in brackets (RFC 7239 section 6).
+		h.Set("X-Forwarded-For", ip.String())
+		h.Set("Forwarded", `for="[`+ip.String()+`]"`)
+	}
+}
+
+// clientACL wraps next with the access list, read per request (a settings save
+// applies to the next request); withClient must run first. An empty allow list
+// admits every client. A denied client gets a bare 403 with no body: nothing
+// in the response says why, the warn log line does. The writer is passed
+// through untouched, so the Hijacker that httputil.ReverseProxy needs for
+// WebSocket upgrades still reaches it.
+func clientACL(lv *live, next http.Handler, logger *slog.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		allow := lv.get().access.allow
+		if len(allow) == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ip, ok := clientOf(r)
+		if ok && prefixContains(allow, ip) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		client := "unknown"
+		if ok {
+			client = ip.String()
+		}
+		logger.Warn("client denied by access list", "client", client, "method", r.Method, "path", r.URL.Path)
+		w.WriteHeader(http.StatusForbidden)
+	})
+}
+
+// clientIP resolves the client address for the access check. The TCP peer is
+// the answer unless it is a trusted proxy that sent X-Forwarded-For; then the
+// header is walked right to left and the first address that is not itself a
+// trusted proxy is the client (a spoofed entry on the left is never reached).
+// If every hop is trusted the leftmost one is returned. Any address that does
+// not parse fails closed: ok is false and the caller denies.
+func clientIP(remoteAddr string, xff []string, trusted []netip.Prefix) (netip.Addr, bool) {
+	ap, err := netip.ParseAddrPort(remoteAddr)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	peer := normalizeAddr(ap.Addr())
+	if len(xff) == 0 || !prefixContains(trusted, peer) {
+		return peer, true
+	}
+	hops := strings.Split(strings.Join(xff, ","), ",")
+	var last netip.Addr
+	for i := len(hops) - 1; i >= 0; i-- {
+		a, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
+		if err != nil {
+			return netip.Addr{}, false
+		}
+		a = normalizeAddr(a)
+		if !prefixContains(trusted, a) {
+			return a, true
+		}
+		last = a
+	}
+	return last, true
+}
+
+func prefixContains(ps []netip.Prefix, a netip.Addr) bool {
+	for _, p := range ps {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeAddr makes IPv4-mapped IPv6 addresses compare equal to their IPv4
+// form and drops the zone, so a prefix written as 10.0.0.0/8 matches a peer the
+// listener reported as ::ffff:10.0.0.5 (Prefix.Contains never matches across
+// families or zones).
+func normalizeAddr(a netip.Addr) netip.Addr {
+	return a.Unmap().WithZone("")
+}

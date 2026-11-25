@@ -1,0 +1,26 @@
+/* Connection Management module styles. Module-prefixed (.conn-mgmt-*) so they
+ * never collide in the shared (inlined) cascade. Shipped only in the managed
+ * build (main-admin.css). */
+
+/* An address on one row, read as a URL: the scheme, the port and the URL
+ * path (the design system's .optional-field) keep their width, and the
+ * hostname takes the rest. */
+.conn-mgmt-scheme {
+    flex: 0 0 150px;
+}
+
+/* The scheme button is as tall as the boxes beside it, so the row reads as
+ * one address. */
+.conn-mgmt-scheme .segmented-option {
+    padding: 0.625rem 0.875rem;
+    font-size: 0.95rem;
+}
+
+.conn-mgmt-host {
+    flex: 1;
+    min-width: 0;
+}
+
+.conn-mgmt-port {
+    flex: 0 0 100px;
+}

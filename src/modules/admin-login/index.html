@@ -1,0 +1,10 @@
+<!-- The signed-out screen. Sign-in happens on the gateway's own page, which
+     returns here (next=/solAdmin). Once an administrator is signed in this page
+     is hidden: the account actions live in the sidebar. -->
+<div id="admin-login-view" class="card card-narrow">
+    <div class="flex-row justify-between items-center mb-4">
+        <h2 class="card-title">Not signed in</h2>
+    </div>
+    <div id="admin-login-error" class="text-error mb-4 hidden"></div>
+    <a id="btn-admin-login" class="btn btn-primary" href="/login?next=/solAdmin">Sign in</a>
+</div>

@@ -1,12 +1,16 @@
 import { defineConfig } from 'vitest/config';
 import fs from 'node:fs';
 import path from 'node:path';
+import { moduleRegistryPlugin } from './scripts/module-registry-plugin.mjs';
 
 const pkgVersion: string = JSON.parse(
     fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')
 ).version;
 
 export default defineConfig({
+    // Resolve `virtual:module-registry` (imported by src/registry.ts) under tests
+    // too. With no __VITE_VARIANT, the plugin defaults to the `standard` variant.
+    plugins: [moduleRegistryPlugin({ root: __dirname })],
     define: {
         __APP_VERSION__: JSON.stringify(pkgVersion)
     },
@@ -14,7 +18,7 @@ export default defineConfig({
         globals: true,
         environment: 'jsdom',
         cache: false,
-        reporter: process.stdout.isTTY ? 'default' : 'verbose',
+        reporters: process.stdout.isTTY ? 'default' : 'verbose',
         include: ['tests/**/*.test.ts'],
         coverage: {
             provider: 'v8',
@@ -27,22 +31,31 @@ export default defineConfig({
                 'lcovonly'                                     // file: coverage/lcov.info — no duplicate HTML tree (use 'lcov' if you want both)
             ],
             reportsDirectory: 'coverage',
-            include: ['src/**/*.ts', 'src/**/*.js'],
+            include: [
+                'src/**/*.ts',
+                'src/**/*.js',
+                // The gate and build scripts whose logic ships or guards what
+                // ships: the bundle check, the module registry the build
+                // generates, the manual's Markdown form and the user guide made of
+                // it, the npm audit gate and the e2e run's helpers.
+                'scripts/check-bundles.mjs',
+                'scripts/csp.mjs',
+                'scripts/module-registry-plugin.mjs',
+                'scripts/manual-to-md.mjs',
+                'scripts/user-guide.mjs',
+                'scripts/npm-audit-gate.mjs',
+                'scripts/e2e-lib.mjs'
+            ],
             exclude: [
                 'src/css/**',
                 'src/index.html',
                 'src/modules/queue-browser/constants.js',
-                // queue-browser ships its own canned-data mock; queue-discovery's
-                // mock was deleted in Stage C in favor of the core mock below.
-                // queue-copy keeps split mocks for the verify + copy engines so
-                // the build:mock demo runs without an SDK-level QueueBrowser mock.
-                'src/modules/**/service-mock.ts',
-                'src/modules/**/service-verify-mock.ts',
-                'src/modules/**/service-copy-mock.ts',
-                // Broker-side service factories + SEMP discovery lifted to
-                // core/services/ in Stages B + C. Mocks are only exercised by
-                // `build:mock` at runtime, not by unit tests.
-                'src/core/services/**/*-mock.ts'
+                // The in-browser demo broker. Mock-only: the redirect that reaches
+                // it is registered only when mode === 'demo', so it never enters a
+                // production bundle. Its fidelity contracts are covered by
+                // tests/mock-broker/ rather than held to the 100% gate; `mock`
+                // reports its coverage (vitest.mock.config.ts).
+                'src/mock-broker/**'
             ],
             thresholds: {
                 statements: 100,

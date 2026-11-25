@@ -1,0 +1,325 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createGateway, DEMO_GATEWAY_MARKER } from '../../../src/mock-broker/gateway';
+import { pathEscape } from '../../../src/mock-broker/gateway/router';
+import { installMockServer } from '../../../src/mock-broker/server';
+import { resetScenario, scenario } from '../../../src/mock-broker/fixtures';
+import { createManagedService } from '../../../src/core/services/managed-service';
+import { contractSeed } from './helpers';
+
+/**
+ * The fake gateway past the contract: how the page reaches it (the fetch
+ * route and the cookie it holds), and what the contract cannot pin because
+ * it depends on the control panel or on state the Go test does not set up.
+ */
+let realFetch: typeof window.fetch;
+let gw: ReturnType<typeof createGateway>;
+
+beforeEach(() => {
+    realFetch = window.fetch;
+    resetScenario();
+    scenario.latencyMs = 0;
+    gw = createGateway({ seed: contractSeed() });
+    installMockServer({ passthrough: () => Promise.reject(new TypeError('refused')), routes: gw.route });
+});
+
+afterEach(() => {
+    window.fetch = realFetch;
+});
+
+const call = (method: string, path: string, body?: unknown, query = '') =>
+    gw.handle({ method, path, query, body: body === undefined ? '' : JSON.stringify(body), session: gw.openSession('admin', false) });
+
+/** A settings save that carries the rev the file has now. */
+const putSettings = (patch: object) => call('PUT', '/managed/settings', { ...patch, rev: gw.settings.rev() });
+
+describe('mock-broker/gateway -- the page\'s fetch route', () => {
+    it('answers the app\'s own service, with the page\'s cookie', async () => {
+        const svc = createManagedService();
+        expect(await svc.me()).toEqual({ ok: false, status: 401, code: 'unauthenticated', field: undefined, reason: undefined });
+
+        gw.setCookie(gw.openSession('viewer', false));
+        const me = await svc.me();
+        expect(me.ok && me.data.username).toBe('viewer');
+    });
+
+    it('marks every answer, keeps it out of caches, and sends no body with a 204', async () => {
+        gw.setCookie(gw.openSession('viewer', false));
+        const res = await fetch('/managed/me');
+        expect(res.headers.get('X-Demo-Gateway')).toBe(DEMO_GATEWAY_MARKER);
+        expect(res.headers.get('Cache-Control')).toBe('no-store');
+        expect(res.headers.get('Content-Type')).toBe('application/json');
+
+        const out = await fetch('/managed/logout', { method: 'POST' });
+        expect(out.status).toBe(204);
+        expect(await out.text()).toBe('');
+    });
+
+    it('clears the cookie on logout, so the next call is signed out', async () => {
+        gw.setCookie(gw.openSession('viewer', false));
+        await fetch('/managed/logout', { method: 'POST' });
+        expect(gw.cookie()).toBeNull();
+        expect((await fetch('/managed/me')).status).toBe(401);
+    });
+
+    it('serves /hosted from the live settings', async () => {
+        expect(await (await fetch('/hosted')).json()).toEqual({ hosted: true, connModes: 'both', defaultConn: 'direct' });
+
+        gw.setCookie(gw.openSession('admin', false));
+        await fetch('/managed/settings', { method: 'PUT', body: JSON.stringify({ connModes: 'provisioned', defaultConn: 'provisioned', rev: gw.settings.rev() }) });
+        expect(await (await fetch('/hosted')).json()).toEqual({ hosted: true, connModes: 'provisioned', defaultConn: 'provisioned' });
+    });
+
+    it('leaves everything else to the next route', async () => {
+        expect((await fetch('http:///https/1943/broker.solace.com/SEMP/v2/monitor/msgVpns')).status).toBe(200);
+        await expect(fetch('https://example.com/elsewhere')).rejects.toThrow('refused');
+    });
+});
+
+describe('mock-broker/gateway -- dial', () => {
+    it('escapes the socket path as url.PathEscape does', () => {
+        expect(pathEscape('b1')).toBe('b1');
+        expect(pathEscape('a b/c;d,e?f')).toBe('a%20b%2Fc%3Bd%2Ce%3Ff');
+        expect(pathEscape('k$&+:=@~')).toBe('k$&+:=@~');
+        expect(pathEscape('caf\u00e9')).toBe('caf%C3%A9');
+    });
+
+    it('answers 429 with Retry-After while the panel holds the window shut', async () => {
+        gw.faults.dialRateLimited = true;
+        const res = await gw.handle({
+            method: 'POST', path: '/managed/dial', query: '', body: '{"broker":"b1","vpn":"v1"}', session: gw.openSession('viewer', false),
+        });
+        expect(res).toEqual({ status: 429, json: { error: 'rate_limited' }, headers: { 'Retry-After': '60' } });
+    });
+
+    it('still answers not_found first, as the gateway checks entitlement before the window', async () => {
+        gw.faults.dialRateLimited = true;
+        const res = await gw.handle({
+            method: 'POST', path: '/managed/dial', query: '', body: '{"broker":"b2","vpn":"v9"}', session: gw.openSession('viewer', false),
+        });
+        expect(res.status).toBe(404);
+    });
+});
+
+describe('mock-broker/gateway -- admin routes', () => {
+    it('signs out a deleted user on an admin route', async () => {
+        const sid = gw.openSession('admin', false);
+        gw.store.upsertUser({ username: 'other', admin: true, operate: [], readOnly: [], modules: null }, 'other-password-1');
+        gw.store.deleteUser('admin');
+        expect(await gw.handle({ method: 'GET', path: '/managed/users', query: '', body: '', session: sid }))
+            .toEqual({ status: 401, json: { error: 'unauthenticated' } });
+    });
+
+    it('refuses a body of the wrong type, or not JSON at all', async () => {
+        expect((await call('PUT', '/managed/users/x', { password: 1 })).status).toBe(400);
+        expect((await call('PUT', '/managed/connections/b9', { semp: [] })).status).toBe(400);
+        expect((await gw.handle({ method: 'PUT', path: '/managed/settings', query: '', body: '{', session: gw.openSession('admin', false) })).status).toBe(400);
+        expect((await gw.handle({ method: 'POST', path: '/managed/dial', query: '', body: '', session: gw.openSession('admin', false) })).status).toBe(400);
+    });
+
+    it('matches a field name without regard to case, as encoding/json does', async () => {
+        expect(await call('POST', '/managed/dial', { Broker: 'zz', VPN: 'v1' })).toEqual({ status: 404, json: { error: 'not_found' } });
+        expect((await call('PUT', '/managed/settings', { LogLevel: 'debug', \u017fession: { IdleMinutes: 20 }, REV: gw.settings.rev() })).status).toBe(200);
+        expect([gw.settings.current().logLevel, gw.settings.current().session.idleMinutes]).toEqual(['debug', 20]);
+        expect((await call('POST', '/managed/dial', { Brokers: 'b1' })).status).toBe(400);
+    });
+
+    it('refuses an empty name segment', async () => {
+        expect(await call('DELETE', '/managed/users/')).toEqual({ status: 404, json: { error: 'not_found' } });
+    });
+});
+
+describe('mock-broker/gateway -- settings', () => {
+    it('saves an allow list that admits the client, masked as the gateway prints it', async () => {
+        expect(await putSettings({ access: { allow: [' 192.0.2.77/24 '] } })).toEqual({ status: 200, json: { rev: '2' } });
+        expect(gw.settings.current().access.allow).toEqual(['192.0.2.0/24']);
+    });
+
+    it('reads a prefix as netip.ParsePrefix does: IPv6 masked and printed short, no leading zero in the bits', async () => {
+        const list = ['192.0.2.0/24', '2001:0DB8:0:0:8:800:200C:417A/64', '2001:db8::1/32', 'fe80::1:0:0:1/128', '::/0'];
+        expect((await putSettings({ access: { allow: list } })).status).toBe(200);
+        expect(gw.settings.current().access.allow).toEqual(['192.0.2.0/24', '2001:db8::/64', '2001:db8::/32', 'fe80::1:0:0:1/128', '::/0']);
+        for (const [v, why] of [
+            ['10.0.0.0/08', 'bad bits after slash: "08"'],
+            ['10.0.0.0/+8', 'bad bits after slash: "+8"'],
+            ['10.0.0.0/33', 'prefix length out of range'],
+            ['2001:db8::/129', 'prefix length out of range'],
+            ['2001:db8:/32', 'ParseAddr("2001:db8:"): unable to parse IP'],
+            ['1:2:3:4:5:6:7::8/64', 'ParseAddr("1:2:3:4:5:6:7::8"): unable to parse IP'],
+            ['1.2.3.4::/64', 'ParseAddr("1.2.3.4::"): unable to parse IP'],
+        ]) {
+            const res: any = (await putSettings({ access: { trustedProxies: [v] } })).json;
+            expect(res.reason).toBe(`key "access.trustedProxies[0]" has invalid value "${v}": want CIDR such as 10.0.0.0/8 or 192.0.2.7/32 (netip.ParsePrefix("${v}"): ${why})`);
+        }
+    });
+
+    it('refuses a value that is not a CIDR, and an IPv4-mapped one', async () => {
+        const bad: any = (await putSettings({ access: { allow: ['192.0.2.7'] } })).json;
+        expect(bad.reason).toMatch(/^key "access\.allow\[0\]" has invalid value "192\.0\.2\.7": want CIDR such as 10\.0\.0\.0\/8 or 192\.0\.2\.7\/32 \(/);
+        const mapped: any = (await putSettings({ access: { trustedProxies: ['::ffff:10.0.0.1/120'] } })).json;
+        expect(mapped.reason).toBe('key "access.trustedProxies[0]" has invalid value "::ffff:10.0.0.1/120": use the IPv4 form');
+    });
+
+    it('treats null as no change, except that a null list empties it', async () => {
+        await putSettings({ access: { allow: ['192.0.2.0/24'] } });
+        expect((await putSettings({ logLevel: null, access: { allow: null } })).status).toBe(200);
+        expect(gw.settings.current().logLevel).toBe('warn');
+        expect(gw.settings.current().access.allow).toEqual([]);
+    });
+
+    it('shows the sign-in limits, the password minimum and the connect limit, saved live', async () => {
+        const view = async () => ((await call('GET', '/managed/settings')).json as any).settings;
+        expect(await view()).toMatchObject({
+            session: { connectsPerMinute: 20 },
+            login: { maxFailures: 5, perClient: true, clientMaxFailures: 10, resetMinutes: 15, passwordMinLength: 12, twoFactorMinutes: 10 },
+        });
+        const patch = {
+            session: { connectsPerMinute: 50 },
+            login: { perClient: false, clientMaxFailures: 3, resetMinutes: 5, passwordMinLength: 16, twoFactorMinutes: 2 },
+        };
+        expect((await putSettings(patch)).json).toEqual({ rev: '2' });
+        expect(await view()).toMatchObject({ session: { idleMinutes: 10, absoluteMinutes: 30, ...patch.session }, login: { maxFailures: 5, ...patch.login } });
+    });
+
+    it.each([
+        [{ session: { connectsPerMinute: 0 } }, 'session.connectsPerMinute', 0, '1 to 1000'],
+        [{ session: { connectsPerMinute: 1001 } }, 'session.connectsPerMinute', 1001, '1 to 1000'],
+        [{ login: { clientMaxFailures: 0 } }, 'login.clientMaxFailures', 0, '1 to 1000'],
+        [{ login: { clientMaxFailures: 1001 } }, 'login.clientMaxFailures', 1001, '1 to 1000'],
+        [{ login: { resetMinutes: 0 } }, 'login.resetMinutes', 0, '1 to 1440'],
+        [{ login: { resetMinutes: 1441 } }, 'login.resetMinutes', 1441, '1 to 1440'],
+        [{ login: { passwordMinLength: 11 } }, 'login.passwordMinLength', 11, '12 to 128'],
+        [{ login: { passwordMinLength: 129 } }, 'login.passwordMinLength', 129, '12 to 128'],
+        [{ login: { twoFactorMinutes: 0 } }, 'login.twoFactorMinutes', 0, '1 to 60'],
+        [{ login: { twoFactorMinutes: 61 } }, 'login.twoFactorMinutes', 61, '1 to 60'],
+    ])('refuses %o with the key and its range, and saves nothing', async (patch, key, value, range) => {
+        expect(await putSettings(patch)).toEqual({
+            status: 422,
+            json: { error: 'invalid', field: 'settings', reason: `key "${key}" has invalid value "${value}": must be ${range}` },
+        });
+        expect(gw.settings.rev()).toBe('1');
+    });
+
+    it('refuses a perClient that is not a boolean and a limit that is not a whole number as a bad request', async () => {
+        expect((await putSettings({ login: { perClient: 'no' } })).status).toBe(400);
+        expect((await putSettings({ login: { resetMinutes: 1.5 } })).status).toBe(400);
+        expect((await putSettings({ session: { connectsPerMinute: '20' } })).status).toBe(400);
+        expect(gw.settings.rev()).toBe('1');
+    });
+
+    it('gives the login and session keys a seed or a snapshot leaves out their defaults', () => {
+        const strip = (s: ReturnType<typeof contractSeed>['settings']) => {
+            const login = s.login as Partial<typeof s.login>;
+            for (const k of ['perClient', 'clientMaxFailures', 'resetMinutes', 'passwordMinLength', 'twoFactorMinutes'] as const) delete login[k];
+            delete (s.session as Partial<typeof s.session>).connectsPerMinute;
+        };
+        const defaults = {
+            session: { idleMinutes: 10, absoluteMinutes: 30, connectsPerMinute: 20 },
+            login: { maxFailures: 3, perClient: true, clientMaxFailures: 10, resetMinutes: 15, passwordMinLength: 12, twoFactorMinutes: 10 },
+        };
+        const seed = contractSeed();
+        seed.settings.login.maxFailures = 3;
+        strip(seed.settings);
+        expect(createGateway({ seed }).settings.current()).toMatchObject(defaults);
+
+        const snap = JSON.parse(JSON.stringify(createGateway({ seed: contractSeed() }).snapshot()));
+        snap.settings.login.maxFailures = 3;
+        strip(snap.settings);
+        const restored = createGateway({ seed: contractSeed() });
+        restored.restore(snap);
+        expect(restored.settings.current()).toMatchObject(defaults);
+    });
+
+    it('carries the audit section: off by default and saved live', async () => {
+        expect(gw.settings.current().audit).toEqual({ stdout: false, access: false, onFailure: 'continue' });
+        expect((await putSettings({ audit: { access: true } })).json).toEqual({ rev: '2' });
+        expect(gw.settings.current().audit).toEqual({ stdout: false, access: true, onFailure: 'continue' });
+        expect((await putSettings({ audit: { stdout: 'yes' } })).status).toBe(400);
+        expect((await putSettings({ audit: { verbose: true } })).status).toBe(400);
+    });
+
+    it('takes audit.onFailure continue or refuse and nothing else, and a seed without it starts on continue', async () => {
+        expect((await putSettings({ audit: { onFailure: 'refuse' } })).status).toBe(200);
+        expect(gw.settings.current().audit.onFailure).toBe('refuse');
+        const bad: any = await putSettings({ audit: { onFailure: 'ignore' } });
+        expect([bad.status, bad.json.error, bad.json.field]).toEqual([422, 'invalid', 'settings']);
+        expect(bad.json.reason).toBe('key "audit.onFailure" has invalid value "ignore": must be "continue" or "refuse"');
+        expect(gw.settings.current().audit.onFailure).toBe('refuse');
+
+        const old = contractSeed();
+        delete (old.settings.audit as Partial<typeof old.settings.audit>).onFailure;
+        expect(createGateway({ seed: old }).settings.current().audit.onFailure).toBe('continue');
+    });
+
+    it('normalises the modes, the log level and the module order', async () => {
+        await putSettings({ connModes: 'PROVISIONED', logLevel: 'DEBUG', modules: { offered: ['queue-copy', 'queue-browser'] } });
+        const s = gw.settings.current();
+        expect([s.connModes, s.logLevel, s.modules.offered]).toEqual(['provisioned', 'debug', ['queue-browser', 'queue-copy']]);
+    });
+
+    it('refuses connModes direct, which would end Provisioned mode and the console with it', async () => {
+        const before = gw.settings.current().connModes;
+        const res: any = await putSettings({ connModes: 'direct' });
+        expect(res.status).toBe(422);
+        expect(res.json.field).toBe('connModes');
+        expect(res.json.reason).toMatch(/remove config\.yaml from the gateway's data volume and start the gateway with SMU_CONN_MODES=direct, so that it seeds its settings again\.$/);
+        expect(gw.settings.current().connModes).toBe(before);
+    });
+
+    it('reports a hand edit and refuses to save over it', async () => {
+        gw.faults.changedOnDisk = true;
+        expect(((await call('GET', '/managed/settings')).json as any).changedOnDisk).toBe(true);
+        expect(await putSettings({ logLevel: 'info' })).toEqual({ status: 409, json: { error: 'config_changed_on_disk' } });
+    });
+
+    it('answers 500 config_unreadable, with what to do, when the file cannot be read', async () => {
+        gw.faults.unreadable = true;
+        for (const res of [await call('GET', '/managed/settings'), await putSettings({})]) {
+            expect(res.status).toBe(500);
+            expect((res.json as any).error).toBe('config_unreadable');
+            expect((res.json as any).reason).toMatch(/The cause is on the gateway host; once the gateway can read the file again, reload this page\.$/);
+        }
+    });
+});
+
+describe('mock-broker/gateway -- the password minimum', () => {
+    const put = (name: string, password: string) => call('PUT', `/managed/users/${name}`, { rev: 0, password, admin: false, operate: [], readOnly: [] });
+
+    it('is login.passwordMinLength for a new user\'s password, read at the next save', async () => {
+        expect((await putSettings({ login: { passwordMinLength: 16 } })).status).toBe(200);
+        expect(await put('newbie', 'fifteen-chars-1')).toEqual({
+            status: 422, json: { error: 'invalid', field: 'password', reason: 'Password must be 16 to 128 characters.' },
+        });
+        expect((await put('newbie', 'sixteen-chars-16')).status).toBe(200);
+    });
+
+    it('applies to a password reset as to a new user, and lets an unchanged password stay empty', async () => {
+        await putSettings({ login: { passwordMinLength: 20 } });
+        const body = (password: string) => ({ rev: 1, password, admin: false, operate: [], readOnly: [], modules: null });
+        expect(((await call('PUT', '/managed/users/viewer', body('nineteen-chars-0019'))).json as any).reason).toBe('Password must be 20 to 128 characters.');
+        expect((await call('PUT', '/managed/users/viewer', body(''))).status).toBe(200);
+    });
+});
+
+describe('mock-broker/gateway -- sessions', () => {
+    it('tells the listeners about a drop, never about an expiry', () => {
+        const dropped: string[] = [];
+        gw.sessions.onDrop((_id, s) => dropped.push(s.user));
+        const a = gw.openSession('viewer', false);
+        const b = gw.openSession('operator', false);
+
+        gw.sessions.expire(a);
+        expect(gw.sessions.get(a)).toBeNull();
+        gw.sessions.dropUser('operator');
+        expect(gw.sessions.get(b)).toBeNull();
+        expect(dropped).toEqual(['operator']);
+    });
+
+    it('tells store listeners after each committed edit', () => {
+        let changes = 0;
+        gw.onStoreChange(() => changes++);
+        gw.store.upsertUser({ username: 'x', admin: false, operate: [], readOnly: [], modules: null }, 'x-password-0001');
+        gw.store.upsertUser({ username: 'y', admin: false, operate: [], readOnly: [], modules: null }, '');   // refused
+        gw.store.deleteConnection('b2');
+        expect(changes).toBe(2);
+    });
+});

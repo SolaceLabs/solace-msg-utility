@@ -1,0 +1,55 @@
+<!-- Provisioned entry template (the `managed` variant). The build splices the
+     Direct markup from index.html in at the module-base marker below. -->
+<!-- Shown by module.managed.ts, in place of every panel, when the /hosted probe was inconclusive. -->
+<div id="conn-probe-notice-managed" class="banner-warning conn-probe-notice hidden" role="status">
+    <span>Could not check whether this page is served by the gateway.</span>
+    <button id="btn-conn-probe-retry-managed" class="btn btn-secondary" type="button">Retry</button>
+</div>
+<div id="conn-tabs" class="tabs hidden" role="tablist">
+    <button id="conn-tab-direct" class="tab is-active" type="button" role="tab" data-conn-mode="direct" aria-selected="true">Direct</button>
+    <button id="conn-tab-managed" class="tab hidden" type="button" role="tab" data-conn-mode="provisioned" aria-selected="false">Provisioned</button>
+</div>
+<div id="conn-panel-direct" role="tabpanel">
+    <!-- Shown by module.managed.ts while a Provisioned connection is open. -->
+    <div id="conn-note-direct" class="card hidden" role="status">
+        <div class="banner-warning m-0">A Provisioned connection is open. Connect here closes it, and you stay signed in.</div>
+    </div>
+<!-- @module-base -->
+</div>
+<!-- Provisioned connection panel: the gateway session's entitled broker/VPN
+     selection. Only rendered when the gateway advertises Provisioned mode via
+     /hosted. Sign-in and password changes happen on the gateway's own pages. -->
+<div id="conn-panel-managed" role="tabpanel" class="hidden">
+    <!-- Signed-out view -->
+    <div id="managed-login-view" class="card card-narrow">
+        <div class="flex-row justify-between items-center mb-4">
+            <h2 class="card-title">Sign in</h2>
+        </div>
+        <p class="text-secondary mb-4 leading-normal">
+            Sign in with your account to connect to the brokers you are entitled to.
+        </p>
+        <div id="managed-login-error" class="text-error mb-4 hidden text-body-sm"></div>
+        <a id="btn-managed-login" class="btn btn-primary" href="/login">Sign in</a>
+    </div>
+
+    <!-- Shown by module.managed.ts while the user is signed in and a Direct connection is open. -->
+    <div id="conn-note-managed" class="card hidden" role="status">
+        <div class="banner-warning m-0">A Direct connection is open. Connect here closes it.</div>
+    </div>
+
+    <!-- Selection view: hosts the shared provisioned connection card
+         (src/core/components/provisioned-connection), which managed-panel.ts
+         builds here; the card takes this Refresh button into its header. -->
+    <div id="managed-select-view" class="hidden">
+        <button id="btn-managed-refresh" class="btn btn-secondary" type="button" title="Re-fetch your available connections">Refresh</button>
+    </div>
+
+    <!-- Connected view -->
+    <div id="managed-connected-view" class="card hidden">
+        <div class="flex-row justify-between items-center mb-4">
+            <h2 class="card-title">Connected</h2>
+            <button id="btn-managed-disconnect" class="btn btn-danger">Disconnect</button>
+        </div>
+        <div id="managed-connected-summary" class="text-secondary"></div>
+    </div>
+</div>

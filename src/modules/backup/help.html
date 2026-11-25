@@ -1,0 +1,245 @@
+<article class="manual-chapter">
+    <h2>Backup &amp; Restore</h2>
+    <p class="manual-lead">Keep a copy of the gateway's users, connections and settings, and bring one back. You can export a copy by hand, restore from a file, and let the gateway write a backup on a schedule.</p>
+    <p>Backup &amp; Restore is part of the administration app at <code>/solAdmin</code>, and it needs an administrator's session. Without one the page shows <strong>Administrator Sign-in Required</strong>, with the line <code>Sign in as an administrator to back up or restore the gateway configuration.</code> in place of everything below. If your session ends or you lose your administrator rights while the page is open, it clears the passphrases you typed and the file you chose, and shows the same card.</p>
+
+    <h3>What a backup holds</h3>
+    <p>A backup is one file, sealed with a passphrase that you choose. It holds three things:</p>
+    <ul>
+        <li><strong>Users.</strong> Each user as the gateway stores them, with the hash of the password, never the password itself. A user's two-factor secret and the hashes of the unused recovery codes are part of the record.</li>
+        <li><strong>Connections.</strong> Each connection with its credentials: the SEMP and the Message VPN passwords.</li>
+        <li><strong>Settings.</strong> The gateway settings, except the file paths. The paths of the certificate, the key and the trusted CAs come from the gateway's host and are not in a backup.</li>
+    </ul>
+    <p>A backup does not hold the audit trail, the queues or messages on your brokers, or a session. It opens on any gateway, whatever that gateway's own keys are. The passphrase is the only key: without it, nobody can open the file, and the gateway cannot tell it to you.</p>
+    <aside class="manual-note" data-kind="important">
+        <p>Treat a backup and its passphrase like the broker credentials themselves. With both, someone holds every user's password hash and every connection's credentials. Keep the passphrase apart from the file.</p>
+    </aside>
+
+    <h3>The page at a glance</h3>
+    <p>The page has two cards. <strong>Configuration</strong> exports and imports by hand. <strong>Schedule</strong> sets the backups the gateway writes by itself, and lists the files they leave.</p>
+    <figure class="manual-figure">
+        <img src="help/page.svg" width="760" height="720" alt="The Backup and Restore page: a Configuration card with an Export form and an Import form, and a Schedule card with a status line, the schedule form, three buttons and a list of saved backups.">
+        <figcaption>Backup &amp; Restore: the Configuration card above, the Schedule card below.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>Export: a passphrase, its confirmation and the <strong>Export</strong> button.</li>
+        <li>Import: the backup file, its passphrase and the <strong>Preview</strong> button.</li>
+        <li><strong>Reload</strong> reads the schedule and the saved backups from the gateway again.</li>
+        <li>The status of the schedule: when it runs, when it runs next, and the last backup.</li>
+        <li>The schedule form: how often, when, how many backups to keep, and the passphrase.</li>
+        <li><strong>Save schedule</strong>, <strong>Back up now</strong> and <strong>Remove schedule</strong>.</li>
+        <li><strong>Saved backups</strong>: the files in the gateway's backup directory, each with a download icon and a restore icon.</li>
+    </ol>
+
+    <h3>Exporting a backup</h3>
+    <p>Use <strong>Export</strong> to take a copy of the configuration as it stands, for example before a change or before you replace the gateway. The copy is a file that your browser saves.</p>
+    <ol class="manual-steps">
+        <li>Type a passphrase in <strong>Passphrase (12 to 128 characters)</strong>. It must be 12 to 128 characters long.</li>
+        <li>Type the same passphrase in <strong>Confirm the passphrase</strong>.</li>
+        <li>Press <strong>Export</strong>. Your browser saves a file named like <code>smu-backup-20261122T020000Z.json</code>: the date and time of the export in UTC. A toast says <code>Exported</code> followed by the file name.</li>
+    </ol>
+    <p>After a successful export the page clears both passphrase fields. It keeps no passphrase: each action sends the one you typed for it.</p>
+    <p>If the two fields differ, the page says <code>The passphrases do not match.</code> and sends nothing. If the passphrase is shorter than 12 or longer than 128 characters, the gateway refuses with <code>The passphrase must be 12 to 128 characters.</code></p>
+
+    <h3>Restoring from a file</h3>
+    <p>Restoring is two steps. <strong>Preview</strong> opens the file and shows what an import would change, and changes nothing. You then choose, for each part, what to import, and press <strong>Import</strong>.</p>
+    <figure class="manual-figure">
+        <img src="help/preview.svg" width="760" height="598" alt="The Import form after a preview: the chosen file, the date and gateway version of the backup, a choice and a list of changes for users, connections and settings, a warning about signing out, and the Import button.">
+        <figcaption>The Import form after a preview, with one choice for each part of the backup.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The file, its passphrase and <strong>Preview</strong>. Under the file box the page names what you chose.</li>
+        <li>When the backup was made and by which gateway version.</li>
+        <li>One choice for <strong>Users</strong>, <strong>Connections</strong> and <strong>Settings</strong>. Settings have two answers, so theirs is a switch between <strong>Skip</strong> and <strong>Replace</strong>.</li>
+        <li>What importing that part would add, change and remove.</li>
+        <li>The warning that the import signs you out.</li>
+        <li><strong>Import</strong> applies the choices.</li>
+    </ol>
+    <ol class="manual-steps">
+        <li>Under <strong>Backup file</strong>, choose a file. The box takes a <code>.json</code> file of at most 8 MiB, the most the gateway accepts in one import. The page then shows <code>File:</code> and the file's name. To restore a backup the gateway wrote itself, use its restore icon in <strong>Saved backups</strong> instead: the page then shows <code>Saved backup:</code> and the name, and puts the cursor in the passphrase box.</li>
+        <li>Type the passphrase the backup was sealed with in <strong>Passphrase</strong>. For a saved backup, that is the passphrase of the schedule when the file was written.</li>
+        <li>Press <strong>Preview</strong>. The gateway opens the file and the page shows when the backup was made, by which gateway, and a list of changes for each part. Choosing another file hides the preview.</li>
+        <li>For each of <strong>Users</strong>, <strong>Connections</strong> and <strong>Settings</strong>, read the list and choose what to do. Every choice starts at <strong>Skip</strong>.</li>
+        <li>Press <strong>Import</strong>. The page asks you to confirm, naming the parts you chose, for example <code>Import users (merge), settings (replace) from this backup? The gateway applies it at once.</code> Press <strong>Import</strong> in that box to go on, or cancel.</li>
+    </ol>
+
+    <h4>The choices</h4>
+    <table>
+        <thead>
+            <tr><th>Part</th><th>Choice</th><th>What the gateway does</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Users, Connections</td><td><strong>Skip</strong></td><td>Leaves the part as it is.</td></tr>
+            <tr><td>Users, Connections</td><td><strong>Merge: add and update these, keep the others</strong></td><td>Adds the backup's records, and replaces any record that has the same name. Records that the backup does not hold stay. Users are matched by user name, connections by broker name.</td></tr>
+            <tr><td>Users</td><td><strong>Replace: these users only</strong></td><td>Makes the user list exactly the backup's. A user the backup does not hold is removed.</td></tr>
+            <tr><td>Connections</td><td><strong>Replace: these connections only</strong></td><td>Makes the connection list exactly the backup's. A connection the backup does not hold is removed.</td></tr>
+            <tr><td>Settings</td><td><strong>Skip</strong> or <strong>Replace</strong></td><td>Replaces every setting with the backup's. There is no merge for settings.</td></tr>
+        </tbody>
+    </table>
+    <p>The list under each choice has up to three kinds of line: <code>Add:</code> names that are not there yet, <code>Change:</code> names whose record differs, and <code>Remove (Replace only):</code> names that only <strong>Replace</strong> would delete. For settings the line is <code>Change:</code> and the settings keys that differ, such as <code>logLevel</code>. A part with nothing to do says <code>No change.</code></p>
+    <p>The gateway imports the parts you chose together, or none of them. If one of them is refused, nothing is imported.</p>
+    <aside class="manual-note" data-kind="warning">
+        <p>An import overwrites what the gateway holds, at once, and there is no undo.</p>
+        <ul>
+            <li><strong>Replace</strong> for users or connections deletes every record that the backup does not hold, and every record it does hold takes the backup's values, passwords and permissions included.</li>
+            <li><strong>Replace</strong> for settings overwrites all the settings, and they apply to the running gateway at once.</li>
+            <li>Export a backup first if you may want to return to what the gateway holds today.</li>
+        </ul>
+    </aside>
+
+    <h4>Sessions and two-factor after a restore</h4>
+    <p>An import ends the sessions of the users it changes in these ways: the user is removed, or the backup changes their password hash or whether they are an administrator, or it adds, removes or replaces their two-factor secret. Those users sign in again. A change to the recovery codes alone does not end a session. A user the import adds has no session to end.</p>
+    <p>Two-factor is restored as the file holds it. A user whose record in the backup has no two-factor ends up without it, and a user whose record has it ends up with the secret and the unused recovery codes in the file. An import changes nothing else about two-factor. A backup without the two-factor mode reads as <code>optional</code>, so importing its settings with <strong>Replace</strong> sets the mode to <code>optional</code>: check the mode afterwards; the Gateway Settings chapter describes it.</p>
+    <p>When the import would change your own account, a banner appears under the users choice: <code>Importing the users this way changes your own account: you will be signed out.</code> It shows only for the users choice that would do this: <strong>Merge</strong> and <strong>Replace</strong> are checked separately. After such an import a toast says <code>Imported. Your own account changed: sign in again.</code> and the app signs you out. After any other import the toast says <code>Imported</code>, and the page clears the file and the passphrase and reloads the schedule.</p>
+    <p>The backup's settings and the way it treats two-factor are described for the operator in <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#backups-and-two-factor">Backups and two-factor</a>.</p>
+
+    <h4>When the data changes during a preview</h4>
+    <p>The preview is a picture of the gateway at one moment. If anyone changes the users, the connections or the settings (a password change counts) after the preview, and before you press <strong>Import</strong>, the gateway refuses the import for the parts that changed. The page hides the preview and says <code>The gateway's data changed since the preview. Run the preview again.</code> The file and passphrase stay filled in. Press <strong>Preview</strong> again, read the list and choose again.</p>
+
+    <h3>Scheduled backups</h3>
+    <p>The gateway can write a backup by itself. Each one is sealed with the schedule's passphrase, so nobody has to be signed in. The gateway writes the files into its backup directory, which the operator mounts from the host so that the files stay outside the container. The operator's side is in <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#back-up-and-restore">Back up and restore</a>. All times on this card are UTC.</p>
+    <figure class="manual-figure">
+        <img src="help/schedule.svg" width="760" height="480" alt="The Schedule card with a weekly schedule: the status lines, the frequency, day and time, the number of backups to keep, the passphrase fields, three buttons and two saved backups with a download and a restore icon each.">
+        <figcaption>The Schedule card for a weekly schedule, with two saved backups.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The status: the schedule in words, the next run and the last backup.</li>
+        <li>How often, and when.</li>
+        <li><strong>Backups to keep</strong>.</li>
+        <li>The passphrase and its confirmation.</li>
+        <li><strong>Save schedule</strong>, <strong>Back up now</strong> and <strong>Remove schedule</strong>.</li>
+        <li>The list of saved backups.</li>
+        <li>The download icon and the restore icon of one backup.</li>
+    </ol>
+
+    <h4>The status</h4>
+    <p>Above the form the page tells you where the schedule stands:</p>
+    <ul>
+        <li>With no schedule: <code>No schedule: the gateway writes no backups until you save one.</code></li>
+        <li>With one: the schedule in words, such as <code>Weekly on Monday at 02:15 UTC; keeps the last 14.</code>, then <code>Next backup:</code> and the time.</li>
+        <li>After a run: <code>Last backup:</code> the file name and the time, or <code>Last backup,</code> the time, <code>failed:</code> and the reason. The gateway keeps the last run in memory, so a restart of the gateway clears it.</li>
+    </ul>
+    <p>When the gateway cannot write to its backup directory, a banner under the heading says why. The reason is one of these:</p>
+    <ul>
+        <li><code>/backup does not exist. Mount a directory there to keep backups outside the container.</code></li>
+        <li><code>/backup is not a directory. Mount a directory there.</code></li>
+        <li><code>Cannot read /backup:</code> and the system's reason.</li>
+        <li><code>/backup is not writable</code>, followed by a hint about who owns the directory when the gateway can tell.</li>
+    </ul>
+    <p>While the directory has a problem the list of saved backups says <code>The backup directory cannot be read.</code> Fix it on the host; the operator's guide shows how. <strong>Reload</strong> checks again.</p>
+
+    <h4>Setting the schedule</h4>
+    <ol class="manual-steps">
+        <li>Choose <strong>Frequency</strong>. The fields below change with it (see the table).</li>
+        <li>Set when the backup runs, in UTC.</li>
+        <li>Set <strong>Backups to keep</strong>.</li>
+        <li>Type the passphrase twice. A schedule that does not exist yet needs one. When you edit a schedule, leave both boxes blank to keep the current passphrase, or type another to change it.</li>
+        <li>Press <strong>Save schedule</strong>. A toast says <code>Schedule saved</code>, the page clears the passphrase boxes, and the status shows the next run.</li>
+    </ol>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>Shown for</th><th>What it takes</th><th>Default</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Frequency</strong></td><td>Every schedule</td><td><strong>Hourly</strong>, <strong>Daily</strong>, <strong>Weekly</strong> or <strong>Monthly</strong>.</td><td>Daily</td></tr>
+            <tr><td><strong>Minute past the hour</strong></td><td>Hourly</td><td>A whole number from 0 to 59.</td><td>0</td></tr>
+            <tr><td><strong>Time (UTC)</strong></td><td>Daily, weekly and monthly</td><td>A time of day, in UTC.</td><td>02:00</td></tr>
+            <tr><td><strong>Day of the week</strong></td><td>Weekly</td><td>Sunday to Saturday.</td><td>Sunday</td></tr>
+            <tr><td><strong>Day of the month</strong></td><td>Monthly</td><td>A whole number from 1 to 31. A month without that day backs up on its last day.</td><td>1</td></tr>
+            <tr><td><strong>Backups to keep</strong></td><td>Every schedule</td><td>A whole number from 1 to 365. After each backup the gateway deletes the oldest ones beyond this number.</td><td>14</td></tr>
+            <tr><td><strong>Passphrase</strong> and <strong>Confirm the passphrase</strong></td><td>Every schedule</td><td>12 to 128 characters, the same in both boxes. Under the box the page says <code>Required: every scheduled backup is encrypted with it.</code> when there is no schedule, and <code>Leave blank to keep the current passphrase.</code> when there is one.</td><td>Empty</td></tr>
+        </tbody>
+    </table>
+    <p>The gateway lists and deletes only the files it wrote itself, named like <code>smu-backup-20261122T020000Z.json</code>. It leaves any other file in the directory alone. A change of passphrase applies to the backups written from then on. The files already saved stay sealed with the passphrase they were written with.</p>
+
+    <h4>Running a backup now</h4>
+    <p>Press <strong>Back up now</strong> to write a backup at once, with the saved schedule and its passphrase. Edits you have made in the form but not saved do not count, and they stay in the form. The button is greyed out while there is no schedule. A toast says <code>Backup written:</code> and the file name, and the status and the list refresh. If the gateway cannot write the file, the reason shows above the buttons and the status line records the failed run. Two backups made in the same second would share a name, so a second press within a second can fail with a message that asks you to wait a second and run it again.</p>
+
+    <h4>Removing the schedule</h4>
+    <p>Press <strong>Remove schedule</strong> to stop the scheduled backups. A box asks <code>Remove the backup schedule? The saved backups stay.</code> Press <strong>Remove</strong> to go on. A toast says <code>Schedule removed</code>. The files in the backup directory stay where they are. The button is greyed out while there is no schedule.</p>
+
+    <h4>Saved backups</h4>
+    <p>The list shows the files the gateway has written, newest first: <strong>File</strong>, <strong>Created (UTC)</strong> and <strong>Size</strong>. Each row ends with two icons:</p>
+    <ul>
+        <li>The download icon, named <code>Download "file name"</code> when you point at it. Your browser saves the file as the gateway wrote it. It is still sealed with the schedule's passphrase.</li>
+        <li>The restore icon, named <code>Restore "file name"</code>. It fills the Import form in the Configuration card with this backup, so that you only type the passphrase and press <strong>Preview</strong>. See Restoring from a file, above.</li>
+    </ul>
+    <p>With no files the list says <code>No saved backups yet.</code> The page offers no way to delete a single backup. The gateway deletes the oldest ones itself, as <strong>Backups to keep</strong> says.</p>
+    <p><strong>Reload</strong> fetches the schedule and the list again. It also fills the schedule fields with the saved schedule, so use it to drop edits you have not saved.</p>
+
+    <h4>When another administrator changes the schedule</h4>
+    <p>Two administrators can edit the schedule at the same time. The gateway keeps the first save and refuses the second, so that nobody overwrites a change they never saw:</p>
+    <ul>
+        <li>If the schedule changed since you opened it, a box says <code>This schedule was changed by someone else since you opened it.</code> Press <strong>Reload</strong> to see the current schedule, or cancel to keep your edits.</li>
+        <li>If you save a first schedule but another administrator saved one before you, the page says <code>Someone else saved a schedule since you opened this page. It is shown now; change it if you still want to.</code> and shows theirs.</li>
+        <li>If another administrator removed the schedule, a toast says <code>This schedule was deleted by someone else.</code> and the page reloads.</li>
+    </ul>
+
+    <h3>Refusals and messages</h3>
+    <p>A refusal shows in red in the card it belongs to: under the Export form, under the Import form (above <strong>Preview</strong>), above the schedule buttons, or, for loading and downloading, under the heading of the Schedule card.</p>
+    <h4>Export and import</h4>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>What it means and what to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>The passphrases do not match.</code></td><td>The two passphrase boxes differ. Type the same text in both.</td></tr>
+            <tr><td><code>The passphrase must be 12 to 128 characters.</code></td><td>The passphrase is too short or too long. Applies to an export, to a schedule, and to opening a file.</td></tr>
+            <tr><td><code>Choose a backup file, or a saved backup below.</code></td><td>You pressed <strong>Preview</strong> with no file chosen.</td></tr>
+            <tr><td><code>smu-backup-20261122T020000Z.json is larger than the 8 MiB the gateway accepts in one import.</code></td><td>The file you chose, whose name the message gives, is too big. A real backup is far smaller: check that you chose the right file.</td></tr>
+            <tr><td><code>This is not a Solace Message Utility backup file.</code></td><td>The file is not a backup made by this application.</td></tr>
+            <tr><td><code>This backup file is damaged.</code></td><td>The file is cut short or has been edited. Use another copy.</td></tr>
+            <tr><td><code>This backup has format version N, which this gateway does not read.</code></td><td>The file's format is one this gateway cannot open. N is the file's version.</td></tr>
+            <tr><td><code>The passphrase does not open this file, or the file is damaged.</code></td><td>Check the passphrase, letter case included. If it is right, the file is damaged.</td></tr>
+            <tr><td><code>There is no backup named "name".</code></td><td>A saved backup you chose is not in the backup directory. Press <strong>Reload</strong> and choose from the list.</td></tr>
+            <tr><td><code>Choose at least one section to import.</code></td><td>All three choices are <strong>Skip</strong>. Choose <strong>Merge</strong> or <strong>Replace</strong> for at least one.</td></tr>
+            <tr><td><code>The backup's users cannot be imported:</code> a reason</td><td>The users in the backup break a rule the gateway applies to its own users. The reason says which. The same holds for <code>The backup's connections cannot be imported:</code>.</td></tr>
+            <tr><td><code>At least one administrator must remain.</code></td><td>The users you chose would leave the gateway with no administrator. Choose <strong>Merge</strong>, or use a backup that holds an administrator.</td></tr>
+            <tr><td><code>This allow list would deny your own address (203.0.113.7). Add it, or a range that contains it.</code></td><td>The backup's settings carry an access list that would lock your browser out. The gateway gives a similar reason, <code>The gateway cannot tell your address, so this allow list would deny this browser.</code>, when it cannot tell your address. Choose <strong>Skip</strong> for the settings and import the other parts.</td></tr>
+            <tr><td>A reason about a setting</td><td>The gateway refuses settings that it would not accept at start, for example settings that would turn Provisioned mode off. The reason says which setting and why. Choose <strong>Skip</strong> for the settings.</td></tr>
+            <tr><td><code>The gateway's data changed since the preview. Run the preview again.</code></td><td>See "When the data changes during a preview", above.</td></tr>
+        </tbody>
+    </table>
+    <h4>Schedule</h4>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>What it means and what to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>Enter a time.</code></td><td>The time box is empty. Give a time of day.</td></tr>
+            <tr><td><code>Enter whole numbers.</code></td><td>A minute, a day of the month or <strong>Backups to keep</strong> is empty or not a whole number.</td></tr>
+            <tr><td><code>The minute must be 0 to 59.</code></td><td>The minute is out of range.</td></tr>
+            <tr><td><code>The day of the month must be 1 to 31, and only a monthly schedule takes one.</code></td><td>The day of the month is out of range.</td></tr>
+            <tr><td><code>Keep 1 to 365 backups.</code></td><td><strong>Backups to keep</strong> is out of range.</td></tr>
+            <tr><td><code>A new schedule needs a passphrase.</code></td><td>You saved a schedule that does not exist yet with the passphrase boxes blank. Type a passphrase.</td></tr>
+            <tr><td>A reason that names a file or the directory, such as <code>already exists; wait a second and run it again</code></td><td>A run failed, and the message is the gateway's own reason. Read it, fix the cause (often the backup directory), and press <strong>Back up now</strong> again. The gateway's log has the detail.</td></tr>
+        </tbody>
+    </table>
+    <h4>Any action</h4>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>What it means and what to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>Your session has ended. Sign in again.</code></td><td>The gateway ended your session. The message is a toast, and the app returns to the sign-in.</td></tr>
+            <tr><td><code>You must change your password before you continue.</code></td><td>Your own password is due for a change. Change it on the gateway's sign-in page, then return.</td></tr>
+            <tr><td><code>This needs an administrator.</code></td><td>Your account does not have administrator rights.</td></tr>
+            <tr><td><code>The gateway rejected the request as malformed.</code></td><td>The gateway could not read what the page sent. Reload the page and try again.</td></tr>
+            <tr><td><code>The gateway refused a cross-site request.</code></td><td>The page was opened from another address than the gateway's own. Open <code>/solAdmin</code> on the gateway's address and try again.</td></tr>
+            <tr><td><code>Not found. It may already have been removed.</code></td><td>What you asked for is not there, for example a saved backup that has been deleted since the list loaded. Press <strong>Reload</strong>.</td></tr>
+            <tr><td><code>Too many requests. Wait a minute and try again.</code></td><td>The gateway refused because requests came too fast. Wait a minute.</td></tr>
+            <tr><td><code>The request is too large.</code></td><td>The request is larger than the gateway accepts.</td></tr>
+            <tr><td><code>This was changed by someone else since you opened it. Reload to see the current version.</code></td><td>Another administrator saved first. Press <strong>Reload</strong>.</td></tr>
+            <tr><td><code>The page did not send the version it was working from, so the gateway refused the change. Reload the page and try again.</code></td><td>Reload the page.</td></tr>
+            <tr><td><code>A data file (users, connections or backup settings) was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.</code></td><td>A file on the gateway's host was changed outside these pages. The operator must restart the gateway before the change can go through.</td></tr>
+            <tr><td><code>config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.</code></td><td>The same, for the settings file. It can appear when you import settings.</td></tr>
+            <tr><td><code>The gateway cannot read its config.yaml. Its log has the cause.</code></td><td>The gateway cannot read its settings file. Tell the operator.</td></tr>
+            <tr><td><code>The gateway could not write its data files, so nothing was changed. Its log has the cause.</code></td><td>Nothing was imported or saved. Tell the operator.</td></tr>
+            <tr><td><code>The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.</code></td><td>An import or a schedule change is refused while the audit log cannot be written. Tell the operator.</td></tr>
+            <tr><td><code>The gateway could not complete the request. Its log has the cause.</code></td><td>An error inside the gateway. Tell the operator.</td></tr>
+            <tr><td><code>The gateway sent a response this page cannot read.</code></td><td>Something between your browser and the gateway answered in place of it. Try again, and tell the operator if it persists.</td></tr>
+            <tr><td><code>The gateway could not be reached.</code></td><td>The page could not contact the gateway. Check your network and try again.</td></tr>
+            <tr><td><code>The gateway did not answer in time. If this was a change, it may still have been applied: reload to see where it stands before you try again.</code></td><td>Press <strong>Reload</strong> and check before you repeat an import or a save.</td></tr>
+        </tbody>
+    </table>
+</article>

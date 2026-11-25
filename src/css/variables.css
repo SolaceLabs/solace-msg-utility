@@ -61,6 +61,11 @@
     /* Disabled glass */
     --glass-border: transparent;
 
+    /* Icons drawn as backgrounds: the chevron of a select (the queue picker's,
+     * in --text-secondary) and the tick of a tick box. */
+    --icon-chevron-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    --icon-tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='5 12.5 10 17.5 19 7'/%3E%3C/svg%3E");
+
     /* Z-index scale — single source of truth for stacking order.
      *   --z-content     content atop the page flow (sticky table headers, sidebar)
      *   --z-overlay     elements floating just above content (sidebar toggle handle)

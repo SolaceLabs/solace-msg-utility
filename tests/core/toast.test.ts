@@ -1,12 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { showToast } from '../../src/core/toast';
+import { showToast, TOAST_EVENT, type ToastEventDetail } from '../../src/core/toast';
 
 /**
  * Tests for the auto-dismiss lifecycle. The happy-path "append + add class" is
  * already exercised by the module tests that call showToast on user actions.
  * These tests target the two `setTimeout` callbacks (visible → leaving → remove)
- * that were previously never fired in the suite, letting a regression remove
- * the cleanup path without any test noticing.
+ * so a regression cannot remove the cleanup path unnoticed.
  */
 describe('core/toast', () => {
     beforeEach(() => {
@@ -20,6 +19,20 @@ describe('core/toast', () => {
         document.body.innerHTML = '';
         expect(() => showToast('hello')).not.toThrow();
         expect(document.querySelectorAll('.toast').length).toBe(0);
+    });
+
+    it('dispatches TOAST_EVENT on the container with the message and type, for the notification center', () => {
+        const seen: ToastEventDetail[] = [];
+        document.getElementById('toast-container')!
+            .addEventListener(TOAST_EVENT, (e) => seen.push((e as CustomEvent<ToastEventDetail>).detail));
+
+        showToast('Queue "orders" bound', 'ok');
+        showToast('Loading saved config');
+
+        expect(seen).toEqual([
+            { message: 'Queue "orders" bound', type: 'ok' },
+            { message: 'Loading saved config', type: 'info' },
+        ]);
     });
 
     it('append + requestAnimationFrame flips to toast--visible', () => {

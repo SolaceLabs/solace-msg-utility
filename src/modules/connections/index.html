@@ -1,37 +1,58 @@
+<!-- Shown by module.ts when the /hosted probe was inconclusive (the Direct form stays usable). -->
+<div id="conn-probe-notice" class="banner-warning conn-probe-notice hidden" role="status">
+    <span>Could not check whether this page is served by the gateway.</span>
+    <button id="btn-conn-probe-retry" class="btn btn-secondary" type="button">Retry</button>
+</div>
+
+<!-- The broker type decides how many hosts the form takes (core/connections/broker-hosts.ts):
+     one for a software or cloud broker, two for an appliance. -->
 <div class="card">
     <div class="flex-row justify-between items-center mb-4">
-        <h2 class="m-0">Broker Configuration</h2>
+        <h2 class="card-title">Solace Event Broker Type</h2>
+        <div class="segmented" id="conn-broker-type" role="group" aria-label="Solace Event Broker Type">
+            <button type="button" class="segmented-option" data-broker-type="software" aria-pressed="true">Software / Cloud</button>
+            <button type="button" class="segmented-option" data-broker-type="appliance" aria-pressed="false">Appliance</button>
+        </div>
     </div>
-    <div class="form-group">
-        <label>Broker Host (IP or Hostname)</label>
-        <input type="text" id="conn-host" class="form-control"
-            placeholder="e.g. localhost or my-broker.solace.cloud or 192.168.0.10" value="localhost">
-        <div class="invalid-feedback">Invalid hostname or IP address.</div>
-    </div>
+    <p id="conn-broker-type-hint" class="text-secondary text-body-sm m-0"></p>
 </div>
 
 <div class="card">
     <div class="flex-row justify-between items-center mb-4">
-        <h2 class="m-0">Solace SEMP (Management)</h2>
+        <h2 class="card-title">Solace SEMP (Management)</h2>
     </div>
+    <!-- One row, read as a URL: protocol, host, port and the optional path. The host is the
+         one host of a software or cloud broker; the management host of an appliance. -->
     <div class="form-group flex-row">
-        <div style="width: 150px;">
+        <div class="w-150px">
             <label>Protocol</label>
             <select id="semp-protocol" class="form-control">
                 <option value="http">http://</option>
                 <option value="https" selected>https://</option>
             </select>
         </div>
-        <div style="width: 100px;">
+        <div class="w-full">
+            <label id="lbl-conn-host" for="conn-host">Broker Host (IP or Hostname)</label>
+            <input type="text" id="conn-host" class="form-control"
+                placeholder="e.g. localhost or my-broker.solace.cloud or 192.168.0.10" value="localhost">
+            <div class="invalid-feedback">Invalid hostname or IP address.</div>
+        </div>
+        <div class="w-100px">
             <label>Port</label>
             <input type="text" id="semp-port" class="form-control">
             <div class="invalid-feedback">Invalid port.</div>
         </div>
-        <div style="width: 150px;">
-            <label>URL Path</label>
-            <input type="text" id="semp-url-path" class="form-control">
+        <!-- Optional: a small "+ URL path" button on the labels' line until it is added (core/optional-field.ts). -->
+        <div id="semp-url-path-field" class="optional-field">
+            <label for="semp-url-path">URL Path</label>
+            <div class="optional-field-input">
+                <input type="text" id="semp-url-path" class="form-control">
+                <button type="button" id="btn-semp-url-path-clear" class="btn-icon optional-field-clear"
+                    title="Remove the URL path" aria-label="Remove the URL path">&#x2715;</button>
+            </div>
+            <button type="button" id="btn-semp-url-path-add" class="btn btn-secondary btn-sm optional-field-add"
+                title="Add a path after the port, before /SEMP (e.g. behind a reverse proxy)">+ URL path</button>
         </div>
-        <div class="w-full"></div> <!-- Spacer -->
     </div>
     <div class="form-group flex-row">
         <div class="w-full">
@@ -46,13 +67,13 @@
         </div>
     </div>
     <button id="btn-semp-connect" class="btn btn-primary">Connect</button>
-    <div id="semp-connect-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+    <div id="semp-connect-error" class="text-error mt-2 hidden text-body-sm"></div>
 </div>
 
 <div class="card">
     <div class="flex-row justify-between items-center mb-4">
         <div class="flex-row items-center gap-4">
-            <h2 class="m-0">Solace Messaging (Client)</h2>
+            <h2 class="card-title">Solace Messaging (Client)</h2>
             <button id="btn-solace-settings" class="btn-icon items-center flex" title="Connection Settings">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                     stroke-linecap="round" stroke-linejoin="round">
@@ -63,19 +84,17 @@
                 </svg>
             </button>
         </div>
-        <!-- Auth Mode Toggle -->
-        <div class="auth-toggle flex-row gap-4" style="font-size: 0.9rem;">
-            <label class="flex-row items-center font-normal cursor-pointer gap-1">
-                <input type="radio" name="solace-auth-mode" value="basic" checked> Basic
-            </label>
-            <label class="flex-row items-center font-normal cursor-pointer gap-1">
-                <input type="radio" name="solace-auth-mode" value="oauth"> OAuth2
-            </label>
+        <!-- Basic (a username and password) or OAuth2 (tokens): the pressed button is the mode (core/segmented.ts). -->
+        <div class="segmented" id="solace-auth-mode" role="group" aria-label="Authentication">
+            <button type="button" class="segmented-option" data-auth-mode="basic" aria-pressed="true">Basic</button>
+            <button type="button" class="segmented-option" data-auth-mode="oauth" aria-pressed="false">OAuth2</button>
         </div>
     </div>
 
+    <!-- One row, read as a URL: protocol, host, port and the optional path. The host is locked to
+         the host above for a software or cloud broker; an appliance's own messaging host. -->
     <div class="form-group flex-row">
-        <div style="width: 150px;">
+        <div class="w-150px">
             <label>Protocol</label>
             <select id="solace-protocol" class="form-control">
                 <option value="ws">ws://</option>
@@ -84,22 +103,35 @@
                 <option value="https" disabled>https://</option>
             </select>
         </div>
-        <div style="width: 100px;">
+        <div class="w-full">
+            <label for="solace-host">Messaging Host (IP or Hostname)</label>
+            <input type="text" id="solace-host" class="form-control" disabled>
+            <div class="invalid-feedback">Invalid hostname or IP address.</div>
+            <small id="solace-host-hint" class="text-secondary text-xs">Follows the Broker Host above. Choose Appliance to set its own.</small>
+        </div>
+        <div class="w-100px">
             <label>Port</label>
             <input type="text" id="solace-port" class="form-control">
             <div class="invalid-feedback">Invalid port.</div>
         </div>
-        <div style="width: 150px;">
-            <label>URL Path</label>
-            <input type="text" id="solace-url-path" class="form-control">
+        <!-- Optional: a small "+ URL path" button on the labels' line until it is added (core/optional-field.ts). -->
+        <div id="solace-url-path-field" class="optional-field">
+            <label for="solace-url-path">URL Path</label>
+            <div class="optional-field-input">
+                <input type="text" id="solace-url-path" class="form-control">
+                <button type="button" id="btn-solace-url-path-clear" class="btn-icon optional-field-clear"
+                    title="Remove the URL path" aria-label="Remove the URL path">&#x2715;</button>
+            </div>
+            <button type="button" id="btn-solace-url-path-add" class="btn btn-secondary btn-sm optional-field-add"
+                title="Add a path after the port (e.g. behind a reverse proxy)">+ URL path</button>
         </div>
+    </div>
+    <div class="form-group flex-row">
         <div class="w-full">
             <label>Message VPN</label>
             <input type="text" id="solace-vpn" class="form-control">
             <div class="invalid-feedback">Message VPN is required.</div>
         </div>
-    </div>
-    <div class="form-group flex-row">
         <div class="w-full">
             <label id="lbl-solace-username">Username</label>
             <input type="text" id="solace-username" class="form-control">
@@ -111,14 +143,13 @@
         </div>
     </div>
     <button id="btn-solace-connect" class="btn btn-primary">Connect</button>
-    <div id="solace-connect-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+    <div id="solace-connect-error" class="text-error mt-2 hidden text-body-sm"></div>
 </div>
 
 <div class="actions-footer mt-6 flex-row justify-end p-6 gap-4">
     <button id="btn-reset-form" class="btn btn-secondary">Reset Form</button>
     <button id="btn-load-config" class="btn btn-secondary">Load All Config</button>
-    <button id="btn-save-config" class="btn btn-primary"
-        style="background-color: var(--status-warning); border-color: var(--status-warning); color: #000;">Save All
+    <button id="btn-save-config" class="btn btn-primary conn-btn-save-all">Save All
         Config</button>
 </div>
 
@@ -131,12 +162,12 @@
     </div>
     <div class="form-group">
         <label>Connect Timeout (ms)</label>
-        <input type="number" id="sol-connect-timeout" class="form-control" value="3000" min="100">
+        <input type="number" id="sol-connect-timeout" class="form-control" value="10000" min="100">
     </div>
     <div class="form-group">
         <label>Reconnect Retries</label>
         <input type="number" id="sol-reconnect-retries" class="form-control" value="1" min="-1">
-        <small class="text-secondary" style="font-size: 0.75rem;">-1 for infinite</small>
+        <small class="text-secondary text-xs">-1 for infinite</small>
     </div>
     <div class="form-group">
         <label>Reconnect Wait (ms)</label>
@@ -159,20 +190,18 @@
 </dialog>
 
 <!-- SSL Trust Modal (native <dialog>) -->
-<dialog id="ssl-trust-modal" aria-labelledby="ssl-trust-modal-title" style="max-width: 500px;">
+<dialog id="ssl-trust-modal" aria-labelledby="ssl-trust-modal-title" class="conn-ssl-dialog">
     <div class="flex-col gap-4">
         <div class="flex-row justify-between items-center">
             <h3 id="ssl-trust-modal-title" class="m-0">Certificate Trust Helper</h3>
-            <button id="btn-close-ssl-modal" class="btn-icon" title="Close" aria-label="Close"
-                style="font-size: 1.5rem;">&times;</button>
+            <button id="btn-close-ssl-modal" class="btn-icon conn-ssl-close" title="Close" aria-label="Close">&times;</button>
         </div>
 
-        <div class="text-secondary" style="line-height: 1.5;">
+        <div class="text-secondary leading-normal">
             <p class="mt-0">The browser may have blocked the connection because the broker's certificate is
                 not trusted.</p>
 
-            <div class="p-4"
-                style="background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color); margin: 0.5rem 0;">
+            <div class="p-4 conn-ssl-box">
                 <strong>Step 1:</strong> Click the link below to open the broker in a new tab.<br>
                 <strong>Step 2:</strong> If you see a privacy warning, click <strong>Advanced</strong> and then
                 <strong>Proceed</strong> (or Accept).<br>
@@ -180,24 +209,20 @@
             </div>
 
             <p class="mt-4 mb-0"><strong>Or it could be CORS</strong></p>
-            <div class="p-4"
-                style="background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color); margin: 0.5rem 0;">
+            <div class="p-4 conn-ssl-box">
                 "Failed to fetch" can also mean the broker did not send an
                 <code>Access-Control-Allow-Origin</code> header that permits this page's origin.
                 If trusting the certificate doesn't fix it, ask your broker admin to enable CORS
                 for this page's origin:<br>
-                <span id="cors-origin-text"
-                    style="font-family: monospace; font-size: 0.85rem; word-break: break-all;"></span>
+                <span id="cors-origin-text" class="conn-ssl-origin"></span>
             </div>
         </div>
 
         <div class="text-center mt-2">
-            <a id="ssl-trust-link" href="#" target="_blank" class="btn btn-primary"
-                style="display: inline-block; text-decoration: none; padding: 0.5rem 1.5rem;">
+            <a id="ssl-trust-link" href="#" target="_blank" class="btn btn-primary conn-ssl-link">
                 Open Broker URL ↗
             </a>
-            <div id="ssl-trust-url-text" class="text-secondary mt-2"
-                style="font-family: monospace; font-size: 0.8rem; word-break: break-all;">
+            <div id="ssl-trust-url-text" class="text-secondary mt-2 conn-ssl-url">
             </div>
         </div>
     </div>

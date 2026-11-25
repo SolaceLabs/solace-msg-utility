@@ -1,0 +1,16 @@
+Standard root CA certificates
+=============================
+
+/etc/ssl/certs/ca-certificates.crt in this image is the list of root CA
+certificates that Mozilla keeps for its products (certdata.txt in Mozilla's
+NSS library), as the Alpine Linux package ca-certificates-bundle builds it.
+The image takes the file from the Alpine-based Go build stage it is built
+with. The gateway trusts these certificates when it verifies a broker, unless
+the setting tls.standardRoots is false.
+
+The list is covered by the Mozilla Public License, version 2.0. The licence is
+at https://mozilla.org/MPL/2.0/.
+
+Source form:
+  Mozilla NSS, lib/ckfw/builtins/certdata.txt: https://hg.mozilla.org/projects/nss
+  Alpine's package: https://gitlab.alpinelinux.org/alpine/aports/-/tree/master/main/ca-certificates

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { config } from '../../../src/modules/connections/config.js';
+import type { ConnectionConfig } from '../../../src/core/connections/types';
+
+/** save/load treat the record as opaque: these fixtures are deliberately partial. */
+const asConfig = (c: object) => c as ConnectionConfig;
 
 describe('connections/config', () => {
     beforeEach(() => {
@@ -9,7 +13,7 @@ describe('connections/config', () => {
     describe('save()', () => {
         it('saves config to localStorage under the obfuscated format (OBF1: prefix)', () => {
             const cfg = { host: 'broker.test', solace: { port: '8000' } };
-            const result = config.save(cfg);
+            const result = config.save(asConfig(cfg));
             expect(result).toBe(true);
 
             const stored = (localStorage.setItem as any).mock.calls.at(-1)[1];
@@ -25,7 +29,7 @@ describe('connections/config', () => {
             (localStorage.setItem as any).mockImplementationOnce(() => {
                 throw new Error('QuotaExceeded');
             });
-            expect(config.save({ test: true })).toBe(false);
+            expect(config.save(asConfig({ test: true }))).toBe(false);
         });
     });
 
@@ -37,7 +41,7 @@ describe('connections/config', () => {
                 semp: { protocol: 'https', port: '943', user: 'admin' }
             };
             // Go through real save to produce an OBF1 blob, then feed it back.
-            config.save(cfg);
+            config.save(asConfig(cfg));
             const stored = (localStorage.setItem as any).mock.calls.at(-1)[1];
             (localStorage.getItem as any).mockReturnValue(stored);
 
@@ -47,7 +51,7 @@ describe('connections/config', () => {
         it('round-trips multi-byte (non-ASCII) values correctly', () => {
             // UTF-8 handling matters — XOR on raw char codes would mangle ü/ó.
             const cfg = { host: 'brökër.tëst', semp: { user: 'Müller' } };
-            config.save(cfg);
+            config.save(asConfig(cfg));
             const stored = (localStorage.setItem as any).mock.calls.at(-1)[1];
             (localStorage.getItem as any).mockReturnValue(stored);
 
@@ -60,8 +64,7 @@ describe('connections/config', () => {
         });
 
         it('returns null when stored value is NOT in OBF1 format (legacy plaintext is rejected)', () => {
-            // Legacy plaintext JSON from older versions is no longer accepted —
-            // the user has to reconfigure. Matches the "no back-compat" decision.
+            // Plaintext JSON is not accepted -- the user has to reconfigure.
             (localStorage.getItem as any).mockReturnValue('{"host":"old.plaintext"}');
             expect(config.load()).toBeNull();
         });
@@ -73,6 +76,7 @@ describe('connections/config', () => {
             // deobfuscate() returns null on failure without logging; load() only
             // logs when something throws BEFORE the deobf null-check. A bad-base64
             // blob is handled cleanly and silently.
+            expect(consoleSpy).not.toHaveBeenCalled();
             consoleSpy.mockRestore();
         });
 
@@ -88,7 +92,7 @@ describe('connections/config', () => {
         it('returns null and logs when localStorage.getItem throws', () => {
             // localStorage can throw SecurityError in browser privacy mode,
             // sandboxed iframes, or file:// origins where storage is denied.
-            // The outer catch at config.js:64-67 turns that into "no saved config"
+            // The outer catch in config.load() turns that into "no saved config"
             // so install() doesn't break — covered here.
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
             const err = new DOMException('storage denied', 'SecurityError');

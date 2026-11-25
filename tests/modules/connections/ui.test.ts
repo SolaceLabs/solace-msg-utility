@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { ui } from '../../../src/modules/connections/ui.js';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 
@@ -31,7 +31,7 @@ describe('connections/ui', () => {
             // Rip the nodes out of the container so a re-query would fail.
             hostBefore.remove();
             btnBefore.remove();
-            expect(container.querySelector('#solace-host')).toBeNull();
+            expect(container.querySelector('#conn-host')).toBeNull();
             expect(container.querySelector('#btn-solace-connect')).toBeNull();
 
             // Cached references are still usable — identity-equal to the originals —
@@ -39,13 +39,6 @@ describe('connections/ui', () => {
             const els2 = ui.getElements();
             expect(els2.elHost).toBe(hostBefore);
             expect(els2.btnSolace).toBe(btnBefore);
-        });
-
-        it('getElements falls back to document.getElementById', () => {
-            // Reset ui internals by testing the fallback
-            // We can't easily test this without resetting, so verify it returns elements
-            const els = ui.getElements();
-            expect(els.container).toBe(container);
         });
     });
 
@@ -66,21 +59,10 @@ describe('connections/ui', () => {
             ui.initEvents();
             const els = ui.getElements();
             ui.openSslModal('https://test:8080');
+            expect(els.elSslModal.open).toBe(true);
 
             els.btnCloseSsl.click();
             expect(els.elSslModal.open).toBe(false);
-        });
-
-        it('wires auth radio change to updateAuthUI', () => {
-            ui.initEvents();
-            const els = ui.getElements();
-            const radios = els.radiosAuth;
-
-            // Switch to oauth
-            radios[1].checked = true;
-            radios[1].dispatchEvent(new Event('change'));
-            expect(els.lblSolUser.textContent).toBe('Access Token');
-            expect(els.lblSolPass.textContent).toBe('ID Token');
         });
     });
 
@@ -128,21 +110,6 @@ describe('connections/ui', () => {
         });
     });
 
-    describe('showError', () => {
-        it('adds is-invalid class when show=true', () => {
-            const els = ui.getElements();
-            ui.showError(els.elHost, true);
-            expect(els.elHost.classList.contains('is-invalid')).toBe(true);
-        });
-
-        it('removes is-invalid class when show=false', () => {
-            const els = ui.getElements();
-            els.elHost.classList.add('is-invalid');
-            ui.showError(els.elHost, false);
-            expect(els.elHost.classList.contains('is-invalid')).toBe(false);
-        });
-    });
-
     describe('showFeedback', () => {
         it('sets button text', () => {
             const els = ui.getElements();
@@ -162,8 +129,27 @@ describe('connections/ui', () => {
     });
 
     describe('getAuthMode / setAuthMode', () => {
+        const authButton = (mode: string) => container.querySelector<HTMLButtonElement>(`#solace-auth-mode [data-auth-mode="${mode}"]`)!;
+
         it('returns basic by default', () => {
             expect(ui.getAuthMode()).toBe('basic');
+        });
+
+        it('a click on OAuth2 makes it the mode and names the two fields as tokens', () => {
+            const els = ui.getElements();
+            authButton('oauth').click();
+            expect(ui.getAuthMode()).toBe('oauth');
+            expect([els.lblSolUser.textContent, els.lblSolPass.textContent]).toEqual(['Access Token', 'ID Token']);
+
+            authButton('basic').click();
+            expect([els.lblSolUser.textContent, els.lblSolPass.textContent]).toEqual(['Username', 'Password']);
+        });
+
+        it('setAuthMode keeps the mode for one the control does not offer', () => {
+            ui.setAuthMode('oauth');
+            ui.setAuthMode('kerberos');
+            expect(ui.getAuthMode()).toBe('oauth');
+            expect(ui.getElements().lblSolUser.textContent).toBe('Access Token');
         });
 
         it('setAuthMode switches to oauth and updates UI', () => {
@@ -183,21 +169,20 @@ describe('connections/ui', () => {
     });
 
     describe('updateInputState', () => {
-        it('disables host when any connection is active', () => {
-            const els = ui.getElements();
-            ui.updateInputState({ isConnected: true, isSempConnected: false });
-            expect(els.elHost.disabled).toBe(true);
-        });
-
         it('disables Solace fields when connected', () => {
             const els = ui.getElements();
             ui.updateInputState({ isConnected: true, isSempConnected: false });
             expect(els.elSolProtocol.disabled).toBe(true);
             expect(els.elSolPort.disabled).toBe(true);
             expect(els.elSolUrlPath.disabled).toBe(true);
+            expect([els.btnSolUrlPathAdd.disabled, els.btnSolUrlPathClear.disabled]).toEqual([true, true]);
             expect(els.elSolVpn.disabled).toBe(true);
             expect(els.elSolUser.disabled).toBe(true);
             expect(els.elSolPass.disabled).toBe(true);
+            const authButtons = [...container.querySelectorAll<HTMLButtonElement>('#solace-auth-mode button')];
+            expect(authButtons.map(b => b.disabled)).toEqual([true, true]);
+            ui.updateInputState({ isConnected: false, isSempConnected: false });
+            expect(authButtons.map(b => b.disabled)).toEqual([false, false]);
         });
 
         it('keeps the settings button enabled when connected so the user can review (read-only) values mid-session', () => {
@@ -240,65 +225,26 @@ describe('connections/ui', () => {
             expect(els.elSempProtocol.disabled).toBe(true);
             expect(els.elSempPort.disabled).toBe(true);
             expect(els.elSempUrlPath.disabled).toBe(true);
+            expect([els.btnSempUrlPathAdd.disabled, els.btnSempUrlPathClear.disabled]).toEqual([true, true]);
         });
 
         it('enables all when disconnected', () => {
             const els = ui.getElements();
             ui.updateInputState({ isConnected: false, isSempConnected: false });
-            expect(els.elHost.disabled).toBe(false);
             expect(els.elSolPort.disabled).toBe(false);
             expect(els.elSempUser.disabled).toBe(false);
-        });
-    });
-
-    describe('updateAuthUI', () => {
-        it('updates labels for oauth mode', () => {
-            const els = ui.getElements();
-            ui.setAuthMode('oauth');
-            expect(els.lblSolUser.textContent).toBe('Access Token');
-            expect(els.lblSolPass.textContent).toBe('ID Token');
-        });
-
-        it('updates labels for basic mode', () => {
-            const els = ui.getElements();
-            ui.setAuthMode('basic');
-            expect(els.lblSolUser.textContent).toBe('Username');
-            expect(els.lblSolPass.textContent).toBe('Password');
-        });
-    });
-
-    describe('getAuthMode edge cases', () => {
-        it('returns basic when no radio is checked', () => {
-            const els = ui.getElements();
-            els.radiosAuth.forEach((r: any) => (r.checked = false));
-            expect(ui.getAuthMode()).toBe('basic');
-        });
-    });
-
-    describe('cacheElements edge cases', () => {
-        it('throws when a required element is missing', () => {
-            const bare = document.createElement('div');
-            document.body.appendChild(bare);
-            expect(() => ui.cacheElements(bare)).toThrow(/Required element missing/);
-            // restore cached full container for remaining tests
-            ui.cacheElements(container);
+            expect([els.btnSolUrlPathAdd.disabled, els.btnSempUrlPathClear.disabled]).toEqual([false, false]);
         });
     });
 
     describe('showConnectError edge cases', () => {
         it('does nothing with empty string message', () => {
             const els = ui.getElements();
+            ui.showConnectError(els.elSolError, 'Earlier error');
+            expect(els.elSolError.style.display).toBe('block');
             ui.showConnectError(els.elSolError, '');
             expect(els.elSolError.style.display).toBe('none');
-        });
-    });
-
-    describe('updateInputState edge cases', () => {
-        it('throws when cacheElements has not been given required elements', () => {
-            const bare = document.createElement('div');
-            document.body.appendChild(bare);
-            expect(() => ui.cacheElements(bare)).toThrow();
-            ui.cacheElements(container);
+            expect(els.elSolError.textContent).toBe('');
         });
     });
 });

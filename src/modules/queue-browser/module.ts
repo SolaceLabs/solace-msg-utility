@@ -2,7 +2,7 @@
  * Queue Browser Module
  *
  * Browse, filter, forward, and delete messages from Solace queues.
- * Priority 30: Depends on Solace session from Connections module.
+ * Depends on the Solace session from the Connections module.
  */
 
 // Import internal sub-modules
@@ -18,7 +18,10 @@ import { createUiEvents } from './ui-events.js';
 import { initDetails } from './ui-details.js';
 import { showPayload } from './features.js';
 import { required, attachBackdropClose } from '../../core/dom';
+import { createGate } from '../../core/components/module-gate';
 import type { AppContext } from '../../core/types';
+
+const log = logger.withTag('queue-browser');
 
 export const QueueBrowserModule = {
     name: 'Queue Browser',
@@ -44,7 +47,7 @@ export const QueueBrowserModule = {
         wireForward({ hasInFlightForward: service.hasInFlightForward });
         const uiEvents = createUiEvents(app, service);
         initDetails(app);
-        initTable(eventBus);
+        initTable(eventBus, { appState });
 
         // Wire state's ingest path to the UI row-remove function so the moving-window
         // drop in ingestMessage can clean up the DOM without state.js importing ui directly.
@@ -63,7 +66,7 @@ export const QueueBrowserModule = {
         // 1. Initialize UI elements + assert module-owned required elements up-front.
         const els = ui.initElements(container);
         const requiredSelectors = [
-            '#browser-connect-prompt', '#browser-active-view',
+            '#browser-active-view',
             '#browser-vpn-name', '#browser-queue-name', '#browser-permissions',
             '#browser-connect-error', '#browser-bind-error',
             '#browser-bind-input', '#btn-browser-bind-pick', '#btn-browser-bind', '#btn-browser-unbind',
@@ -84,18 +87,28 @@ export const QueueBrowserModule = {
             '#forward-dest-name', '#forward-dest-type',
             '#forward-error', '#forward-msg-list', '#forward-queue-count'
         ];
-        // Payload-bearing elements (Content Preview, Show Raw + modal, Download
-        // Content/Full, Body filter) exist only in the show-payload flavor — they were
+        // Payload-bearing elements (Content Preview with its Show content image,
+        // Show Raw + modal, Download Content/Full, Body filter) exist only in the show-payload flavor -- they were
         // removed from the DOM above in the no-payload flavor, so assert them only when present.
         if (showPayload()) {
             requiredSelectors.push(
                 '#filter-content',
                 '#btn-browser-download-content', '#btn-browser-download-full',
                 '#btn-copy-content', '#detail-content',
+                '#btn-show-content', '#detail-binary-note', '#detail-preview',
                 '#btn-show-raw', '#btn-raw-close', '#browser-raw-content-modal', '#raw-content-text'
             );
         }
         requiredSelectors.forEach(selector => required(container, selector));
+
+        // The connection-required gate is owned by the shared module-gate
+        // component; hand it to the ui layer so updateVisibility can toggle it
+        // (the module still owns gate-vs-active-view mutual exclusion).
+        ui.setGate(createGate(container, {
+            id: 'browser-connect-prompt',
+            title: 'Connection Required',
+            message: 'Please establish a Solace Client connection to browse queues.',
+        }));
 
         // 2. Initial Visibility
         ui.updateVisibility(appState.isConnected, appState.selectedVpn);
@@ -148,6 +161,7 @@ export const QueueBrowserModule = {
         els.inputFilterOlderThan.addEventListener('focus', prefillOlder);
         attachBackdropClose(els.modalFilter as HTMLDialogElement);
         attachBackdropClose(els.modalForward as HTMLDialogElement);
+        attachBackdropClose(els.modalConfirmDelete as HTMLDialogElement);
         // Raw modal exists only in the show-payload flavor.
         if (showPayload()) attachBackdropClose(els.modalRaw as HTMLDialogElement);
 
@@ -157,7 +171,7 @@ export const QueueBrowserModule = {
         // Check All Toggle
         els.checkAll.addEventListener('change', () => {
             const checked = els.checkAll.checked;
-            els.msgList.querySelectorAll('.msg-check').forEach((cb: any) => cb.checked = checked);
+            els.msgList.querySelectorAll('.msg-check').forEach((cb: HTMLInputElement) => cb.checked = checked);
             ui.updateCounts();
         });
 
@@ -221,16 +235,16 @@ export const QueueBrowserModule = {
 
         // Client Disconnect (from broker)
         eventBus.on('client:disconnected', () => {
-            logger.info('[Browser] Client disconnected, cleaning up...');
+            log.info('Client disconnected, cleaning up');
             handleDisconnect();
         });
 
         // 6. Cross-Module: Handle "Browse Queue" from Discovery via EventBus
         eventBus.on('browser:browse-queue', ({ queue: targetQueue }) => {
-            logger.info('[Browser] Received browse request:', targetQueue);
+            log.info(`Received browse request for queue=${targetQueue}`);
 
             // Switch view to Browser
-            if (loadSelf) loadSelf();
+            loadSelf();
 
             setTimeout(() => {
                 els.inputBind.value = targetQueue;
@@ -245,7 +259,7 @@ export const QueueBrowserModule = {
                 els.btnBrowserDownloadContent.classList.remove('hidden');
                 els.btnBrowserDownloadFull.classList.remove('hidden');
             };
-            if ((window as any).jszipLoaded) {
+            if (window.jszipLoaded) {
                 showDownloadButtons();
             }
             eventBus.on('jszip:loaded', showDownloadButtons);
@@ -260,6 +274,6 @@ export const QueueBrowserModule = {
         // so subscription order doesn't matter.
         eventBus.emit('browser:available');
 
-        logger.info('Queue Browser Module Setup Complete');
+        log.info('Module setup complete');
     }
 };

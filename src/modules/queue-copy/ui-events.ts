@@ -1,19 +1,23 @@
 import type { AppContext } from '../../core/types';
-import { primarySempContextFrom } from '../../core/services/sempContext';
-import { pickQueue } from '../../core/components/queue-picker';
+import { queueSourceFrom, sempQueueSource, type QueueSource } from '../../core/services/queue-source';
+import {
+    createProvisionedConnectionCard,
+    type ProvisionedConnectionCard,
+    type ProvisionedTarget,
+} from '../../core/components/provisioned-connection';
 import * as ui from './ui';
 import type { CopyUiElements, PrimarySnapshot } from './ui';
-import type { QueueCopyState, CopyMode, DestType } from './state';
-import { syncDestFormFromSnapshot } from './state';
+import type { QueueCopyState } from './state';
+import { destLive, syncDestFormFromSnapshot } from './state';
 import { openCopyModal, cancelCopyModal } from './ui-modal';
 
 /**
  * Surface provided by `module.ts` so `ui-events` stays free of session /
  * factory details. The primary snapshot is computed fresh each call so the
- * toggle-prefill path always reflects the live primary connection.
+ * prefill path always reflects the live primary connection.
  */
 export interface CopyUiServices {
-    /** Return a snapshot of primary connection fields for toggle prefill, or null. */
+    /** Return a snapshot of primary connection fields for the destination prefill, or null. */
     getPrimarySnapshot: () => PrimarySnapshot | null;
     /** Return the live primary Solace session (used by the modal). */
     getPrimarySession: () => any | null;
@@ -25,10 +29,33 @@ export interface CopyUiServices {
     connectDestSol: () => void;
     /** Tear down the destination Solace (Client) connection. */
     disconnectDestSol: () => void;
+    /**
+     * The provisioned card's Connect: dial the destination's client credential
+     * (and open its SEMP through the gateway relay when the broker differs from
+     * the primary's). Names only -- the credential never leaves the dial callback.
+     */
+    connectDestProvisioned: (target: ProvisionedTarget) => void;
+    /** The provisioned card's Disconnect: tear down both destination connections. */
+    disconnectDestProvisioned: () => void;
     /** Re-derive the Next button's enabled state. Owned by module.ts. */
     refreshStartEnabled: () => void;
     /** Re-derive the destination picker icon's visibility. Owned by module.ts. */
     refreshDestPickVisible: () => void;
+}
+
+/** What `wireUiEvents` hands back to module.ts. */
+export interface CopyUiApi {
+    /**
+     * Re-derive the controls that choose the destination (the Copy to button and the
+     * provisioned card), locked while `state.destSolPending` names a connect in
+     * flight. module.ts locks them when a destination connect starts and calls
+     * this whenever one ends.
+     */
+    refreshDestTarget: () => void;
+    /** The provisioned destination card; module.ts reports connect outcomes to it. */
+    destCard: ProvisionedConnectionCard;
+    /** Re-read the primary connection's broker and Message VPN into the provisioned source card. */
+    refreshSource: () => void;
 }
 
 export function wireUiEvents(
@@ -36,7 +63,7 @@ export function wireUiEvents(
     els: CopyUiElements,
     state: QueueCopyState,
     services: CopyUiServices,
-): void {
+): CopyUiApi {
     // ===== Source =====
     els.sourceInput.addEventListener('input', () => {
         state.sourceQueue = els.sourceInput.value.trim();
@@ -44,9 +71,11 @@ export function wireUiEvents(
     });
 
     els.btnSourcePick.addEventListener('click', async () => {
-        const sempCtx = primarySempContextFrom(ctx);
-        if (!sempCtx) return;
-        const picked = await pickQueue(sempCtx, {
+        // Reading FROM a queue is legitimate even when it is read-only to this
+        // user (move's delete half is gated separately, at run start).
+        const source = queueSourceFrom(ctx, 'browse');
+        if (!source) return;
+        const picked = await ctx.queuePicker.pick(source, {
             title: 'Pick source queue',
             defaultVpn: ctx.appState.selectedVpn ?? undefined,
         });
@@ -71,25 +100,16 @@ export function wireUiEvents(
         }
     });
 
-    // ===== Destination Broker toggles =====
-    // Any change to either toggle disposes BOTH live secondary connections
-    // (dest SEMP + dest Client). Toggling ON makes them redundant; toggling
-    // OFF means the form fields the user is about to edit no longer match
-    // whatever the existing connection was bound to. Either way, drop the
-    // sessions and clear the typed passwords / Connect-button state so the
-    // user starts from a clean slate.
-    els.toggleSameBroker.addEventListener('change', () => {
-        state.destForm.sameBroker = els.toggleSameBroker.checked;
-        if (!state.destForm.sameBroker) {
-            state.destForm.sameVpn = false;
-        }
-        disposeDestSempConnection();
-        disposeDestSolConnection();
-        syncDestFromToggles();
-    });
-
-    els.toggleSameVpn.addEventListener('change', () => {
-        state.destForm.sameVpn = els.toggleSameVpn.checked;
+    // ===== Destination Broker: the Copy to choice =====
+    // Any change of the choice disposes BOTH live secondary connections
+    // (dest SEMP + dest Client). Moving towards the source makes them
+    // redundant; moving away means the form fields the user is about to edit
+    // no longer match whatever the existing connection was bound to. Either
+    // way, drop the sessions and clear the typed passwords / Connect-button
+    // state so the user starts from a clean slate.
+    els.destScope.onChange((scope) => {
+        state.destForm.sameBroker = scope !== 'another-broker';
+        state.destForm.sameVpn = scope === 'this-vpn';
         disposeDestSempConnection();
         disposeDestSolConnection();
         syncDestFromToggles();
@@ -104,15 +124,27 @@ export function wireUiEvents(
     }
 
     function disposeDestSolConnection(): void {
-        if (state.destSession) services.disconnectDestSol();
+        // A connect still in flight is cancelled too, so its late session
+        // cannot land on a target the form no longer names.
+        if (state.destSession || state.destSolPending !== null) services.disconnectDestSol();
         state.destSolacePass = '';
         els.destSolPass.value = '';
         ui.setDestSolStatus(els, 'disconnected');
         ui.setDestSolError(els, null);
+        if (state.destForm.credMode === 'provisioned') destCard.setStatus('disconnected');
     }
 
-    // ===== Destination Broker host =====
-    els.destHost.addEventListener('input', () => { state.destForm.host = els.destHost.value.trim(); });
+    // ===== Destination broker type and hosts =====
+    // The form's hosts follow the two boxes and the type control, whose own
+    // listener (set when the elements were cached) has run by the time this one does.
+    const readDestHosts = (): void => {
+        const { host, messagingHost } = els.destHosts.values();
+        state.destForm.host = host.trim();
+        state.destForm.messagingHost = messagingHost?.trim();
+    };
+    els.destHost.addEventListener('input', readDestHosts);
+    els.destSolHost.addEventListener('input', readDestHosts);
+    els.destBrokerType.addEventListener('click', readDestHosts);
 
     // ===== Destination Connect buttons =====
     // Same one-button toggle as the connections module: read the button's
@@ -149,9 +181,8 @@ export function wireUiEvents(
 
     // Enter-to-connect: pressing Enter in any destination field triggers the
     // same click path as the Connect button on that card. Mirrors the
-    // connections module's Enter bindings. The destHost field is shared so
-    // it binds to the SEMP Connect (SEMP is typically established first
-    // because it powers the destination queue picker).
+    // connections module's Enter bindings: destHost sits in the SEMP card and
+    // binds to the SEMP Connect, an appliance's destSolHost to the Client one.
     //
     // `keydown` (not deprecated `keypress`) for cross-layout parity.
     const onEnter = (e: KeyboardEvent, btn: HTMLButtonElement): void => {
@@ -165,6 +196,7 @@ export function wireUiEvents(
         input.addEventListener('keydown', (e) => onEnter(e as KeyboardEvent, els.btnDestSempConnect));
     });
     const solFields: HTMLElement[] = [
+        els.destSolHost,
         els.destSolPort, els.destSolUrlPath, els.destSolVpn, els.destSolUser, els.destSolPass,
     ];
     solFields.forEach((input) => {
@@ -172,14 +204,14 @@ export function wireUiEvents(
     });
 
     // ===== Destination type + name =====
-    // Slide toggle: unchecked = queue, checked = topic. Drives state.dest.type
-    // and re-applies the label / placeholder + active-side highlight via
-    // ui.applyDestType.
-    els.destTypeToggle.addEventListener('change', () => {
-        const type: DestType = els.destTypeToggle.checked ? 'topic' : 'queue';
+    // The Queue / Topic slide choice drives state.dest.type; ui.applyDestType
+    // re-applies the name field's label and placeholder.
+    els.destType.onChange((type) => {
         state.dest.type = type;
         ui.applyDestType(els, type);
         services.refreshDestPickVisible();
+        // The name limit depends on the type (a queue name carries the SDK's prefix).
+        services.refreshStartEnabled();
     });
 
     els.destInput.addEventListener('input', () => {
@@ -188,27 +220,26 @@ export function wireUiEvents(
     });
 
     els.btnDestPick.addEventListener('click', async () => {
-        const sempCtx = destSempContext(ctx, state);
-        if (!sempCtx) return;
+        const source = destQueueSource(ctx, state);
+        if (!source) return;
         const defaultVpn = state.destForm.sameBroker && state.destForm.sameVpn
             ? (ctx.appState.selectedVpn ?? undefined)
             : (state.destForm.solace.vpn || undefined);
-        const picked = await pickQueue(sempCtx, { title: 'Pick destination queue', defaultVpn });
+        const picked = await ctx.queuePicker.pick(source, { title: 'Pick destination queue', defaultVpn });
         if (picked === null) return;
 
         // Picking from a different VPN updates the destination form's VPN
         // in-place — destination operates entirely within this module so no
-        // bus handoff is needed. If the user had "Same VPN" on, that toggle
-        // turns off (different VPN by definition) and the dest VPN field
+        // bus handoff is needed. If the choice was This VPN, it becomes
+        // Another VPN (different VPN by definition) and the dest VPN field
         // becomes editable + reflects the picked VPN.
         if (picked.vpn !== state.destForm.solace.vpn) {
             if (state.destForm.sameBroker && state.destForm.sameVpn) {
                 state.destForm.sameVpn = false;
-                els.toggleSameVpn.checked = false;
             }
             state.destForm.solace.vpn = picked.vpn;
             els.destSolVpn.value = picked.vpn;
-            // Re-apply prefill so toggle/disabled state matches the new VPN.
+            // Re-apply prefill so the Copy to button and the disabled state match the new VPN.
             syncDestFromToggles();
         }
         state.dest.name = picked.queue;
@@ -217,15 +248,12 @@ export function wireUiEvents(
     });
 
     // ===== Mode =====
-    els.modeRadios.forEach((radio) => {
-        radio.addEventListener('change', () => {
-            if (radio.checked) state.mode = radio.value as CopyMode;
-        });
+    els.mode.onChange((mode) => {
+        state.mode = mode;
     });
 
     // ===== Footer: Next =====
     els.btnStart.addEventListener('click', () => {
-        if (!state.sourceQueue || !state.dest.name) return;
         openCopyModal(ctx, els, state, services.getPrimarySession);
     });
 
@@ -233,17 +261,139 @@ export function wireUiEvents(
     els.btnModalCancel.addEventListener('click', () => {
         cancelCopyModal(els, state);
     });
+    // Esc fires `cancel` on a modal <dialog> and would close it outright:
+    // route it through the same handler, so a verify is aborted and a running
+    // copy is flagged to cancel (the dialog stays open until it ends) rather
+    // than continuing behind a closed dialog.
+    els.modal.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        cancelCopyModal(els, state);
+    });
 
     // Modal Start is wired inside ui-modal so it has access to the verify
     // result + dest-connection orchestration. No event listener here.
 
+    // ===== Destination mode (follows the primary connection) =====
+
+    /** A secondary connection is only needed when the dest isn't the primary. */
+    const needsSecondary = (): boolean => !state.destForm.sameBroker || !state.destForm.sameVpn;
+
+    /**
+     * The provisioned destination card. It lists the brokers the account is
+     * provisioned for -- only the primary's own broker unless the choice is Another broker
+     * -- and the VPNs of the chosen one, straight from the managed profile. Its
+     * Connect hands the chosen names to module.ts, which dials inside the
+     * callback; the card never sees a credential.
+     */
+    const destCard = createProvisionedConnectionCard(els.destProvCardHost, {
+        profile: {
+            brokers: () => {
+                const own = ctx.appState.managed?.broker ?? '';
+                return ctx.managedProfile.brokers().filter(b => !state.destForm.sameBroker || b === own);
+            },
+            vpnsFor: (broker) => ctx.managedProfile.vpnsFor(broker),
+        },
+        title: 'Destination Connection',
+        // On the source's broker only the Message VPN is left to choose.
+        brokerFixed: () => state.destForm.sameBroker,
+        onConnect: async (target) => { services.connectDestProvisioned(target); },
+        onDisconnect: () => services.disconnectDestProvisioned(),
+        ids: { broker: 'copy-dest-prov-broker', vpn: 'copy-dest-prov-vpn', action: 'copy-btn-dest-prov-connect', error: 'copy-dest-prov-error' },
+    });
+
+    /**
+     * The provisioned source card: the primary connection's broker and Message
+     * VPN, shown and never chosen here. Its header button goes to Connections,
+     * as the source cards' own do.
+     */
+    const btnSourceProvEdit = document.createElement('button');
+    btnSourceProvEdit.type = 'button';
+    btnSourceProvEdit.className = 'btn btn-secondary copy-source-edit-btn';
+    btnSourceProvEdit.textContent = 'Edit in Connections';
+    btnSourceProvEdit.addEventListener('click', () => ctx.eventBus.emit('connection:edit-requested'));
+    /** The primary connection's broker and Message VPN; '' for one it does not have. */
+    const primaryNames = () => ({ broker: ctx.appState.managed?.broker ?? '', vpn: ctx.appState.selectedVpn ?? '' });
+    const sourceCard = createProvisionedConnectionCard(els.sourceProv, {
+        profile: {
+            brokers: () => [primaryNames().broker].filter(Boolean),
+            vpnsFor: () => [primaryNames().vpn].filter(Boolean),
+        },
+        title: 'Source Connection',
+        headerActions: btnSourceProvEdit,
+        readOnly: true,
+        ids: { broker: 'copy-source-prov-broker', vpn: 'copy-source-prov-vpn' },
+    });
+
+    function refreshSource(): void {
+        sourceCard.setChoices();
+        const { broker, vpn } = primaryNames();
+        sourceCard.setStatus('connected', broker && vpn ? `Broker "${broker}", VPN "${vpn}"` : '');
+    }
+
+    /** False until the first derive: a mode change is a flip only once a mode has been shown. */
+    let modeShown = false;
+
+    /**
+     * Derive the destination's mode from the primary connection's: a
+     * Provisioned primary (a signed-in managed profile) means one provisioned
+     * card, a Direct primary the typed Broker, SEMP and Client cards. Runs at
+     * install and on rbac:changed, the sign-in lifecycle; a change of mode
+     * under a live destination drops it -- it was dialled for the other mode.
+     * A connect that ends or a change of the Copy to choice only re-renders (renderDestMode), so a
+     * refusal shown on the card survives the profile going away under it.
+     */
+    function deriveDestMode(): void {
+        const credMode = ctx.managedProfile.isActive() ? 'provisioned' : 'manual';
+        if (modeShown && state.destForm.credMode !== credMode) {
+            state.destForm.credMode = credMode;
+            disposeDestSempConnection();
+            disposeDestSolConnection();
+            destCard.setStatus('disconnected');
+            state.dest.name = '';
+            els.destInput.value = '';
+        }
+        state.destForm.credMode = credMode;
+        modeShown = true;
+        renderDestMode();
+    }
+
+    /** Render both sides for the mode in state: the provisioned cards and their lists, or the typed cards. */
+    function renderDestMode(): void {
+        const provisioned = state.destForm.credMode === 'provisioned';
+        ui.applySourceMode(els, provisioned);
+        ui.applyDestMode(els, { provisioned, needsSecondary: needsSecondary() });
+        if (provisioned) {
+            refreshSource();
+            destCard.setChoices();
+        } else {
+            // Never leave a typed secret sitting in a field the user can no longer see.
+            state.destSempPass = '';
+            state.destSolacePass = '';
+            ui.clearDestTypedSecrets(els);
+        }
+        // The renders above re-enable what they own; a connect in flight keeps
+        // the destination locked until it ends.
+        if (state.destSolPending !== null) {
+            ui.setDestTargetLocked(els, true);
+            destCard.lock(true);
+        }
+    }
+
+    function refreshDestTarget(): void {
+        ui.setDestTargetLocked(els, false);
+        destCard.lock(false);
+        // renderDestMode re-renders the mode's cards and the card's lists.
+        renderDestMode();
+    }
+
     // ===== Helpers =====
     function syncDestFromToggles(): void {
         const snap = services.getPrimarySnapshot();
-        ui.applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, snap);
+        ui.applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, snap, destLive(state));
         // Prefill also needs to flow back into state so the modal summary +
         // any downstream consumer see the values that now live in the inputs.
         syncDestFormFromSnapshot(state, snap);
+        renderDestMode();
         services.refreshDestPickVisible();
         services.refreshStartEnabled();
     }
@@ -253,24 +403,54 @@ export function wireUiEvents(
     // returns; the initial call from module.ts after wireUiEvents() handles it.
     {
         const snap = services.getPrimarySnapshot();
-        ui.applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, snap);
+        ui.applyDestPrefill(els, state.destForm.sameBroker, state.destForm.sameVpn, snap, destLive(state));
         syncDestFormFromSnapshot(state, snap);
     }
+    // The provisioned set and the session itself can both change under us; this
+    // panel owns the destination's mode and card, so it re-derives its own UI
+    // here while module.ts handles the run/connection lifecycle for the same event.
+    ctx.eventBus.on('rbac:changed', () => {
+        const target = state.destForm.provisioned;
+        if (state.destForm.credMode === 'provisioned' && state.destSession !== null
+            && !ctx.managedProfile.vpnsFor(target.broker).includes(target.vpn)) {
+            // The connected identity is gone -- drop the target picked against it.
+            state.dest.name = '';
+            els.destInput.value = '';
+        }
+        deriveDestMode();
+        services.refreshStartEnabled();
+        services.refreshDestPickVisible();
+    });
+
+    deriveDestMode();
     services.refreshStartEnabled();
     services.refreshDestPickVisible();
+    return { refreshDestTarget, destCard, refreshSource };
 }
 
 /**
- * Resolve the SempContext to use for destination discovery:
- *   - same broker: primary SempContext
- *   - different broker: destSempCtx if the user has established one (this
- *     module no longer has an in-form Connect button, but future flows may
- *     populate it — e.g. auto-connect on picker click)
+ * Resolve the QueueSource to use for destination discovery:
+ *   - same broker: the primary connection's source (queueSourceFrom)
+ *   - different broker: a SEMP-backed source over the module-local destSempCtx
+ *     if the user has established one (the form has no Connect button; a flow
+ *     such as auto-connect on picker click could populate it)
  */
-function destSempContext(ctx: AppContext, state: QueueCopyState): import('../../core/connections/types').SempContext | null {
+function destQueueSource(ctx: AppContext, state: QueueCopyState): QueueSource | null {
     if (state.destForm.sameBroker) {
-        return primarySempContextFrom(ctx);
+        // Copying INTO a queue is a WRITE — operate scope.
+        return queueSourceFrom(ctx, 'operate');
     }
-    return state.destSempCtx;
+    if (!state.destSempCtx) return null;
+    const session = ctx.appState.managed;
+    if (state.destForm.credMode === 'provisioned' && session) {
+        // Provisioned destination: entitlement-filtered against the DESTINATION
+        // broker, at operate scope because copying into a queue is a write.
+        return sempQueueSource(state.destSempCtx, {
+            session, broker: state.destForm.provisioned.broker, scope: 'operate',
+        });
+    }
+    // A manual-credential destination is governed by no managed session: the
+    // deliberate, audited bypass (see `Access` in core/services/queue-source).
+    return sempQueueSource(state.destSempCtx, 'unmanaged');
 }
 

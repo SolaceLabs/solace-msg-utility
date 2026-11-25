@@ -1,0 +1,276 @@
+<article class="manual-chapter">
+    <h2>Queue Copy</h2>
+    <p class="manual-lead">Copy the messages of a queue to another queue or to a topic, or move them, on the same broker or on another one. A copy leaves the source as it is. A move takes each message off the source once the destination has it.</p>
+    <p>Queue Copy needs the <strong>client connection</strong> from the Connections page. Until you connect, the page shows <strong>Connection Required</strong> and asks you to establish a primary Solace connection before copying messages.</p>
+    <p>The <strong>SEMP connection</strong> is not required, but it helps. With it, the magnifier buttons can list queues for you, and the check you make before a run reads the queue's figures from the broker. Without it, the check browses the queue to count its messages: that takes longer, and it cannot show the queue's quota or its largest allowed message.</p>
+
+    <h3>The page at a glance</h3>
+    <figure class="manual-figure">
+        <img src="help/page.svg" width="760" height="668" alt="The Queue Copy page: a notes card on top, then source cards on the left and destination cards on the right, the source queue and the destination with its Copy or Move choice, and the Next button.">
+        <figcaption>Queue Copy with the destination on the same broker and Message VPN as the source.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Important Considerations</strong>: what to know before you run a copy. They are listed in full under "Before you move messages".</li>
+        <li>The source cards. They show the connection you made on the Connections page and cannot be edited here. Each has an <strong>Edit in Connections</strong> button that takes you back to that page.</li>
+        <li><strong>Destination Broker</strong>, with the broker type and the <strong>Copy to</strong> button: <strong>This VPN</strong>, <strong>Another VPN</strong> or <strong>Another broker</strong>.</li>
+        <li>The destination's <strong>Solace SEMP (Management)</strong> and <strong>Solace Messaging (Client)</strong> cards.</li>
+        <li><strong>Source Queue</strong>: the queue to read from. The magnifier button, when it is shown, picks the queue from a list.</li>
+        <li>The <strong>Queue</strong> or <strong>Topic</strong> switch: what the messages go to.</li>
+        <li>The name of the destination queue or topic. The magnifier button, when it is shown, picks a queue from a list.</li>
+        <li><strong>Mode</strong>: a switch between <strong>Copy</strong> and <strong>Move</strong>.</li>
+        <li><strong>Next</strong>: opens the Confirm Queue Copy dialog.</li>
+    </ol>
+
+    <h3>The source</h3>
+    <p>The three source cards, <strong>Source Broker</strong>, <strong>Solace SEMP (Management)</strong> and <strong>Solace Messaging (Client)</strong>, are a mirror of the connection you made on the Connections page. <strong>Source Broker</strong> shows the broker type, and each of the other two cards shows the host it uses. Their boxes are locked. To change anything, press <strong>Edit in Connections</strong>. If you are signed in to a gateway, one card takes the place of the three: <strong>Source Connection</strong> shows the <strong>Broker</strong> and <strong>Message VPN</strong> of your connection, both locked, with the same <strong>Edit in Connections</strong> button. It has no address or password to show, because the gateway keeps them. The card is pictured under "The Destination Connection card".</p>
+    <p>The only box you fill in on the source side is the queue.</p>
+    <ol class="manual-steps">
+        <li>Type the name of the source queue in <strong>Queue name</strong> under <strong>Source Queue</strong>. Spaces at either end are dropped.</li>
+        <li>Or press the magnifier button beside the box to pick the queue from a list. The button is shown only while the SEMP connection is up. Its dialog is described under "Picking a queue".</li>
+    </ol>
+    <p>If the queue you pick is in another Message VPN than the one your client connection uses, the page hands over to the Connections page, which asks <strong>Current VPN is ... Switch to ...?</strong> and switches the connection to that VPN once you press <strong>Switch</strong>. You then come back to Queue Copy with the queue name filled in. If you decline the switch, you stay where you were.</p>
+
+    <h3>Picking a queue</h3>
+    <p>Both magnifier buttons open the same dialog. Its title is <strong>Pick source queue</strong> or <strong>Pick destination queue</strong>.</p>
+    <table>
+        <thead>
+            <tr><th>Part</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Message VPN</strong></td><td>Type to narrow the list, or choose from it. The list opens on the Message VPN the page is using, when it can. A line under the boxes says how many VPNs have loaded.</td></tr>
+            <tr><td><strong>Queue</strong></td><td>Locked until you choose a Message VPN. Then type to narrow the list (any part of the name, in any letter case), or choose from it.</td></tr>
+            <tr><td>The two refresh buttons</td><td>Fetch the VPN list, or the queue list of the chosen VPN, again from the broker. The dialog remembers lists it has loaded, so opening it again is quick.</td></tr>
+            <tr><td><strong>Confirm</strong></td><td>Switched on once you have chosen a queue. It fills the page with your choice.</td></tr>
+            <tr><td><strong>Cancel</strong> and the close button</td><td>Close the dialog and change nothing.</td></tr>
+        </tbody>
+    </table>
+    <p>In a signed-in session the lists hold only what you are entitled to see. The destination's list holds only the queues you may write to.</p>
+
+    <h3>The destination connection</h3>
+    <p>The destination is where the messages go. It can be the connection you already have, another Message VPN on the same broker, or another broker. What the page shows for it depends on how you connected.</p>
+
+    <h4>The Copy to button</h4>
+    <p>The <strong>Destination Broker</strong> card holds the <strong>Copy to</strong> button. It has three parts, and the pressed one is your choice. <strong>This VPN</strong> is pressed when the page opens. A line under the button says what the choice leaves you to fill in.</p>
+    <table>
+        <thead>
+            <tr><th>Copy to</th><th>What it means</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>This VPN</strong></td><td>The destination is your client connection itself. The destination boxes are filled in and locked, and there is nothing to connect.</td></tr>
+            <tr><td><strong>Another VPN</strong></td><td>Another Message VPN on the same broker. The broker and SEMP boxes are filled in and locked, and the destination uses your SEMP connection. The Message VPN, username and password boxes are yours to fill in, and the Messaging card needs its own <strong>Connect</strong>.</td></tr>
+            <tr><td><strong>Another broker</strong></td><td>Another broker. Every box is yours to fill in, and both cards need their own <strong>Connect</strong>.</td></tr>
+        </tbody>
+    </table>
+    <p>Changing the choice closes any destination connection you opened and empties the destination password boxes, so you start from a clean slate. While the destination's messaging connection is being made, the button is locked, and its tooltip says <strong>Locked while the destination connects.</strong></p>
+    <p>When the page is served over <code>https://</code> without the gateway, the Protocol lists on the destination cards offer only <code>https://</code> and <code>wss://</code>, as on the Connections page.</p>
+
+    <h4>Typed details</h4>
+    <p>If you connected on the Connections page by typing the broker's details, the destination has the cards below. Fill in the ones the table above says are yours.</p>
+    <figure class="manual-figure">
+        <img src="help/destination.svg" width="760" height="558" alt="The destination cards for another broker, an appliance: the broker type and the Copy to button, the SEMP card with its Management Host and a Connect button, and the Client card with its Messaging Host, showing a live connection.">
+        <figcaption>A destination on another broker, an appliance: SEMP not yet connected, the messaging connection up.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Solace Event Broker Type</strong>: <strong>Software / Cloud</strong> or <strong>Appliance</strong>. Here it is an appliance, so each card has a host of its own.</li>
+        <li>The <strong>Copy to</strong> button. Here <strong>Another broker</strong> is pressed.</li>
+        <li><strong>Solace SEMP (Management)</strong>: the host, Protocol, Port, URL Path, Username and Password, with a <strong>Connect</strong> button and a status line.</li>
+        <li><strong>Solace Messaging (Client)</strong>: the host, Protocol, Port, URL Path, Message VPN, Username and Password, with a <strong>Connect</strong> button, shown as <strong>Disconnect</strong> while connected, and a status line.</li>
+    </ol>
+    <p>The broker type works as it does on the Connections page, whose chapter describes it under "One host or two: the broker type". For <strong>Software / Cloud</strong> you type one host, in <strong>Broker Host (IP or Hostname)</strong> on the SEMP card, and the Messaging card shows the same host, locked. For <strong>Appliance</strong> the SEMP card takes the <strong>Management Host (IP or Hostname)</strong> and the Messaging card the <strong>Messaging Host (IP or Hostname)</strong>.</p>
+    <ol class="manual-steps">
+        <li>Fill in the <strong>Solace Messaging (Client)</strong> card and press <strong>Connect</strong>. The status line reads <strong>Connecting...</strong>, then <strong>Connected</strong> followed by the Message VPN in brackets. The page cannot run a copy until this connection is up, unless the destination is your own client connection.</li>
+        <li>If you want to pick the destination queue from a list, fill in the <strong>Solace SEMP (Management)</strong> card too and press <strong>Connect</strong>. The status line reads <strong>Connected</strong>. The destination's SEMP connection serves only the list. A copy does not need it.</li>
+        <li>To close a connection, press <strong>Disconnect</strong> on its card. The boxes unlock again.</li>
+    </ol>
+    <p>Pressing <kbd>Enter</kbd> in a box presses the <strong>Connect</strong> button of its card. While a connection is up, the boxes of its card are locked, and so is the broker type. The hosts lock as they do on the Connections page: the one host of a software or cloud broker while either connection is up, and each host of an appliance with its own connection. So with an appliance's SEMP connected you can still correct its Messaging Host. A connection that closes unlocks only its own card.</p>
+    <p>The page checks what you typed before it connects. A SEMP username or password the broker would refuse, or a client username with a character the broker does not allow, is refused with the reason on the card. If the broker rejects the details, the card says so in red: <strong>SEMP authentication failed (401).</strong>, <strong>SEMP error:</strong> followed by the reason, or <strong>Connection failed:</strong> followed by the reason.</p>
+
+    <h4>The Destination Connection card</h4>
+    <p>If you are signed in to a gateway, you type no addresses and no passwords. On the source side, one card, <strong>Source Connection</strong>, shows the connection you have. On the destination side, the broker type and both cards give way to one card, <strong>Destination Connection</strong>. The <strong>Copy to</strong> button stays.</p>
+    <figure class="manual-figure">
+        <img src="help/provisioned.svg" width="760" height="330" alt="Queue Copy in a signed-in session: on the left the Source Connection card with a locked Broker list and Message VPN list and an Edit in Connections button; on the right the Destination Broker card with its Copy to button, and under it the Destination Connection card with a locked Broker list, a Message VPN list, a Disconnect button and a status line.">
+        <figcaption>A signed-in session copying to another Message VPN on the same broker, connected.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Source Connection</strong>: the broker and Message VPN of the connection you made on the Connections page. Both lists are locked, and the line under them names the two.</li>
+        <li><strong>Edit in Connections</strong>: takes you to the Connections page, where you change the connection.</li>
+        <li>The <strong>Copy to</strong> button. Here <strong>Another VPN</strong> is pressed: another Message VPN on the same broker.</li>
+        <li><strong>Broker</strong>: the brokers your account may use. Unless <strong>Another broker</strong> is pressed, it shows the source's broker and is locked, so only the Message VPN is yours to choose.</li>
+        <li><strong>Message VPN</strong>: the Message VPNs your account may use on the chosen broker.</li>
+        <li><strong>Connect</strong>, which reads <strong>Connecting...</strong> and is off while it works, and <strong>Disconnect</strong> once connected.</li>
+        <li>The status line. While connecting it names the step: <strong>Connecting SEMP (management)</strong> or <strong>Connecting messaging (client)</strong>, with the broker and Message VPN. When connected it names the broker and the Message VPN.</li>
+    </ol>
+    <ol class="manual-steps">
+        <li>Choose a <strong>Broker</strong>, when <strong>Another broker</strong> is pressed, and a <strong>Message VPN</strong>.</li>
+        <li>Press <strong>Connect</strong>. The gateway supplies the credentials. When the broker is not the source's, the card opens a SEMP connection for the destination as well as the messaging connection. When it is the source's, only the messaging connection is opened.</li>
+        <li>Wait for the card to show the broker and VPN. The card is connected only when everything it needs is up.</li>
+    </ol>
+    <p>If the connect fails, the card shows one line for each part that failed, <strong>SEMP (management)</strong> or <strong>Messaging (client)</strong>, and says when a part came up and was closed again because the other failed. Each failure is also added in full to the notification bell. If the destination has no connection available to your account, the card says <strong>No connections are available for your account. Ask an administrator to grant access.</strong></p>
+    <p>While <strong>This VPN</strong> is pressed, the card is replaced by a note saying that the destination is the source connection: nothing to connect. While a connect is running, the card's lists and the <strong>Copy to</strong> button are locked. If the destination on show changes before the connection comes up, for example because a refresh of your entitlements removes the Message VPN you chose, the late connection is dropped and the card says <strong>The destination changed while connecting. Connect again.</strong></p>
+    <p>If your sign-in changes to or from a signed-in session while the page is open, any destination connection and the target you chose are dropped. The same happens to the destination queue you chose when a refresh of your entitlements removes the Message VPN of a connected destination: the <strong>Queue name</strong> box is emptied, so you cannot start a run against it.</p>
+    <p>The card's connection is one unit: if its messaging connection drops, its SEMP connection is closed with it, and <strong>Disconnect</strong> closes both.</p>
+    <aside class="manual-note" data-kind="important">
+        <p>In a signed-in session you can copy only into queues you are entitled to operate on. A run into any other queue is refused before anything is read. Your entitlements cover queues only, so a <strong>Topic</strong> destination is not checked against them: the broker decides whether the connection may publish to the topic, and a topic delivers to every queue that subscribes to it. Outside a signed-in session the page checks neither.</p>
+    </aside>
+
+    <h3>The destination target</h3>
+    <p>The <strong>Destination</strong> card says what the messages go to.</p>
+    <ol class="manual-steps">
+        <li>Use the switch at the top of the card to choose <strong>Queue</strong> or <strong>Topic</strong>. The box under it is labelled <strong>Queue name</strong> or <strong>Topic</strong> to match.</li>
+        <li>Type the name. For a queue the magnifier button opens the picker. It is shown only when the page can list the queues of the destination: the SEMP connection is up for the same broker, or the destination's own SEMP connection is up for another one. A topic has no list, so the button is hidden.</li>
+        <li>If you pick a queue from another Message VPN than the destination's, the destination's Message VPN box takes that VPN. If <strong>This VPN</strong> was pressed, the choice becomes <strong>Another VPN</strong>. You then connect to it as usual.</li>
+    </ol>
+    <p>The page checks the name as you type, with the rules the messaging library applies when it publishes. A name that breaks one is marked, the reason appears under the box, and <strong>Next</strong> stays off.</p>
+    <table>
+        <thead>
+            <tr><th>Rule</th><th>The page says</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>At most 250 bytes for a topic, 241 for a queue (the library adds a prefix to a queue name).</td><td><code>Too long: at most N bytes.</code></td></tr>
+            <tr><td>A <code>/</code> may not start or end the name, or follow another <code>/</code>.</td><td><code>Empty level at character N: a "/" cannot start or end the name, or follow another "/".</code></td></tr>
+            <tr><td>A <code>*</code> may only end a level.</td><td><code>"*" at character N may only end a level.</code></td></tr>
+            <tr><td>A name may not start with the library's reserved prefixes, <code>#P2P/QUE/</code> and <code>#P2P/QTMP/</code>.</td><td><code>"#P2P/QUE/" is a reserved prefix.</code> (or the same for the other prefix)</td></tr>
+        </tbody>
+    </table>
+
+    <h3>Copy or Move</h3>
+    <p><strong>Mode</strong> sits at the bottom of the <strong>Destination</strong> card: a switch with <strong>Copy</strong> on its left and <strong>Move</strong> on its right. The side in bold is the mode.</p>
+    <table>
+        <thead>
+            <tr><th>Mode</th><th>What happens</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Copy</strong> (the default)</td><td>Every message is sent to the destination. The source keeps all of them. It needs only permission to read the source queue.</td></tr>
+            <tr><td><strong>Move</strong>, marked as destructive</td><td>Every message is sent to the destination, and as soon as the destination has acknowledged it, the page asks the broker to remove it from the source. It needs permission to consume from the source queue.</td></tr>
+        </tbody>
+    </table>
+
+    <h3>Starting</h3>
+    <p><strong>Next</strong> opens the Confirm Queue Copy dialog. It stays off until all of these hold:</p>
+    <ul>
+        <li>the source queue has a name;</li>
+        <li>the destination has a name that passes the rules above;</li>
+        <li>the destination is ready: <strong>This VPN</strong> is pressed, or the destination's Messaging connection is up.</li>
+    </ul>
+    <p>If you disconnect the client connection, the page returns to <strong>Connection Required</strong>.</p>
+
+    <h3>The Confirm Queue Copy dialog</h3>
+    <p>Before anything moves, the dialog checks the source queue and shows what it found. You read the figures, then start the run, or cancel.</p>
+    <figure class="manual-figure">
+        <img src="help/confirm.svg" width="640" height="640" alt="The Confirm Queue Copy dialog: a Source block with a Refresh button and the queue's figures, a Destination block, and the Cancel and Copy buttons.">
+        <figcaption>The dialog after a successful check of a queue of 48 messages.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Refresh</strong>: checks the queue again.</li>
+        <li>The queue's figures: <strong>Queue Usage</strong>, <strong>Message Count</strong>, <strong>Max Message Size</strong> and the two message numbers.</li>
+        <li><strong>Status</strong>: how the check went.</li>
+        <li>The <strong>Destination</strong> block: where the messages will go.</li>
+        <li>A red banner or message here says why the run cannot start.</li>
+        <li><strong>Cancel</strong>.</li>
+        <li>The start button, labelled <strong>Copy</strong> or <strong>Move</strong> after the mode you chose. It stays off until the check has succeeded and no banner applies.</li>
+    </ol>
+    <h4>The Source block</h4>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>Shows</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Broker</strong></td><td>The broker you are connected to, as address and port. In a signed-in session, its name.</td></tr>
+            <tr><td><strong>Message VPN</strong></td><td>The Message VPN of the queue. When the broker reports it, that is the value shown.</td></tr>
+            <tr><td><strong>Queue</strong></td><td>The name you gave.</td></tr>
+            <tr><td><strong>Queue Usage</strong></td><td>The space the messages use, and, when the broker reports it, the queue's quota, as <code>used / quota</code>. Without a quota, the space alone. <code>(unavailable)</code> when neither is known.</td></tr>
+            <tr><td><strong>Message Count</strong></td><td>How many messages the queue holds. This is the number the run works to.</td></tr>
+            <tr><td><strong>Max Message Size</strong></td><td>The largest message the queue accepts. This row is left out when the page had to browse the queue because SEMP is not connected.</td></tr>
+            <tr><td><strong>Oldest Msg ID</strong> and <strong>Newest Msg ID</strong></td><td>The first and last messages the run will handle. The run reads the queue once, from the oldest to the newest.</td></tr>
+            <tr><td><strong>Status</strong></td><td><strong>Checking...</strong> while it works, then <strong>Found via SEMP</strong>, <strong>Found via QueueBrowser</strong> or <strong>Not Found</strong>.</td></tr>
+        </tbody>
+    </table>
+    <p>The <strong>Destination</strong> block repeats where the messages will go: <strong>Broker</strong>, <strong>Message VPN</strong>, <strong>Type</strong> (<strong>Queue</strong> or <strong>Topic</strong>) and <strong>Name</strong> (or <strong>Topic</strong>). A value the form does not yet hold reads <code>(not set)</code>.</p>
+
+    <h4>How the check works</h4>
+    <ul>
+        <li>With the SEMP connection up, the page asks the broker for the queue's figures. A second request fetches the newest message's number. If that one fails, the check still succeeds and the failure is shown in red. The run then has no newest message to stop at, and it ends when the queue has sent nothing for 30 seconds.</li>
+        <li>Without SEMP, the page binds a temporary browser to the queue and counts what arrives. <strong>Message Count</strong> and <strong>Queue Usage</strong> show a running total marked <code>(loading...)</code>. The bind must answer within 10 seconds, or the check fails with <strong>Verification timed out after 10s.</strong> Once bound, counting ends when no message has arrived for 2 seconds.</li>
+        <li><strong>Refresh</strong> repeats the check and replaces the figures. It is off while a check is running and is hidden once a run starts. If the queue is still being fed, a count taken without SEMP may never settle: press <strong>Cancel</strong>.</li>
+    </ul>
+
+    <h4>What the check refuses</h4>
+    <p>When the check finds a problem, the start button stays off.</p>
+    <table>
+        <thead>
+            <tr><th>You see</th><th>Why</th><th>What to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Not Found</strong> and a red message such as <code>Source queue "orders.incoming" not found in VPN "default".</code></td><td>No such queue, or the broker refused the request. The message gives the broker's reason.</td><td>Cancel, correct the queue name, and press <strong>Next</strong> again.</td></tr>
+            <tr><td><code>You are not entitled to queue "orders.incoming".</code></td><td>A signed-in session: the queue is not one your account may see.</td><td>Choose another queue.</td></tr>
+            <tr><td><code>No primary Solace session -- reconnect and retry.</code></td><td>The client connection dropped.</td><td>Connect again on the Connections page.</td></tr>
+            <tr><td>A red banner: <strong>Queue is empty</strong>, nothing to copy or move</td><td>The queue holds no message, so there is nothing to copy or move.</td><td>Cancel, or press <strong>Refresh</strong> once messages have arrived.</td></tr>
+            <tr><td>A red banner: <strong>Move requires consume permission on this queue</strong></td><td>You chose <strong>Move</strong>, and you may read the queue but not consume from it. In a signed-in session the same banner appears when your account may not operate on the queue.</td><td>Cancel, choose <strong>Copy</strong> and press <strong>Next</strong> again.</td></tr>
+            <tr><td>A red banner: <strong>You don't have access to this queue</strong></td><td>You are not the queue's owner and its permission for others is No-Access. Both <strong>Copy</strong> and <strong>Move</strong> are blocked.</td><td>Connect as the owner, or as a user with at least read-only permission, then press <strong>Refresh</strong>.</td></tr>
+        </tbody>
+    </table>
+    <p>The owner of a queue always has full access. When the queue's owner is the username of your client connection, the dialog treats the queue as read and write, whatever its permission for others says. The match is exact, letter case included. Without SEMP the page cannot read the owner, but the broker's answer to the temporary browser already counts ownership.</p>
+    <p>With SEMP connected, the dialog reads the queue's permission for other users (No-Access, Read-Only, Consume, Modify-Topic or Delete) through SEMP. Without SEMP, it takes it from the broker's answer when the temporary browser binds. If neither gives an answer, the dialog does not block the run and leaves the broker to refuse it.</p>
+
+    <h3>Running a copy or a move</h3>
+    <p>Press the start button. The dialog changes to the run.</p>
+    <figure class="manual-figure">
+        <img src="help/run.svg" width="640" height="300" alt="The dialog during a run: the title Copying, a progress bar, a count of messages sent out of the total, and the Cancel copy button.">
+        <figcaption>A copy part-way through: 29 of 48 messages sent.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The title: <strong>Copying...</strong> or <strong>Moving...</strong> while it runs, then <strong>Completed</strong>, <strong>Cancelled</strong> or <strong>Failed</strong>.</li>
+        <li>The progress bar.</li>
+        <li>The count: messages sent, out of the <strong>Message Count</strong> from the check.</li>
+        <li>An error line, <strong>Error:</strong> followed by the reason. It appears only when the run fails or is refused.</li>
+        <li><strong>Cancel copy</strong> or <strong>Cancel move</strong>. Once the run has ended it reads <strong>Close</strong>.</li>
+    </ol>
+    <p>The page sends the messages oldest first, and waits for the destination to acknowledge them. A message counts as sent only once its acknowledgement has arrived. A move asks the broker to remove each message from the source straight after its acknowledgement, not in a batch at the end.</p>
+    <p>While the run is going, every control on the page is locked, so nothing can change under it. When the run ends, each control returns to the state it had before, and the dialog stays open until you press <strong>Close</strong>.</p>
+
+    <h4>Stopping a run</h4>
+    <p>Press <strong>Cancel copy</strong> or <strong>Cancel move</strong>, or press <kbd>Esc</kbd>. The page stops reading the queue and does not wait for acknowledgements still outstanding: a message not yet acknowledged when you cancel is not counted. The dialog stays open until the run has settled, then shows <strong>Cancelled</strong> with the number sent. The page notices the request when the next message arrives or a publish ends, so if the queue is sending nothing, the stop can take up to 30 seconds. In the check, <strong>Cancel</strong> and <kbd>Esc</kbd> stop the check and close the dialog.</p>
+    <p>If your entitlements change during a run in a signed-in session, for example when you refresh them or sign out, and the change takes away your access to an endpoint of the run, the run stops in the same way and shows <strong>Cancelled</strong>.</p>
+
+    <h4>How a run ends</h4>
+    <table>
+        <thead>
+            <tr><th>Title</th><th>Meaning</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Completed</strong></td><td>The page reached the newest message, and every message of the check has been sent.</td></tr>
+            <tr><td><strong>Cancelled</strong></td><td>You stopped it, or your entitlements changed. The count shows how many messages were sent.</td></tr>
+            <tr><td><strong>Failed</strong></td><td>The run stopped on an error, and the <strong>Error:</strong> line says which.</td></tr>
+        </tbody>
+    </table>
+    <p>The errors you may see:</p>
+    <ul>
+        <li><strong>First message ID did not match recorded oldest.</strong> The queue's contents changed between the check and the run. Check again and start again.</li>
+        <li><strong>Recorded newest message was consumed before our run reached it.</strong> Someone else took messages from the source. The message gives the number sent and the number expected.</li>
+        <li><strong>Message count mismatch.</strong> The run finished, but sent fewer messages than the check counted, because another consumer drained the source meanwhile.</li>
+        <li>The broker's own reason for refusing a message, such as a full queue, a missing permission or a message that is too large for the destination. The run stops on the first one.</li>
+        <li>A reason from the source, such as <strong>Browser disconnected</strong>, <strong>Browser connect failed</strong> or <strong>Could not open the source queue.</strong></li>
+        <li><strong>Publisher unavailable</strong>, or <strong>The destination connection does not match the destination selected. Connect the destination again.</strong> The run is refused before it reads anything. This happens when the destination connection is not the one the form names, for example after you changed the target. The title still reads <strong>Copying...</strong> or <strong>Moving...</strong>: press <strong>Cancel copy</strong> or <strong>Cancel move</strong> to close the dialog, then connect the destination again.</li>
+        <li>In a signed-in session, <strong>You are not entitled to write to queue</strong> followed by the queue's name. This too refuses the run before it reads anything.</li>
+    </ul>
+
+    <h3>Before you move messages</h3>
+    <p>The <strong>Important Considerations</strong> card at the top of the page lists what to know before a run:</p>
+    <ul>
+        <li>Do not run it on a live queue that has publishers or consumers working on it.</li>
+        <li>The whole run stops at the first error, for example a full destination or a missing permission.</li>
+        <li>The page takes a snapshot of the source queue first, the count and the oldest and newest message of the check, so that the run has an end. Messages that arrive after the check are not part of the run.</li>
+        <li>The destination needs enough spool quota.</li>
+        <li>The destination needs a maximum message size at least as large as the source's.</li>
+        <li>The destination needs ingress enabled.</li>
+        <li>The source queue needs egress enabled.</li>
+    </ul>
+    <p>A run also ends when the source has delivered no message for 30 seconds. It is then reported as <strong>Completed</strong> only if every message of the check has been sent.</p>
+    <aside class="manual-note" data-kind="warning">
+        <p>A move cannot be undone. A run that stops, whether you cancel it or it fails, does not put anything back: messages already sent stay on the destination, and messages already removed stay removed from the source.</p>
+        <p>The page counts a message as moved once the destination has acknowledged it and the removal has been requested. It does not read the source queue again afterwards. The broker does not answer a removal request, so the page cannot tell whether it worked: a removal the broker refuses goes unseen, the message stays on the source, and the page still counts it as moved. To see what is left on the source, press <strong>Next</strong> again and read <strong>Message Count</strong> before you rely on the result. When a run stops on an error, a message whose acknowledgement arrives after the page has stopped reading the source is counted but is not removed from it, so it can be on both queues.</p>
+    </aside>
+    <aside class="manual-note" data-kind="tip">
+        <p>When you are unsure, try the run first as a <strong>Copy</strong> into a spare queue. A copy never changes the source, so nothing is lost if the destination turns out to be wrong.</p>
+    </aside>
+</article>

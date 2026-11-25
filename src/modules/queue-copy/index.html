@@ -1,28 +1,31 @@
-<!-- Connection Prompt (Visible when primary Solace not connected) -->
-<div id="copy-warning" class="card text-center p-6">
-    <h2 class="mb-4 text-secondary">Connection Required</h2>
-    <p class="text-secondary">Please establish a primary Solace connection before copying messages.</p>
-</div>
+<!-- The connection-required gate is created at install by createGate() (see module.ts). -->
 
-<!-- Active View (Visible when primary Solace is connected) -->
-<div id="copy-content" class="hidden">
+<!--
+  Active View (Visible when primary Solace is connected). One fieldset holds
+  every control on the page, so a running copy disables them all at once
+  (setFormDisabled) without touching their own disabled state.
+-->
+<fieldset id="copy-content" class="copy-content hidden">
 
     <!--
       Two-column grid laid out row-by-row so each Source / Destination pair
       sits in the same grid row. Default `align-items: stretch` makes every
       pair equal height — the taller card defines the row, the shorter
       stretches to match. Pairs in order:
-        1. Broker        (Source Broker     | Destination Broker + toggles)
+        1. Broker        (Source Broker     | Destination Broker + Copy to)
         2. SEMP          (Source SEMP       | Destination SEMP)
         3. Client        (Source Client     | Destination Client)
         4. Target        (Source Queue      | Destination type/name/mode)
+      With a Provisioned primary, one Source Connection card takes the place
+      of the source's first three, and one Destination Connection card that
+      of the destination's SEMP and Client.
     -->
     <div class="copy-grid">
 
         <!-- ===== Important Considerations (spans both columns) ===== -->
         <div class="card copy-notes-card" id="copy-notes-card">
             <div class="flex-row justify-between items-center mb-2">
-                <h2 class="m-0">Important Considerations</h2>
+                <h2 class="card-title">Important Considerations</h2>
             </div>
             <ul class="copy-notes-list text-secondary">
                 <li>Please do not execute this on a live queue with active publisher(s) and consumer(s).</li>
@@ -37,56 +40,83 @@
             </ul>
         </div>
 
+        <!-- Provisioned source (the primary is a Provisioned connection): ONE
+             read-only connection card stands in for the three source cards
+             below (Broker, SEMP, Client) and spans their rows. Built at install
+             by createProvisionedConnectionCard (see ui-events.ts); hidden while
+             the primary is a Direct connection. -->
+        <div class="copy-source-prov hidden" id="copy-source-prov"></div>
+
         <!-- ===== Pair 1: Broker ===== -->
-        <div class="card">
+        <div class="card" id="copy-source-broker-card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Source Broker</h2>
+                <h2 class="card-title">Source Broker</h2>
                 <button type="button" class="btn btn-secondary copy-source-edit-btn">Edit in Connections</button>
             </div>
             <div class="form-group">
-                <label>Broker Host (IP or Hostname)</label>
-                <input type="text" id="copy-source-host" class="form-control" disabled>
+                <label>Solace Event Broker Type</label>
+                <div class="flex-row items-center gap-4">
+                    <div class="segmented" id="copy-source-broker-type" role="group" aria-label="Source Solace Event Broker Type">
+                        <button type="button" class="segmented-option" data-broker-type="software" aria-pressed="true" disabled>Software / Cloud</button>
+                        <button type="button" class="segmented-option" data-broker-type="appliance" aria-pressed="false" disabled>Appliance</button>
+                    </div>
+                    <span id="copy-source-broker-type-hint" class="text-secondary text-body-sm"></span>
+                </div>
             </div>
         </div>
 
         <div class="card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Destination Broker</h2>
+                <h2 class="card-title">Destination Broker</h2>
             </div>
+            <div class="form-group" id="copy-dest-type-group">
+                <label>Solace Event Broker Type</label>
+                <div class="flex-row items-center gap-4">
+                    <div class="segmented" id="copy-dest-broker-type" role="group" aria-label="Dest Solace Event Broker Type">
+                        <button type="button" class="segmented-option" data-broker-type="software" aria-pressed="true">Software / Cloud</button>
+                        <button type="button" class="segmented-option" data-broker-type="appliance" aria-pressed="false">Appliance</button>
+                    </div>
+                    <span id="copy-dest-broker-type-hint" class="text-secondary text-body-sm"></span>
+                </div>
+            </div>
+            <!-- Where the destination is, seen from the source: this connection,
+                 another Message VPN on its broker, or another broker. -->
             <div class="form-group">
-                <label>Broker Host (IP or Hostname)</label>
-                <input type="text" id="copy-dest-host" class="form-control">
-                <div class="invalid-feedback">Invalid hostname or IP address.</div>
-            </div>
-            <div class="form-group flex-row gap-4 items-center">
-                <label class="flex-row items-center gap-2 font-normal cursor-pointer">
-                    <input type="checkbox" id="copy-toggle-same-broker" checked> Same Solace Broker as source
-                </label>
-                <label class="flex-row items-center gap-2 font-normal cursor-pointer">
-                    <input type="checkbox" id="copy-toggle-same-vpn" checked> Same Message VPN as source
-                </label>
+                <label id="copy-dest-scope-label">Copy to</label>
+                <div>
+                    <div class="segmented" id="copy-dest-scope" role="group" aria-labelledby="copy-dest-scope-label">
+                        <button type="button" class="segmented-option" data-dest-scope="this-vpn" aria-pressed="true">This VPN</button>
+                        <button type="button" class="segmented-option" data-dest-scope="another-vpn" aria-pressed="false">Another VPN</button>
+                        <button type="button" class="segmented-option" data-dest-scope="another-broker" aria-pressed="false">Another broker</button>
+                    </div>
+                </div>
+                <p id="copy-dest-scope-hint" class="text-secondary text-body-sm mt-2 m-0" role="status"></p>
             </div>
         </div>
 
         <!-- ===== Pair 2: SEMP ===== -->
-        <div class="card">
+        <div class="card" id="copy-source-semp-card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Solace SEMP (Management)</h2>
+                <h2 class="card-title">Solace SEMP (Management)</h2>
                 <button type="button" class="btn btn-secondary copy-source-edit-btn">Edit in Connections</button>
             </div>
+            <div class="form-group">
+                <label id="lbl-copy-source-host">Broker Host (IP or Hostname)</label>
+                <input type="text" id="copy-source-host" class="form-control" disabled>
+            </div>
             <div class="form-group flex-row">
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>Protocol</label>
                     <select id="copy-source-semp-protocol" class="form-control" disabled>
                         <option value="http">http://</option>
                         <option value="https" selected>https://</option>
                     </select>
                 </div>
-                <div style="width: 100px;">
+                <div class="w-100px">
                     <label>Port</label>
                     <input type="text" id="copy-source-semp-port" class="form-control" disabled>
                 </div>
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>URL Path</label>
                     <input type="text" id="copy-source-semp-urlpath" class="form-control" disabled>
                 </div>
@@ -104,24 +134,29 @@
             </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="copy-dest-semp-card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Solace SEMP (Management)</h2>
+                <h2 class="card-title">Solace SEMP (Management)</h2>
+            </div>
+            <div class="form-group">
+                <label id="lbl-copy-dest-host" for="copy-dest-host">Broker Host (IP or Hostname)</label>
+                <input type="text" id="copy-dest-host" class="form-control">
+                <div class="invalid-feedback">Invalid hostname or IP address.</div>
             </div>
             <div class="form-group flex-row">
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>Protocol</label>
                     <select id="copy-dest-semp-protocol" class="form-control">
                         <option value="http">http://</option>
                         <option value="https" selected>https://</option>
                     </select>
                 </div>
-                <div style="width: 100px;">
+                <div class="w-100px">
                     <label>Port</label>
                     <input type="text" id="copy-dest-semp-port" class="form-control">
                     <div class="invalid-feedback">Invalid port.</div>
                 </div>
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>URL Path</label>
                     <input type="text" id="copy-dest-semp-urlpath" class="form-control">
                 </div>
@@ -139,7 +174,7 @@
                     <div class="invalid-feedback">Password is required.</div>
                 </div>
             </div>
-            <!-- Visible only when "Same Solace Broker as source" is unchecked. -->
+            <!-- Visible only when Copy to is Another broker. -->
             <div class="copy-dest-connect-row hidden" id="copy-dest-semp-connect-row">
                 <button id="copy-btn-dest-semp-connect" type="button" class="btn btn-primary">Connect</button>
                 <span id="copy-dest-semp-status" class="copy-dest-connect-status">Not connected</span>
@@ -147,25 +182,42 @@
             <div id="copy-dest-semp-error" class="copy-dest-connect-error hidden"></div>
         </div>
 
+        <!-- Provisioned destination (the primary is a Provisioned connection): ONE
+             shared connection card replaces the destination SEMP and Client cards
+             above and below. It spans both rows so the Source / Destination pairing
+             of the grid holds. Built at install by createProvisionedConnectionCard
+             (see ui-events.ts); hidden while the primary is a Direct connection. -->
+        <div class="copy-dest-prov hidden" id="copy-dest-prov">
+            <div id="copy-dest-prov-card"></div>
+            <div class="card text-secondary hidden" id="copy-dest-prov-same">
+                The destination is the source connection (same broker and Message VPN): nothing to connect.
+            </div>
+        </div>
+
         <!-- ===== Pair 3: Client ===== -->
-        <div class="card">
+        <div class="card" id="copy-source-sol-card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Solace Messaging (Client)</h2>
+                <h2 class="card-title">Solace Messaging (Client)</h2>
                 <button type="button" class="btn btn-secondary copy-source-edit-btn">Edit in Connections</button>
             </div>
+            <div class="form-group">
+                <label>Messaging Host (IP or Hostname)</label>
+                <input type="text" id="copy-source-sol-host" class="form-control" disabled>
+                <small id="copy-source-sol-host-hint" class="text-secondary text-xs">Follows the Broker Host above.</small>
+            </div>
             <div class="form-group flex-row">
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>Protocol</label>
                     <select id="copy-source-sol-protocol" class="form-control" disabled>
                         <option value="ws">ws://</option>
                         <option value="wss" selected>wss://</option>
                     </select>
                 </div>
-                <div style="width: 100px;">
+                <div class="w-100px">
                     <label>Port</label>
                     <input type="text" id="copy-source-sol-port" class="form-control" disabled>
                 </div>
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>URL Path</label>
                     <input type="text" id="copy-source-sol-urlpath" class="form-control" disabled>
                 </div>
@@ -186,24 +238,29 @@
             </div>
         </div>
 
-        <div class="card">
+        <div class="card" id="copy-dest-sol-card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Solace Messaging (Client)</h2>
+                <h2 class="card-title">Solace Messaging (Client)</h2>
+            </div>
+            <div class="form-group">
+                <label for="copy-dest-sol-host">Messaging Host (IP or Hostname)</label>
+                <input type="text" id="copy-dest-sol-host" class="form-control" disabled>
+                <small id="copy-dest-sol-host-hint" class="text-secondary text-xs">Follows the Broker Host above. Choose Appliance to set its own.</small>
             </div>
             <div class="form-group flex-row">
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>Protocol</label>
                     <select id="copy-dest-sol-protocol" class="form-control">
                         <option value="ws">ws://</option>
                         <option value="wss" selected>wss://</option>
                     </select>
                 </div>
-                <div style="width: 100px;">
+                <div class="w-100px">
                     <label>Port</label>
                     <input type="text" id="copy-dest-sol-port" class="form-control">
                     <div class="invalid-feedback">Invalid port.</div>
                 </div>
-                <div style="width: 150px;">
+                <div class="w-150px">
                     <label>URL Path</label>
                     <input type="text" id="copy-dest-sol-urlpath" class="form-control">
                 </div>
@@ -224,7 +281,7 @@
                     <input type="password" id="copy-dest-sol-pass" class="form-control">
                 </div>
             </div>
-            <!-- Visible only when either "Same Solace Broker" or "Same Message VPN" is unchecked. -->
+            <!-- Visible unless Copy to is This VPN. -->
             <div class="copy-dest-connect-row hidden" id="copy-dest-sol-connect-row">
                 <button id="copy-btn-dest-sol-connect" type="button" class="btn btn-primary">Connect</button>
                 <span id="copy-dest-sol-status" class="copy-dest-connect-status">Not connected</span>
@@ -234,12 +291,12 @@
 
         <!-- ===== Pair 4: Source Queue / Destination target ===== -->
         <div class="card">
-            <h2 class="m-0 mb-4">Source Queue</h2>
+            <h2 class="card-title mb-4">Source Queue</h2>
             <div class="form-group">
                 <label>Queue name</label>
-                <div class="copy-input-with-search">
+                <div class="input-with-search">
                     <input type="text" id="copy-source-input" class="form-control" autocomplete="off">
-                    <button id="copy-btn-source-pick" type="button" class="copy-search-btn hidden"
+                    <button id="copy-btn-source-pick" type="button" class="input-search-btn hidden"
                         title="Pick from list of queues" aria-label="Pick queue">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -254,23 +311,23 @@
 
         <div class="card">
             <div class="flex-row justify-between items-center mb-4">
-                <h2 class="m-0">Destination</h2>
+                <h2 class="card-title">Destination</h2>
                 <!-- Queue / Topic slide toggle. Unchecked = Queue, Checked = Topic.
                      Sits in the card's top-right corner per design. -->
-                <div class="copy-dest-type-switch" id="copy-dest-type-switch">
-                    <span class="copy-dest-type-label active" id="copy-dest-type-label-queue">Queue</span>
-                    <label class="copy-switch" title="Toggle between Queue and Topic">
-                        <input type="checkbox" id="copy-dest-type-toggle" aria-label="Destination type">
-                        <span class="copy-slider"></span>
-                    </label>
-                    <span class="copy-dest-type-label" id="copy-dest-type-label-topic">Topic</span>
+                <div class="slide-choice" id="copy-dest-type-switch" role="group" aria-label="Destination type">
+                    <span class="slide-choice-label active" data-choice="queue">Queue</span>
+                    <span class="switch" title="Toggle between Queue and Topic">
+                        <input type="checkbox" id="copy-dest-type-toggle" aria-label="Topic">
+                        <span class="switch-slider"></span>
+                    </span>
+                    <span class="slide-choice-label" data-choice="topic">Topic</span>
                 </div>
             </div>
             <div class="form-group">
                 <label id="copy-dest-name-label">Queue name</label>
-                <div class="copy-input-with-search">
+                <div class="input-with-search">
                     <input type="text" id="copy-dest-input" class="form-control" autocomplete="off">
-                    <button id="copy-btn-dest-pick" type="button" class="copy-search-btn hidden"
+                    <button id="copy-btn-dest-pick" type="button" class="input-search-btn hidden"
                         title="Pick from list of queues" aria-label="Pick queue">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -282,15 +339,15 @@
                 <div id="copy-dest-error" class="invalid-feedback"></div>
             </div>
             <div class="form-group">
-                <label>Mode</label>
-                <div class="flex-row gap-4" style="font-size: 0.9rem;">
-                    <label class="flex-row items-center font-normal cursor-pointer gap-1">
-                        <input type="radio" name="copy-mode" value="copy" checked> Copy
-                    </label>
-                    <label class="flex-row items-center font-normal cursor-pointer gap-1">
-                        <input type="radio" name="copy-mode" value="move"> Move <span class="text-error">(destructive —
-                            removes from source)</span>
-                    </label>
+                <label id="copy-mode-label">Mode</label>
+                <!-- Copy / Move slide toggle. Unchecked = Copy, Checked = Move. -->
+                <div class="slide-choice" id="copy-mode-switch" role="group" aria-labelledby="copy-mode-label">
+                    <span class="slide-choice-label active" data-choice="copy">Copy</span>
+                    <span class="switch" title="Toggle between Copy and Move">
+                        <input type="checkbox" id="copy-mode-toggle" aria-label="Move the messages">
+                        <span class="switch-slider"></span>
+                    </span>
+                    <span class="slide-choice-label" data-choice="move">Move <span class="text-error">(destructive: removes from source)</span></span>
                 </div>
             </div>
         </div>
@@ -300,7 +357,7 @@
     <div class="actions-footer mt-6 flex-row justify-end p-6 gap-4">
         <button id="copy-btn-start" class="btn btn-primary" disabled>Next</button>
     </div>
-</div>
+</fieldset>
 
 <!-- Confirm Queue Copy modal -->
 <dialog id="copy-modal" aria-labelledby="copy-modal-title">
@@ -357,19 +414,19 @@
                 </dl>
             </div>
 
-            <div id="copy-modal-verify-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+            <div id="copy-modal-verify-error" class="text-error mt-2 hidden text-body-sm"></div>
 
             <!-- Verify-phase red banners. The modal's evaluateStartGate
                  toggles these based on the verify result and selected mode:
                  empty queue, or read-only source under Move mode. Both
                  disable the Start button alongside being shown. -->
-            <div id="copy-modal-source-empty" class="text-error mt-2 hidden" style="font-size: 0.9rem; font-weight: 600;">
+            <div id="copy-modal-source-empty" class="text-error mt-2 hidden text-body-sm font-bold">
                 Queue is empty — nothing to copy or move.
             </div>
-            <div id="copy-modal-source-readonly" class="text-error mt-2 hidden" style="font-size: 0.9rem; font-weight: 600;">
+            <div id="copy-modal-source-readonly" class="text-error mt-2 hidden text-body-sm font-bold">
                 Move requires consume permission on this queue. Switch to Copy mode to proceed.
             </div>
-            <div id="copy-modal-source-noaccess" class="text-error mt-2 hidden" style="font-size: 0.9rem; font-weight: 600;">
+            <div id="copy-modal-source-noaccess" class="text-error mt-2 hidden text-body-sm font-bold">
                 You don't have access to this queue. Both Copy and Move are blocked — connect as the queue owner or as a user with at least Read-Only others-permission.
             </div>
         </div>
@@ -381,9 +438,9 @@
                 <div class="copy-progress-bar">
                     <div id="copy-progress-fill" class="copy-progress-fill"></div>
                 </div>
-                <div id="copy-progress-text" class="text-secondary mt-2" style="font-size: 0.9rem;">0 / 0</div>
+                <div id="copy-progress-text" class="text-secondary mt-2 text-body-sm">0 / 0</div>
             </div>
-            <div id="copy-run-error" class="text-error mt-2 hidden" style="font-size: 0.9rem;"></div>
+            <div id="copy-run-error" class="text-error mt-2 hidden text-body-sm"></div>
         </div>
 
         <div class="flex-row justify-between mt-4">

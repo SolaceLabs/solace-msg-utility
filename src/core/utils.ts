@@ -19,6 +19,11 @@ export function formatBytes(bytes: number | string, decimals = 2): string {
     return parseFloat(b.toFixed(decimals)) + ' ' + sizes[i];
 }
 
+/** An RFC 3339 UTC time as a page shows it: "2026-11-09 02:00 UTC". */
+export function formatUtc(iso: string): string {
+    return iso.replace('T', ' ').replace(/:\d{2}Z$/, ' UTC');
+}
+
 /**
  * Generate a v4-style UUID string.
  */
@@ -54,6 +59,19 @@ export function matchString(text: string, pattern: string | null): boolean {
     }
 
     return text.toLowerCase() === pattern.toLowerCase();
+}
+
+/**
+ * List-search match (case-insensitive): `text` contains `query`, where each
+ * `*` in the query matches any run of characters, so `ord*q` finds "ord"
+ * followed later by "q". A blank query matches everything. Deliberately
+ * looser than the RBAC globs in `./rbac` (anchored, case-sensitive): this
+ * narrows a list on screen and grants nothing.
+ */
+export function matchContains(text: string, query: string): boolean {
+    const q = query.trim();
+    if (!q) return true;
+    return matchString(text, `*${q}*`);
 }
 
 /**
@@ -259,4 +277,149 @@ export function normalizeUrlPath(val: string | null | undefined): string {
     if (!trimmed) return '';
     const withLeading = trimmed.startsWith('/') ? trimmed : '/' + trimmed;
     return withLeading.replace(/\/+$/, '');
+}
+
+/**
+ * The HTTP Basic `Authorization` value for a SEMP account. The one place the
+ * header is built: the SEMP connect probe (`services/semp-client.ts`) and the
+ * kernel's `sempFetch` both call it, so the probe and every later request send
+ * the same bytes. Plain `btoa` is exact for the ASCII the connection forms
+ * accept (`sempAccountError`); it throws on a character above U+00FF.
+ */
+export function basicAuthHeader(user: string, pass: string): string {
+    return `Basic ${btoa(`${user}:${pass}`)}`;
+}
+
+/** Symbols a Solace CLI password may not contain. */
+const SEMP_PASSWORD_FORBIDDEN = /[:()";'<>,`\\*&|]/;
+
+/** The longest SEMP (management) username a broker accepts, and its characters. */
+const SEMP_USERNAME_MAX = 32;
+const SEMP_USERNAME_CHARS = /^[A-Za-z0-9_-]*$/;
+
+/**
+ * Whether a SEMP (management) username is one a broker accepts: up to 32
+ * characters from A-Z a-z 0-9 _ -. A blank name passes; the caller decides
+ * whether one is required. The gateway holds stored connections to the same
+ * rule (`validSempUser` in go-web-proxy/store.go).
+ */
+export function sempUsernameOk(user: string): boolean {
+    return user.length <= SEMP_USERNAME_MAX && SEMP_USERNAME_CHARS.test(user);
+}
+
+/** The longest client username a broker accepts. */
+const CLIENT_USERNAME_MAX = 189;
+
+/**
+ * Why a client (messaging) username is one a broker refuses, or `null` when
+ * it accepts it: up to 189 printable ASCII characters (0x20 to 0x7e), without
+ * `?` or `*`, which the broker's CLI reads as wildcards. Case counts. A blank
+ * name passes; the caller decides whether one is required. The gateway holds
+ * stored connections to the same rule (`validClientUser` in
+ * go-web-proxy/store.go).
+ */
+export function clientUsernameError(user: string): string | null {
+    if (user.length > CLIENT_USERNAME_MAX) return `Client username must not exceed ${CLIENT_USERNAME_MAX} characters.`;
+    if (!/^[\x20-\x7e]*$/.test(user)) {
+        return 'Client username may contain only printable ASCII characters: no accented letters or control characters.';
+    }
+    if (/[?*]/.test(user)) return 'Client username must not contain ? or *.';
+    return null;
+}
+
+/** `clientUsernameError` as a yes or no. */
+export function clientUsernameOk(user: string): boolean {
+    return clientUsernameError(user) === null;
+}
+
+/**
+ * Why a SEMP username/password pair is one a broker refuses, or `null` when it
+ * is valid. Username: 1 to 32 characters from A-Z a-z 0-9 _ - (`sempUsernameOk`).
+ * Password: the Solace CLI user-account rules (docs.solace.com, Configuring
+ * Internal CLI User Accounts), 1-128 printable ASCII characters (no spaces),
+ * none of `: ( ) " ; ' < > , \` \\ * & |`. The page states no encoding, so
+ * ASCII is the rule: it is also what `basicAuthHeader` encodes exactly.
+ * `field` names the input to mark.
+ */
+export function sempAccountError(user: string, pass: string): { field: 'user' | 'pass'; message: string } | null {
+    if (!user) return { field: 'user', message: 'SEMP username is required.' };
+    if (user.length > SEMP_USERNAME_MAX) return { field: 'user', message: `SEMP username must not exceed ${SEMP_USERNAME_MAX} characters.` };
+    if (!SEMP_USERNAME_CHARS.test(user)) {
+        return { field: 'user', message: 'SEMP username may contain only letters, digits, - and _ (A-Z, a-z, 0-9, -, _).' };
+    }
+    if (!pass) return { field: 'pass', message: 'SEMP password is required.' };
+    if (pass.length > 128) return { field: 'pass', message: 'SEMP password must not exceed 128 characters.' };
+    if (!/^[\x21-\x7e]+$/.test(pass)) {
+        return { field: 'pass', message: 'SEMP password may contain only printable ASCII characters: no spaces or accented letters.' };
+    }
+    if (SEMP_PASSWORD_FORBIDDEN.test(pass)) {
+        return { field: 'pass', message: 'SEMP password must not contain any of : ( ) " ; \' < > , ` \\ * & |' };
+    }
+    return null;
+}
+
+/**
+ * The SDK `clientName` for a connection started at `at`:
+ * `SolMsgUtil/YYYYMMDDHHMMSS/{clientNameId}`, in local time (what the user's
+ * own clock shows when they read it in broker tooling). The Direct form and
+ * the managed profile's dial both compose it here.
+ */
+export function sdkClientName(clientNameId: string, at: Date = new Date()): string {
+    const p = (n: number) => n.toString().padStart(2, '0');
+    const stamp = `${at.getFullYear()}${p(at.getMonth() + 1)}${p(at.getDate())}${p(at.getHours())}${p(at.getMinutes())}${p(at.getSeconds())}`;
+    return `SolMsgUtil/${stamp}/${clientNameId}`;
+}
+
+/** Modules whose sidebar name is not their id title-cased. */
+const MODULE_LABELS: Record<string, string> = { 'queue-subscription-explorer': 'Queue Subscriptions' };
+
+/**
+ * A module id as the sidebar names it: "queue-browser" -> "Queue Browser".
+ * tests/variants.test.ts holds every catalog module's label to its `name`.
+ */
+export function moduleLabel(id: string): string {
+    return MODULE_LABELS[id] ?? id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+/**
+ * Message from a thrown value, for display in a UI error slot. Non-Error
+ * throws are stringified rather than dropped, so a rejected promise from a
+ * non-Error source still tells the user something.
+ */
+export function errMessage(e: unknown): string {
+    return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Reason text for anything the Solace SDK hands a listener, or for a thrown
+ * exception — the two arrive in different shapes and the SDK is not consistent
+ * about which field carries the detail:
+ *
+ * - **QueueBrowser / MessageConsumer** `CONNECT_FAILED_ERROR` and `DOWN_ERROR`
+ *   deliver an `OperationError` (an `Error` subclass), so the reason is on
+ *   **`.message`**. It has no `infoStr` at all.
+ * - **Session** events (`CONNECT_FAILED_ERROR`, `REJECTED_MESSAGE_ERROR`, …)
+ *   deliver a `SessionEvent`, whose reason is on **`.infoStr`**.
+ * - A `try`/`catch` around an SDK call yields a plain `Error` → `.message`.
+ *
+ * Reading only one of those silently loses the broker's explanation: the queue
+ * browser showed it while queue-copy reported a generic fallback for the very
+ * same failure, because each read a different field. Prefer `.message`, fall
+ * back to `.infoStr`, and only then to the caller's text — never stringify the
+ * object itself, which is how `[object Object]` reaches a user.
+ *
+ * @param e        the SDK event or thrown value
+ * @param fallback shown when the value carries no usable text
+ */
+export function solaceErrorText(e: unknown, fallback: string): string {
+    if (typeof e === 'string') return e.trim() || fallback;
+
+    const candidate = e as { message?: unknown; infoStr?: unknown } | null | undefined;
+    const message = candidate?.message;
+    if (typeof message === 'string' && message.trim()) return message;
+
+    const infoStr = candidate?.infoStr;
+    if (typeof infoStr === 'string' && infoStr.trim()) return infoStr;
+
+    return fallback;
 }

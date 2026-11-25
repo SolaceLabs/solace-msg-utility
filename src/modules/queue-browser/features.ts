@@ -2,8 +2,8 @@
  * Queue Browser build-flavor flags.
  *
  * Module-local: only the queue-browser module reads these, and "payload" is a
- * queue-browser concept. (The general capability/visibility seam lives in the
- * RBAC plan's `CapabilityProvider`, not here.)
+ * queue-browser concept. (Which pages a signed-in user sees is `isModuleVisible`
+ * in src/core/rbac.ts, not here.)
  */
 
 /**

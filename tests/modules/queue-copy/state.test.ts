@@ -1,42 +1,30 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { createInitialState, resetTransientState, syncDestFormFromSnapshot } from '../../../src/modules/queue-copy/state';
+import {
+    createInitialState, resetTransientState, syncDestFormFromSnapshot, destTargetKey, destMessagingHost, destLive, destScopeOf, DEST_SCOPES,
+} from '../../../src/modules/queue-copy/state';
 import type { DestPrefillSnapshot } from '../../../src/modules/queue-copy/state';
 
 describe('queue-copy/state', () => {
+    describe('destLive', () => {
+        it('names the destination connections that are up: its SEMP context and its messaging session', () => {
+            const s = createInitialState();
+            expect(destLive(s)).toEqual({ semp: false, messaging: false });
+            s.destSempCtx = { fetch: () => Promise.resolve(new Response()), baseUrl: 'https://dest.example:943/SEMP/v2' };
+            expect(destLive(s)).toEqual({ semp: true, messaging: false });
+            s.destSession = {};
+            expect(destLive(s)).toEqual({ semp: true, messaging: true });
+        });
+    });
+
     describe('createInitialState', () => {
-        it('returns default form values with both toggles checked', () => {
+        it('returns default form values, with the destination on the source\'s own VPN', () => {
             const s = createInitialState();
             expect(s.destForm.sameBroker).toBe(true);
             expect(s.destForm.sameVpn).toBe(true);
             expect(s.dest.type).toBe('queue');
             expect(s.dest.name).toBe('');
             expect(s.mode).toBe('copy');
-        });
-
-        it('starts with no live secondary connections', () => {
-            const s = createInitialState();
-            expect(s.destSession).toBeNull();
-            expect(s.destSempCtx).toBeNull();
-            expect(s.verify).toBeNull();
-            expect(s.job).toBeNull();
-        });
-
-        it('starts with no publishers — they are created lazily on session connect', () => {
-            const s = createInitialState();
-            expect(s.primaryPublisher).toBeNull();
-            expect(s.destPublisher).toBeNull();
-        });
-
-        it('starts with blank password fields', () => {
-            const s = createInitialState();
-            expect(s.destSolacePass).toBe('');
-            expect(s.destSempPass).toBe('');
-        });
-
-        it('initializes SEMP and Solace sub-forms with urlPath slots', () => {
-            const s = createInitialState();
-            expect(s.destForm.semp.urlPath).toBe('');
-            expect(s.destForm.solace.urlPath).toBe('');
         });
     });
 
@@ -67,6 +55,17 @@ describe('queue-copy/state', () => {
             expect(s.destForm.solace.user).toBe('kept-user');
         });
 
+        it('sameBroker=true: takes an appliance primary\'s messaging host too, and drops it for a primary with one host', () => {
+            const s = createInitialState();
+            syncDestFormFromSnapshot(s, { ...SNAP, host: 'mgmt.example', messagingHost: 'msg.example' });
+            expect([s.destForm.host, s.destForm.messagingHost]).toEqual(['mgmt.example', 'msg.example']);
+            expect(destMessagingHost(s.destForm)).toBe('msg.example');
+
+            syncDestFormFromSnapshot(s, SNAP);
+            expect([s.destForm.host, s.destForm.messagingHost]).toEqual(['broker.solace.com', undefined]);
+            expect(destMessagingHost(s.destForm)).toBe('broker.solace.com');
+        });
+
         it('sameBroker=false: leaves the form untouched (different broker means different everything)', () => {
             const s = createInitialState();
             s.destForm.sameBroker = false;
@@ -77,11 +76,70 @@ describe('queue-copy/state', () => {
             expect(s.destForm.solace.vpn).toBe('');
         });
 
-        it('null snapshot: no-op even with toggles checked', () => {
+        it('null snapshot: no-op even on the source\'s own VPN', () => {
             const s = createInitialState();
             syncDestFormFromSnapshot(s, null);
             expect(s.destForm.host).toBe('');
             expect(s.destForm.solace.vpn).toBe('');
+        });
+    });
+
+    describe('destScopeOf', () => {
+        it('names the Copy to answer of each pair, and the same VPN means nothing on another broker', () => {
+            expect(destScopeOf(true, true)).toBe('this-vpn');
+            expect(destScopeOf(true, false)).toBe('another-vpn');
+            expect(destScopeOf(false, false)).toBe('another-broker');
+            expect(destScopeOf(false, true)).toBe('another-broker');
+            // The button offers exactly these three, nearest the source first.
+            expect(DEST_SCOPES).toEqual(['this-vpn', 'another-vpn', 'another-broker']);
+        });
+    });
+
+    describe('destTargetKey', () => {
+        it('a provisioned destination is its broker and VPN names, whatever the typed fields hold', () => {
+            const s = createInitialState();
+            s.destForm.credMode = 'provisioned';
+            s.destForm.provisioned = { broker: 'b1', vpn: 'v1' };
+            s.destForm.host = 'typed-host';
+            const key = destTargetKey(s.destForm);
+            s.destForm.solace.vpn = 'typed-vpn';
+            expect(destTargetKey(s.destForm)).toBe(key);
+            s.destForm.provisioned.vpn = 'v2';
+            expect(destTargetKey(s.destForm)).not.toBe(key);
+        });
+
+        it('a manual appliance destination is its messaging host and VPN: the management host does not carry messages', () => {
+            const s = createInitialState();
+            s.destForm.host = 'mgmt';
+            s.destForm.messagingHost = 'msg1';
+            s.destForm.solace.vpn = 'v1';
+            const key = destTargetKey(s.destForm);
+            s.destForm.host = 'mgmt2';
+            expect(destTargetKey(s.destForm)).toBe(key);
+            s.destForm.messagingHost = 'msg2';
+            expect(destTargetKey(s.destForm)).not.toBe(key);
+        });
+
+        it('a manual destination is its typed host and VPN', () => {
+            const s = createInitialState();
+            s.destForm.host = 'h1';
+            s.destForm.solace.vpn = 'v1';
+            const key = destTargetKey(s.destForm);
+            s.destForm.solace.vpn = 'v2';
+            expect(destTargetKey(s.destForm)).not.toBe(key);
+            s.destForm.solace.vpn = 'v1';
+            s.destForm.host = 'h2';
+            expect(destTargetKey(s.destForm)).not.toBe(key);
+        });
+
+        it('the same names under the other credential source are a different destination', () => {
+            const s = createInitialState();
+            s.destForm.host = 'b1';
+            s.destForm.solace.vpn = 'v1';
+            s.destForm.provisioned = { broker: 'b1', vpn: 'v1' };
+            const manual = destTargetKey(s.destForm);
+            s.destForm.credMode = 'provisioned';
+            expect(destTargetKey(s.destForm)).not.toBe(manual);
         });
     });
 

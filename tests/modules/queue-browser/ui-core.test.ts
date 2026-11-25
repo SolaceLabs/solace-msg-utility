@@ -17,27 +17,22 @@ function createBrowserDOM() {
 
 describe('queue-browser/ui-core', () => {
     let container: HTMLElement;
+    // The gate is the module-gate component, injected at install. These ui-core
+    // tests drive ui.updateVisibility directly (no Module.install), so inject a
+    // stub gate and assert against its show()/hide().
+    let gateStub: { show: ReturnType<typeof vi.fn>; hide: ReturnType<typeof vi.fn> };
 
     beforeEach(() => {
         container = createBrowserDOM();
         document.body.appendChild(container);
         ui.initElements(container);
+        gateStub = { show: vi.fn(), hide: vi.fn() };
+        ui.setGate(gateStub);
+        // Installed by initTable / initDetails at module install; stubbed here.
+        ui.renderList = vi.fn();
+        ui.clearDetails = vi.fn();
 
         resetQueueBrowserState();
-    });
-
-    describe('initElements()', () => {
-        it('caches all elements', () => {
-            const cached = ui.getElements();
-            expect(cached.container).toBe(container);
-            expect(cached.inputBind).toBeTruthy();
-            expect(cached.btnBind).toBeTruthy();
-            expect(cached.selectBound).toBeTruthy();
-            expect(cached.msgList).toBeTruthy();
-            expect(cached.detailId).toBeTruthy();
-            expect(cached.modalForward).toBeTruthy();
-            expect(cached.btnFilter).toBeTruthy();
-        });
     });
 
     describe('showBrowserError()', () => {
@@ -70,48 +65,27 @@ describe('queue-browser/ui-core', () => {
         });
     });
 
-    describe('formatBytes()', () => {
-        it('formats bytes correctly', () => {
-            expect(ui.formatBytes(0)).toBe('0 B');
-            expect(ui.formatBytes(500)).toBe('500 B');
-            expect(ui.formatBytes(1024)).toBe('1 KB');
-            expect(ui.formatBytes(1048576)).toBe('1 MB');
-            expect(ui.formatBytes(1073741824)).toBe('1 GB');
-        });
-
-        it('handles NaN', () => {
-            expect(ui.formatBytes(NaN)).toBe('0 B');
-            expect(ui.formatBytes('not a number')).toBe('0 B');
-        });
-
-        it('respects decimal places', () => {
-            expect(ui.formatBytes(1536, 1)).toBe('1.5 KB');
-        });
-    });
-
-    describe('generateUuid()', () => {
-        it('returns a UUID-like string', () => {
-            const uuid = ui.generateUuid();
-            expect(uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-        });
-
-        it('generates unique values', () => {
-            const a = ui.generateUuid();
-            const b = ui.generateUuid();
-            expect(a).not.toBe(b);
-        });
-    });
-
     describe('updateVisibility()', () => {
-        it('shows prompt and hides view when disconnected', () => {
+        it('names the missing ui.setGate() wiring instead of dereferencing null', () => {
+            // module.ts wires the gate at install; a module that forgot would
+            // otherwise die with "Cannot read properties of null".
+            ui.setGate(null);
+            els.hdrVpnName.textContent = 'vpn-before';
+            expect(() => ui.updateVisibility(false))
+                .toThrow('queue-browser: ui.setGate() must run before ui.updateVisibility()');
+            // Refused before touching the view.
+            expect(els.hdrVpnName.textContent).toBe('vpn-before');
+        });
+
+        it('shows gate and hides view when disconnected', () => {
             ui.updateVisibility(false);
-            expect(els.elPrompt.classList.contains('hidden')).toBe(false);
+            expect(gateStub.show).toHaveBeenCalled();
             expect(els.elActiveView.classList.contains('hidden')).toBe(true);
         });
 
-        it('hides prompt and shows view when connected', () => {
+        it('hides gate and shows view when connected', () => {
             ui.updateVisibility(true);
-            expect(els.elPrompt.classList.contains('hidden')).toBe(true);
+            expect(gateStub.hide).toHaveBeenCalled();
             expect(els.elActiveView.classList.contains('hidden')).toBe(false);
         });
 
@@ -150,10 +124,6 @@ describe('queue-browser/ui-core', () => {
             state.allMessages = [{ id: '1' }];
             state.displayedMessages = [{ id: '1' }];
 
-            // Need renderList and clearDetails to be defined
-            ui.renderList = vi.fn();
-            ui.clearDetails = vi.fn();
-
             ui.resetQueueSelection();
 
             expect(state.currentQueue).toBe('');
@@ -161,6 +131,8 @@ describe('queue-browser/ui-core', () => {
             expect(state.displayedMessages).toEqual([]);
             expect(state.currentQueuePermissions).toBeNull();
             expect(els.btnFilter.disabled).toBe(true);
+            expect(ui.renderList).toHaveBeenCalledTimes(1);
+            expect(ui.clearDetails).toHaveBeenCalledTimes(1);
         });
     });
 
@@ -178,32 +150,52 @@ describe('queue-browser/ui-core', () => {
 
     });
 
-    describe('resetQueueSelection edge cases', () => {
-        // The previous "handles missing filter elements gracefully" test exercised the
-        // dead defensive guards on hdrQueueName / hdrPermissions / filter inputs / btnFilter
-        // and was deleted when those guards were dropped (all are required elements per
-        // the queue-browser/module.ts required() list).
+    describe('removeBoundQueue()', () => {
+        // The template DOM here holds the placeholder and q1; add q2 as a second bound queue.
+        function bindSecondQueue() {
+            const opt = document.createElement('option');
+            opt.value = 'q2';
+            opt.textContent = 'q2';
+            els.selectBound.appendChild(opt);
+        }
+        const values = () => Array.from(els.selectBound.options).map((o: any) => o.value);
 
-        it('handles missing renderList and clearDetails — state still reset', () => {
-            const savedRender = ui.renderList;
-            const savedClear = ui.clearDetails;
-            ui.renderList = null;
-            ui.clearDetails = null;
+        it('removing the queue on screen moves the view to the next bound queue', () => {
+            bindSecondQueue();
+            els.selectBound.value = 'q1';
+            const onChange = vi.fn();
+            els.selectBound.addEventListener('change', onChange);
 
-            state.currentQueue = 'q1';
-            state.allMessages = [{ id: 'm1' } as any];
-            expect(() => ui.resetQueueSelection()).not.toThrow();
-            expect(state.currentQueue).toBe('');
-            expect(state.allMessages).toEqual([]);
+            ui.removeBoundQueue('q1');
 
-            ui.renderList = savedRender;
-            ui.clearDetails = savedClear;
+            expect(values()).toEqual(['', 'q2']);
+            expect(els.selectBound.value).toBe('q2');
+            expect(onChange).toHaveBeenCalledTimes(1);
         });
-    });
 
-    describe('formatBytes edge cases', () => {
-        it('handles TB range', () => {
-            expect(ui.formatBytes(1099511627776)).toBe('1 TB');
+        it('removing the last bound queue clears the view', () => {
+            els.selectBound.value = 'q1';
+            state.currentQueue = 'q1';
+
+            ui.removeBoundQueue('q1');
+
+            expect(values()).toEqual(['']);
+            expect(els.selectBound.selectedIndex).toBe(0);
+            expect(state.currentQueue).toBe('');
+        });
+
+        it('removing a queue off screen leaves the view as it is', () => {
+            bindSecondQueue();
+            els.selectBound.value = 'q1';
+            state.currentQueue = 'q1';
+            const onChange = vi.fn();
+            els.selectBound.addEventListener('change', onChange);
+
+            ui.removeBoundQueue('q2');
+
+            expect(values()).toEqual(['', 'q1']);
+            expect([els.selectBound.value, state.currentQueue]).toEqual(['q1', 'q1']);
+            expect(onChange).not.toHaveBeenCalled();
         });
     });
 });

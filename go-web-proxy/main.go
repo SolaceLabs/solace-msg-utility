@@ -4,35 +4,290 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 )
 
+// Stamped at build time by scripts/dev.sh via
+// -ldflags "-X main.version=$VERSION", and by docker/Dockerfile from the
+// APP_VERSION build-arg. The git tag is the single source of version truth, so
+// this default should only ever be seen in an ad-hoc `go build`.
+var version = "dev"
+
+// Connection modes the app may offer, advertised to the SPA via /hosted. Any
+// value but direct turns Provisioned mode on: sign-in, the stores and the admin
+// console.
+const (
+	connDirect      = "direct"
+	connProvisioned = "provisioned"
+	connBoth        = "both"
+)
+
+// Route and bundle for the administration console. Served only in Provisioned
+// mode -- see adminHandler.
+const (
+	adminPath      = "/solAdmin"
+	adminIndexFile = "solAdmin.html"
+)
+
+// The app bundle served at /: the Direct-only Release bundle, or in
+// Provisioned mode the one that carries the sign-in. The image ships both.
+const (
+	directIndexFile      = "index.html"
+	provisionedIndexFile = "provisioned.html"
+)
+
+// appRoot is where the image keeps the app's files (docker/Dockerfile). It is
+// fixed: to serve another build, mount it here.
+const appRoot = "/SolaceMsgUtility"
+
+// config is the validated config.yaml. The keys live.go lists as live are
+// copied into a *live at startup and swapped by the settings page; read them
+// there, per request, so a save reaches them. The rest apply at restart.
 type config struct {
-	hosted             bool
-	appDir             string
-	certFile           string
-	keyFile            string
-	trustDir           string
+	hosted bool
+	// The TLS paths come from the environment at every start, never from
+	// config.yaml (tlsPathsFromEnv).
+	certFile string
+	keyFile  string
+	trustDir string
+	// insecureSkipVerify is live: the trust holder carries it (live.go).
 	insecureSkipVerify bool
-	logLevel           slog.Level
+	// standardRoots is live the same way: whether brokers are also verified
+	// against the standard root CAs the image carries (standardRootsFile).
+	standardRoots bool
+	logLevel      slog.Level
+	// Provisioned mode's stores, at fixed paths (the defaults below; serve
+	// moves them under process.dataDir for tests). Read only when connModes
+	// offers provisioned.
+	usersFile       string
+	connectionsFile string
+	storeKeyFile    string // encrypts usersFile and connectionsFile (keyfile.go)
+	// backupDir is where scheduled backups go: always backupRoot, a field
+	// only so tests can point it elsewhere (backup.go).
+	backupDir string
+	// auditFile is the audit log (audit.go): always defaultAuditFile, a field
+	// only so tests can move it (inDataDir). Opened in Provisioned mode only.
+	auditFile string
+	// Connection-mode config surfaced to the SPA through /hosted. connModes is
+	// one of direct|provisioned|both; defaultConn (direct|provisioned) picks
+	// the tab shown first when both are offered. The default, direct, is
+	// Gateway mode: users type their broker's details and the gateway relays.
+	connModes   string
+	defaultConn string
+	// Client access list. Lives in config.yaml only (no env var); an empty
+	// allow list admits every client. See access.go.
+	access accessConfig
+	// Provisioned sign-in limits and module control, config.yaml only (no env
+	// var). Unused in Gateway mode.
+	session sessionLimits
+	login   loginLimits
+	modules moduleSettings
+	// twoFactor is login.twoFactor (totp.go): optional, admins or
+	// mandatory. The zero value counts as optional. Live.
+	twoFactor string
+	// The audit stream's options (audit.go): audit.stdout is seeded by
+	// SMU_SHOW_AUDIT, audit.access and audit.onFailure have no env var. Live.
+	audit auditSettings
 }
 
-func loadConfig() config {
-	return config{
-		hosted:             os.Getenv("HOSTED") == "true",
-		appDir:             envOr("APP_DIR", "/SolaceMsgUtility"),
-		certFile:           envOr("SSL_CERT_FILE", "/tls/tls.crt"),
-		keyFile:            envOr("SSL_KEY_FILE", "/tls/tls.key"),
-		trustDir:           envOr("SSL_TRUST_DIR", "/tls/trust"),
-		insecureSkipVerify: os.Getenv("SSL_INSECURE_SKIP_VERIFY") == "true",
-		logLevel:           parseLogLevel(envOr("LOG_LEVEL", "warn")),
+// managedRoutes is what Provisioned mode adds to the router; nil in Gateway
+// mode.
+type managedRoutes struct {
+	api       http.Handler                    // /managed/*
+	pages     http.Handler                    // /login, /login/password, /login/code, /login/two-factor
+	gateApp   func(http.Handler) http.Handler // the PWA; a session under connModes=provisioned
+	gateAdmin func(http.Handler) http.Handler // /solAdmin; an admin session, every mode
+	gateRelay func(http.Handler) http.Handler // the Direct relay; 404 under connModes=provisioned
+	backups   *backupService                  // the backup schedule, run by serve
+	audit     *auditor                        // the audit trail, closed by serve at shutdown
+}
+
+// robotsTxt asks every crawler to stay out; X-Robots-Tag on each response says
+// the same to the ones that skip robots.txt.
+const robotsTxt = "User-agent: *\nDisallow: /\n"
+
+// newRootHandler routes a request to the gateway's handlers. /managed/* never
+// falls through to the SPA: in Gateway mode it is a plain 404.
+func newRootHandler(hosted, admin, app, relay http.Handler, mr *managedRoutes) http.Handler {
+	if mr != nil {
+		app, admin, relay = mr.gateApp(app), mr.gateAdmin(admin), mr.gateRelay(relay)
 	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+		p := r.URL.Path
+		switch {
+		case p == "/robots.txt":
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = io.WriteString(w, robotsTxt)
+		case p == "/hosted":
+			hosted.ServeHTTP(w, r)
+		case p == adminPath || p == adminPath+"/":
+			admin.ServeHTTP(w, r)
+		case strings.HasPrefix(p, "/managed/"):
+			if mr == nil {
+				http.NotFound(w, r)
+				return
+			}
+			mr.api.ServeHTTP(w, r)
+		case mr != nil && (p == "/login" || p == "/login/password" || p == "/login/code" || p == "/login/two-factor"):
+			mr.pages.ServeHTTP(w, r)
+		case isProxyPath(p):
+			relay.ServeHTTP(w, r)
+		default:
+			app.ServeHTTP(w, r)
+		}
+	})
+}
+
+// defaultConfig is the built-in baseline: what an unconfigured deployment runs
+// with, and what a config.yaml key falls back to when it is missing.
+func defaultConfig() config {
+	return config{
+		hosted:          true,
+		certFile:        defaultCertFile,
+		keyFile:         defaultKeyFile,
+		trustDir:        defaultTrustDir,
+		standardRoots:   true,
+		logLevel:        slog.LevelWarn,
+		usersFile:       defaultUsersFile,
+		connectionsFile: defaultConnectionsFile,
+		storeKeyFile:    defaultStoreKeyFile,
+		backupDir:       backupRoot,
+		auditFile:       defaultAuditFile,
+		connModes:       connDirect,
+		defaultConn:     connDirect,
+		session: sessionLimits{
+			idle: 10 * time.Minute, absolute: 30 * time.Minute,
+			ticket: defaultTicketTTL, connects: defaultConnectsPerMinute,
+		},
+		login: loginLimits{
+			maxFailures:       5,
+			backoff:           30 * time.Second,
+			maxBackoff:        15 * time.Minute,
+			unauthPerMinute:   60,
+			clientMaxFailures: 10,
+			reset:             15 * time.Minute,
+			passwordMinLength: passwordMinLen,
+		},
+		twoFactor: twoFactorOptional,
+		modules:   moduleSettings{offered: moduleCatalog(), userDefault: modulesDefaultAll},
+		audit:     auditSettings{onFailure: auditOnFailureContinue},
+	}
+}
+
+// loadConfig reads the environment. It seeds config.yaml on first start
+// (resolveConfig) and is compared against the file on later starts; it never
+// overrides the file.
+func loadConfig() (config, error) {
+	d := defaultConfig()
+	level, err := parseLogLevel(envOr("LOG_LEVEL", levelName(d.logLevel)))
+	if err != nil {
+		return config{}, fmt.Errorf("LOG_LEVEL=%q: %w", os.Getenv("LOG_LEVEL"), err)
+	}
+	hosted, err := parseStrictBool(os.Getenv("SMU_HOSTED"), d.hosted)
+	if err != nil {
+		return config{}, fmt.Errorf("SMU_HOSTED=%q: %w", os.Getenv("SMU_HOSTED"), err)
+	}
+	insecure, err := parseStrictBool(os.Getenv("SMU_SSL_SKIP_CERT_VERIFY"), d.insecureSkipVerify)
+	if err != nil {
+		return config{}, fmt.Errorf("SMU_SSL_SKIP_CERT_VERIFY=%q: %w", os.Getenv("SMU_SSL_SKIP_CERT_VERIFY"), err)
+	}
+	standard, err := parseStrictBool(os.Getenv("SMU_SSL_STANDARD_ROOTS"), d.standardRoots)
+	if err != nil {
+		return config{}, fmt.Errorf("SMU_SSL_STANDARD_ROOTS=%q: %w", os.Getenv("SMU_SSL_STANDARD_ROOTS"), err)
+	}
+	showAudit, err := parseStrictBool(os.Getenv("SMU_SHOW_AUDIT"), d.audit.stdout)
+	if err != nil {
+		return config{}, fmt.Errorf("SMU_SHOW_AUDIT=%q: %w", os.Getenv("SMU_SHOW_AUDIT"), err)
+	}
+	paths := tlsPathsFromEnv()
+	return config{
+		hosted:             hosted,
+		certFile:           paths.certFile,
+		keyFile:            paths.keyFile,
+		trustDir:           paths.trustDir,
+		insecureSkipVerify: insecure,
+		standardRoots:      standard,
+		logLevel:           level,
+		usersFile:          d.usersFile,
+		connectionsFile:    d.connectionsFile,
+		storeKeyFile:       d.storeKeyFile,
+		connModes:          strings.ToLower(envOr("SMU_CONN_MODES", d.connModes)),
+		defaultConn:        strings.ToLower(envOr("SMU_DEFAULT_CONN", d.defaultConn)),
+		session:            d.session,
+		login:              d.login,
+		twoFactor:          d.twoFactor,
+		modules:            d.modules,
+		auditFile:          d.auditFile,
+		audit:              auditSettings{stdout: showAudit, onFailure: d.audit.onFailure},
+	}, nil
+}
+
+// parseStrictBool reads a boolean seed variable (SMU_HOSTED,
+// SMU_SSL_SKIP_CERT_VERIFY, SMU_SHOW_AUDIT): unset is def, the setting's
+// default; "true" and "false" are themselves; anything else (TRUE, 1, yes) is
+// refused rather than guessed, since the value is written into config.yaml on
+// the first start.
+func parseStrictBool(raw string, def bool) (bool, error) {
+	switch raw {
+	case "":
+		return def, nil
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	return false, errors.New(`must be "true" or "false"`)
+}
+
+// inDataDir moves the stores, the store key and the audit log under dir,
+// keeping their file names. It is the one seam tests use to keep the fixed paths out of /data;
+// "" (main) leaves them as they are.
+func (c config) inDataDir(dir string) config {
+	if dir == "" {
+		return c
+	}
+	c.usersFile = filepath.Join(dir, filepath.Base(defaultUsersFile))
+	c.connectionsFile = filepath.Join(dir, filepath.Base(defaultConnectionsFile))
+	c.storeKeyFile = filepath.Join(dir, filepath.Base(defaultStoreKeyFile))
+	c.auditFile = filepath.Join(dir, filepath.Base(defaultAuditFile))
+	return c
+}
+
+// provisioned reports whether cfg turns Provisioned mode on: sign-in, the
+// stores and the admin console.
+func (c config) provisioned() bool { return c.connModes != connDirect }
+
+// validateConnModes reports whether the advertised connection modes can be
+// served. Fatal at startup and a refusal on the settings page: Provisioned
+// sign-in on a gateway the app cannot detect would show a tab that only fails
+// at sign-in. Messages name the config.yaml key and the env var that seeds it,
+// since either may be the source.
+func validateConnModes(cfg config) error {
+	switch cfg.connModes {
+	case connDirect, connProvisioned, connBoth:
+	default:
+		return fmt.Errorf("connModes=%q (config.yaml; seeded by SMU_CONN_MODES) must be one of %q, %q, %q", cfg.connModes, connDirect, connProvisioned, connBoth)
+	}
+	switch cfg.defaultConn {
+	case connDirect, connProvisioned:
+	default:
+		return fmt.Errorf("defaultConn=%q (config.yaml; seeded by SMU_DEFAULT_CONN) must be one of %q, %q", cfg.defaultConn, connDirect, connProvisioned)
+	}
+	if cfg.provisioned() && !cfg.hosted {
+		return fmt.Errorf("connModes=%q offers Provisioned sign-in but hosted is false (config.yaml; seeded by SMU_HOSTED), so the app cannot detect the gateway", cfg.connModes)
+	}
+	return nil
 }
 
 func envOr(key, def string) string {
@@ -42,102 +297,305 @@ func envOr(key, def string) string {
 	return def
 }
 
-func parseLogLevel(s string) slog.Level {
+// parseLogLevel is strict: the value persists in config.yaml, so a typo must
+// fail at startup rather than silently run at warn.
+func parseLogLevel(s string) (slog.Level, error) {
 	switch strings.ToLower(s) {
 	case "debug":
-		return slog.LevelDebug
+		return slog.LevelDebug, nil
 	case "info":
-		return slog.LevelInfo
+		return slog.LevelInfo, nil
+	case "warn":
+		return slog.LevelWarn, nil
 	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelWarn
+		return slog.LevelError, nil
+	}
+	return 0, errors.New("must be one of debug, info, warn, error")
+}
+
+// printVersionIfRequested handles the version query before any configuration is
+// read, so `--version` works on a gateway that would refuse to start. Extracted
+// from main so it is testable; main itself is not.
+func printVersionIfRequested(args []string, w io.Writer) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "--version", "-version", "version":
+		fmt.Fprintln(w, version)
+		return true
+	}
+	return false
+}
+
+// listenAddr is the gateway's one port: unprivileged, so the non-root image
+// binds it without a capability.
+const listenAddr = ":9443"
+
+// shutdownTimeout is how long a graceful shutdown waits for open connections
+// before it gives up and fails.
+const shutdownTimeout = 10 * time.Second
+
+func main() {
+	if printVersionIfRequested(os.Args[1:], os.Stdout) {
+		return
+	}
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	err := serve(process{
+		configFile: configFilePath,
+		appDir:     appRoot,
+		standard:   standardRootsFile,
+		log:        os.Stderr,
+		stdout:     os.Stdout,
+		listen:     func() (net.Listener, error) { return net.Listen("tcp", listenAddr) },
+		signals:    signals,
+		shutdown:   shutdownTimeout,
+		restart:    restartInPlace,
+	})
+	if err != nil {
+		os.Exit(1)
 	}
 }
 
-func main() {
-	cfg := loadConfig()
+// process is what serve takes from main: the operating system's pieces and
+// the shutdown deadline. main passes the real ones; tests pass a config.yaml in
+// a temp dir, a buffer, a loopback listener, their own signal channel and, to
+// overrun it, a short deadline, so a whole start and shutdown runs in a test.
+type process struct {
+	configFile string                       // config.yaml: configFilePath
+	appDir     string                       // the app's files: appRoot
+	standard   string                       // the standard root CA bundle: standardRootsFile; "" holds none
+	dataDir    string                       // holds the stores and the store key; "" keeps the fixed /data paths
+	log        io.Writer                    // every log line
+	stdout     io.Writer                    // the audit copy while audit.stdout is on: os.Stdout; nil discards
+	listen     func() (net.Listener, error) // listenAddr
+	signals    <-chan os.Signal             // SIGINT or SIGTERM: a graceful shutdown
+	shutdown   time.Duration                // shutdownTimeout
+	restart    func() error                 // starts the program again after a restart's shutdown: restartInPlace; tests count the call instead of exec'ing
+}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.logLevel}))
-	slog.SetDefault(logger)
+// serve is the gateway proper: it returns when a signal has shut it down (nil)
+// or when it cannot start or keep serving (the error, already logged; main
+// exits 1). A restart asked for from the console (restart.go) shuts down the
+// same way and then calls p.restart, which does not return when it works; if
+// it fails, the reason is logged and serve returns it, so main exits 1 and the
+// platform's restart policy takes over. A restart's shutdown that overruns its
+// deadline closes what is still open and restarts all the same.
+func serve(p process) error {
+	var restart bool
+	if err := serveUntilStopped(p, &restart); err != nil || !restart {
+		return err
+	}
+	// Everything serveUntilStopped opened is closed: the audit log, the stores,
+	// the listener.
+	if err := p.restart(); err != nil {
+		slog.New(slog.NewTextHandler(p.log, nil)).With("component", "gateway").Error("gateway restart failed: the program could not be started again, so the gateway is exiting for the platform's restart policy to start it", "err", err)
+		return err
+	}
+	return nil
+}
 
-	logger.Info("gateway starting",
-		"hosted", cfg.hosted,
-		"app_dir", cfg.appDir,
-		"cert_file", cfg.certFile,
-		"trust_dir", cfg.trustDir,
-		"insecure_skip_verify", cfg.insecureSkipVerify,
-	)
+// serveUntilStopped is serve up to the end of the shutdown; *restart is set
+// when the stop was the console's restart.
+func serveUntilStopped(p process, restart *bool) error {
+	// config.yaml first: the log level lives in it, so the real logger cannot
+	// exist yet. A bootstrap logger at the default level carries the one error
+	// that can happen before it.
+	configFile := p.configFile
+	boot := slog.New(slog.NewTextHandler(p.log, nil)).With("component", "gateway")
 
-	serverCert, err := loadOrGenerateServerCert(cfg.certFile, cfg.keyFile, logger)
+	// Before anything reads config.yaml: a store write the last process left
+	// half done is rolled back, or its leftovers are swept (fileutil.go). The
+	// data directory is the one config.yaml sits in, which is where the stores
+	// live too.
+	dataDir := p.dataDir
+	if dataDir == "" {
+		dataDir = filepath.Dir(configFile)
+	}
+	if err := recoverDataDir(dataDir, boot); err != nil {
+		boot.Error("data directory recovery failed", "err", err)
+		return err
+	}
+
+	load, err := resolveConfig(configFile)
+	if err != nil {
+		boot.Error("configuration failed", "err", err)
+		return err
+	}
+	cfg := load.cfg.inDataDir(p.dataDir)
+
+	// The live keys (live.go), the log level among them, are read per request
+	// from lv, so a save on the settings page reaches them without a restart.
+	lv := newLive(cfg)
+	// base is what each component's logger is made from; logger, the
+	// gateway's own lifecycle lines (start, the listener, the shutdown).
+	base := slog.New(slog.NewTextHandler(p.log, &slog.HandlerOptions{Level: &lv.level}))
+	logger := base.With("component", "gateway")
+
+	if load.seeded {
+		logger.Info("config file seeded from the environment; it is authoritative from now on", "path", configFile)
+	}
+	for _, o := range load.overrides {
+		logger.Warn("env var ignored, config.yaml wins", "env", o.Env, "key", o.Key, "env_value", o.EnvValue, "file_value", o.FileValue)
+	}
+	for _, s := range load.removed {
+		logger.Warn("setting no longer used, ignored", "setting", s.name, "instead", s.instead)
+	}
+	if len(load.tlsPathsIgnored) > 0 {
+		logger.Warn("config.yaml holds TLS paths that differ from the ones in use; they are ignored and dropped at the next save: the paths come from SMU_SSL_CERTFILE, SMU_SSL_CERTKEYFILE and SMU_SSL_TRUSTDIR at every start",
+			"keys", strings.Join(load.tlsPathsIgnored, "; "))
+	}
+
+	// The summary shows at every level: an operator diagnosing a denied
+	// client or the wrong mode needs it without raising the level first.
+	logStartup(p.log, cfg, configFile, p.appDir)
+
+	// A certificate replacement the last process left half done is rolled back
+	// (or its leftovers swept) before the pair is loaded.
+	tlsLog := base.With("component", "tls")
+	if err := recoverTLSPair(cfg.certFile, cfg.keyFile, tlsLog); err != nil {
+		logger.Error("TLS directory recovery failed", "err", err)
+		return err
+	}
+	serverCert, err := loadOrGenerateServerCert(cfg.certFile, cfg.keyFile, tlsLog)
 	if err != nil {
 		logger.Error("server certificate setup failed", "err", err)
-		os.Exit(1)
+		return err
 	}
 
-	trustPool, err := buildTrustPool(cfg.trustDir, logger)
+	trustPool, err := buildTrustPool(cfg.trustDir, tlsLog)
 	if err != nil {
 		logger.Error("trust pool setup failed", "err", err)
-		os.Exit(1)
-	}
-	if cfg.insecureSkipVerify {
-		logger.Warn("SSL_INSECURE_SKIP_VERIFY=true — upstream certificates will NOT be validated")
+		return err
 	}
 
-	hh := newHostedHandler(cfg.hosted)
-	pwa := newPWAHandler(cfg.appDir, logger)
-	rp := newReverseProxy(trustPool, cfg.insecureSkipVerify, logger)
+	// The certificate and the trust are held where the listener and every
+	// outbound connection read them when they connect, so the console can
+	// change either with no restart (tls.go). The holder warns when skipping
+	// verification is on.
+	trust := newTrustHolder(trustPool, cfg.insecureSkipVerify, tlsLog)
+	trust.holdStandard(loadStandardRoots(p.standard), cfg.standardRoots)
+	lv.bindTrust(trust)
+	tm := newTLSManager(cfg.certFile, cfg.keyFile, cfg.trustDir, newCertHolder(serverCert), trust, tlsLog)
+	upstream := newUpstreamTransport(trust)
+	// Files only (hosted: false): browsers reach brokers themselves, so the
+	// relay paths are refused, not left open.
+	var relay http.Handler = newReverseProxy(upstream, base.With("component", "direct-relay"))
+	if !cfg.hosted {
+		relay = http.HandlerFunc(refuseRelay)
+	}
 
-	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/hosted":
-			hh.ServeHTTP(w, r)
-		case isProxyPath(r.URL.Path):
-			rp.ServeHTTP(w, r)
-		default:
-			pwa.ServeHTTP(w, r)
-		}
-	})
+	// Provisioned sign-in and the /managed/* API; nil in Gateway mode, where
+	// /managed/* is a 404. A load failure is fatal: a misconfiguration must not
+	// fall back to an unauthenticated app. The connection modes were validated
+	// with the rest of config.yaml (resolveConfig).
+	auditOut := p.stdout
+	if auditOut == nil {
+		auditOut = io.Discard
+	}
+	mr, err := newManagedRouting(cfg, lv, configSource{path: configFile, data: load.data}, upstream, tm, auditOut, base)
+	if err != nil {
+		logger.Error("provisioned store load failed", "err", err)
+		return err
+	}
+	// POST /managed/restart asks for the same shutdown a signal does.
+	requestRestart, restartRequested := restartRequester()
+	if mr != nil {
+		defer func() { _ = mr.audit.close() }()
+		mr.setRestart(requestRestart)
+	}
 
-	handler := accessLog(root, logger)
+	// The mode's bundle must be there, or every page would be a 404: a
+	// packaging or mount fault stops the start, naming the file.
+	pwa, err := newPWAHandler(p.appDir, appIndexFile(mr != nil), base.With("component", "app"))
+	if err != nil {
+		logger.Error("app bundle check failed", "err", err)
+		return err
+	}
+	// /hosted, the health probe, answers 503 once the bundle is unusable.
+	hh := newHostedHandler(cfg.hosted, lv, pwa.ready)
+
+	// The admin console edits the stores, so it only exists in Provisioned
+	// mode, where they are served.
+	admin := newAdminHandler(p.appDir, cfg.hosted && mr != nil, base.With("component", "app"))
+	if admin.enabled {
+		logger.Info("administration app enabled", "path", adminPath)
+	}
+
+	root := newRootHandler(hh, admin, pwa, relay, mr)
+
+	// The client address is resolved once (trusted proxies) for the access
+	// log, the access list and the sign-in throttle, so every line names the
+	// same client. The access list sits inside the access log, so a denial is
+	// logged as a 403 like any other response (the ACL adds its own warn line
+	// with the reason), and so does a recovered handler panic (a 500).
+	accessLogger := base.With("component", "access")
+	handler := withClient(lv, accessLog(recoverPanics(clientACL(lv, root, accessLogger), base.With("component", "http")), accessLogger))
 
 	srv := &http.Server{
-		Addr:              ":9443",
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		TLSConfig: &tls.Config{
-			MinVersion:   tls.VersionTLS12,
-			Certificates: []tls.Certificate{serverCert},
+			MinVersion:     tls.VersionTLS12,
+			GetCertificate: tm.cert.getCertificate,
 		},
+		// net/http's own errors go to the same log, at info: they are mostly
+		// TLS handshakes a client gave up on. A handler panic never gets here
+		// (recoverPanics logs it at error).
+		ErrorLog: slog.NewLogLogger(base.With("component", "http").Handler(), slog.LevelInfo),
 	}
 
-	errCh := make(chan error, 1)
+	// The backup schedule runs in the gateway: the image has no cron. It
+	// stops at shutdown, after any backup it is writing.
+	backupCtx, stopBackups := context.WithCancel(context.Background())
+	defer stopBackups()
+	backupsDone := make(chan struct{})
+	if mr != nil {
+		go mr.backups.loop(backupCtx, time.After, backupsDone)
+	} else {
+		close(backupsDone)
+	}
+
+	ln, err := p.listen()
+	if err != nil {
+		logger.Error("listener failed", "err", err)
+		return err
+	}
+	served := make(chan error, 1)
 	go func() {
-		logger.Info("listening", "addr", srv.Addr)
-		if err := srv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		}
-		close(errCh)
+		logger.Info("listening", "addr", ln.Addr().String())
+		served <- srv.ServeTLS(ln, "", "")
 	}()
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
 	select {
-	case err, ok := <-errCh:
-		if ok && err != nil {
-			logger.Error("listener failed", "err", err)
-			os.Exit(1)
-		}
-	case sig := <-sigCh:
+	case err := <-served:
+		// Before a shutdown, ServeTLS returns only when it fails.
+		logger.Error("listener failed", "err", err)
+		return err
+	case sig := <-p.signals:
 		logger.Info("shutdown signal received", "signal", sig.String())
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(ctx); err != nil {
-			logger.Error("graceful shutdown failed", "err", err)
-			os.Exit(1)
-		}
-		logger.Info("shutdown complete")
+	case <-restartRequested:
+		logger.Info("restart requested from the administration console; shutting down to start the program again")
+		*restart = true
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), p.shutdown)
+	defer cancel()
+	err = srv.Shutdown(ctx)
+	stopBackups()
+	<-backupsDone
+	if err != nil {
+		if *restart && errors.Is(err, context.DeadlineExceeded) {
+			// The restart the administrator asked for goes ahead: the exec
+			// would cut what is still open anyway. A signal's overrun fails.
+			logger.Warn("graceful shutdown overran its deadline; closing the connections still open and starting the program again", "timeout", p.shutdown.String())
+			_ = srv.Close()
+			return nil
+		}
+		logger.Error("graceful shutdown failed", "err", err)
+		return err
+	}
+	logger.Info("shutdown complete")
+	return nil
 }

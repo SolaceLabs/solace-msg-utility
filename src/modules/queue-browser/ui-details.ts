@@ -1,15 +1,19 @@
-import { ui } from './ui-core.js';
+import { ui, NOTICE_TOAST_MS } from './ui-core.js';
 import { state } from './state.js';
-import { escapeHtml } from '../../core/utils';
+import { errMessage, escapeHtml } from '../../core/utils';
 import { logger } from '../../core/logger';
+import { showToast } from '../../core/toast';
 import { showPayload } from './features.js';
-import { BLOB_URL_REVOKE_DELAY_MS } from './constants.js';
+import { bytesToBase64, contentFileName } from './payload.js';
+import { detectKind, imageSize, MAX_PREVIEW_PIXELS, type PreviewImage } from './file-kind.js';
+import { toJsonValue } from './sdt.js';
+import { downloadBlob, saveBlob } from '../../core/download';
 import type { AppContext } from '../../core/types';
+
+const log = logger.withTag('queue-browser');
 
 // ui-details.ts - Message Details & Properties
 // Initialized via initDetails(ctx) which closes over AppContext for copyToClipboard.
-
-declare const JSZip: any;
 
 export function initDetails(ctx: AppContext) {
 
@@ -19,25 +23,23 @@ export function initDetails(ctx: AppContext) {
     };
 
     ui.triggerDownloadBlob = function (blob: Blob, filename: string) {
-        const url = URL.createObjectURL(blob);
-        if (!url) {
-            logger.warn('[ui-details] createObjectURL returned null — download aborted');
-            return;
-        }
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), BLOB_URL_REVOKE_DELAY_MS);
+        downloadBlob(blob, filename);
     };
 
+    /**
+     * Save the message's body: its original bytes (a binary attachment, or a
+     * map's or stream's wire bytes), else its text, always as
+     * application/octet-stream so the browser never opens it, under the name
+     * contentFileName() suggests. Called from the click: the save dialog
+     * needs the user's gesture.
+     */
     ui.downloadMessageContent = function (msg: any) {
         if (!msg) return;
-        const filename = `solace-message-${msg.id.replace(/[^a-zA-Z0-9-_]/g, '')}`;
-        const content = msg.content || '';
-        ui.triggerDownload(filename, content);
+        const name = contentFileName(msg);
+        saveBlob(new Blob([msg.bytes ?? msg.content], { type: 'application/octet-stream' }), name).catch((e: unknown) => {
+            log.error(`Could not save ${name}`, e);
+            showToast(`Could not save ${name}: ${errMessage(e)}`, 'error', NOTICE_TOAST_MS);
+        });
     };
 
     ui.getFullMessageJson = function (msg: any) {
@@ -49,8 +51,12 @@ export function initDetails(ctx: AppContext) {
                 messageType: msg.type
             },
             applicationProperties: msg.appProperties,
-            payload: msg.content
+            // A binary payload rides as base64, flagged so a reader can decode it; text stays text.
+            // A map or stream rides as its wire bytes too, with its fields decoded beside them.
+            payload: msg.binary || msg.sdt ? bytesToBase64(msg.bytes) : msg.content
         };
+        if (msg.binary || msg.sdt) fullObj.payloadEncoding = 'base64';
+        if (msg.sdt) fullObj.payloadDecoded = toJsonValue(msg.sdt);
 
         // _originalMsg is set by service-events.onMessage for every broker-delivered
         // message and is always present here. getDestination() can still return null
@@ -60,11 +66,11 @@ export function initDetails(ctx: AppContext) {
             if (dest) {
                 fullObj.messageProperties.destination.name = dest.getName();
                 const dType = dest.getType();
-                if (dType === (window as any).solace.DestinationType.TOPIC) fullObj.messageProperties.destination.type = 'Topic';
-                else if (dType === (window as any).solace.DestinationType.QUEUE) fullObj.messageProperties.destination.type = 'Queue';
+                if (dType === window.solace.DestinationType.TOPIC) fullObj.messageProperties.destination.type = 'Topic';
+                else if (dType === window.solace.DestinationType.QUEUE) fullObj.messageProperties.destination.type = 'Queue';
                 else fullObj.messageProperties.destination.type = dType.toString();
             }
-        } catch (e) { logger.warn('Failed to extract destination details', e); }
+        } catch (e) { log.warn('Failed to extract destination details', e); }
         return fullObj;
     };
 
@@ -75,11 +81,91 @@ export function initDetails(ctx: AppContext) {
         ui.triggerDownload(filename, JSON.stringify(fullObj, null, 2), 'application/json');
     };
 
+    // The shown image's object URL, revoked when the pane moves on.
+    let previewUrl: string | null = null;
+
+    /** Put the Content Preview box back in place of the image, and let the image's bytes go. */
+    function hideContent(): void {
+        const els = ui.getElements();
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        previewUrl = null;
+        els.detailPreview.onerror = null;
+        els.detailPreview.removeAttribute('src');
+        els.detailPreview.classList.add('hidden');
+        els.detailContent.classList.remove('hidden');
+        els.btnShowContent.textContent = 'Show content';
+    }
+
+    /** Back to the box alone: no Show content button and no note. */
+    function resetBinary(): void {
+        const els = ui.getElements();
+        hideContent();
+        els.btnShowContent.classList.add('hidden');
+        els.detailBinaryNote.classList.add('hidden');
+        els.detailBinaryNote.textContent = '';
+    }
+
+    function note(text: string): void {
+        const els = ui.getElements();
+        els.detailBinaryNote.textContent = text;
+        els.detailBinaryNote.classList.remove('hidden');
+    }
+
+    /**
+     * Swap the Content Preview box for the image, or back. Nothing decodes
+     * the image until the user asks. The bytes are attachmentBytes()'s own
+     * copy, so an ArrayBuffer backs them (a Blob takes no shared memory).
+     */
+    function toggleContent(bytes: Uint8Array<ArrayBuffer>, image: PreviewImage): void {
+        const els = ui.getElements();
+        if (previewUrl) {
+            hideContent();
+            return;
+        }
+        previewUrl = URL.createObjectURL(new Blob([bytes], { type: image }));
+        // Undecodable after all: back to the box, without the button, and say
+        // why. Cleared whenever the image goes, so a late event cannot reach
+        // the next message's box.
+        els.detailPreview.onerror = () => {
+            resetBinary();
+            note('The image could not be decoded.');
+        };
+        els.detailPreview.src = previewUrl;
+        els.detailPreview.classList.remove('hidden');
+        els.detailContent.classList.add('hidden');
+        els.btnShowContent.textContent = 'Hide content';
+    }
+
+    /**
+     * Offer Show content for a binary payload that is an image of the four
+     * kinds the pane may show, when its header declares a size within
+     * MAX_PREVIEW_PIXELS (read from the header; nothing is decoded). Another
+     * image says why it is not shown; any other payload has no button.
+     */
+    function showBinary(msg: any): void {
+        const els = ui.getElements();
+        resetBinary();
+        if (!msg.binary) return;
+        const image = detectKind(msg.bytes)?.image;
+        if (!image) return;
+        const size = imageSize(msg.bytes, image);
+        if (!size) {
+            note('Not shown: the image\'s header does not say how large it is.');
+            return;
+        }
+        if (size.width * size.height > MAX_PREVIEW_PIXELS) {
+            note(`Not shown: the image's header says it is ${size.width} x ${size.height} pixels, more than the ${MAX_PREVIEW_PIXELS / 1_000_000}-megapixel limit.`);
+            return;
+        }
+        els.btnShowContent.classList.remove('hidden');
+        els.btnShowContent.onclick = () => toggleContent(msg.bytes, image);
+    }
+
     ui.selectMessage = function (id: string) {
         const els = ui.getElements();
 
         // Highlight row
-        els.msgList.querySelectorAll('tr').forEach((tr: any) => {
+        els.msgList.querySelectorAll('tr').forEach((tr: HTMLTableRowElement) => {
             if (tr.dataset.id === id) tr.classList.add('selected');
             else tr.classList.remove('selected');
         });
@@ -100,8 +186,8 @@ export function initDetails(ctx: AppContext) {
                 els.detailDest.textContent = destName;
                 const destType = dest.getType();
                 let typeLabel = destType.toString();
-                if (destType === (window as any).solace.DestinationType.TOPIC) typeLabel = 'Topic';
-                else if (destType === (window as any).solace.DestinationType.QUEUE) typeLabel = 'Queue';
+                if (destType === window.solace.DestinationType.TOPIC) typeLabel = 'Topic';
+                else if (destType === window.solace.DestinationType.QUEUE) typeLabel = 'Queue';
                 els.detailDestBadge.textContent = typeLabel;
             } else {
                 els.detailDest.textContent = 'N/A';
@@ -127,11 +213,13 @@ export function initDetails(ctx: AppContext) {
 
             // Payload preview + raw/copy-content actions exist only in the show-payload
             // flavor; their elements were removed in the no-payload flavor.
+            // A true binary payload shows its placeholder (its kind and size); there is no text to copy.
             if (showPayload()) {
                 els.detailContent.textContent = msg.content;
                 els.btnShowRaw.disabled = false;
                 els.btnShowRaw.onclick = () => ui.showRawContent(msg);
-                els.btnCopyContent.disabled = false;
+                els.btnCopyContent.disabled = msg.binary === true;
+                showBinary(msg);
             }
 
             els.btnCopyDest.disabled = false;
@@ -160,13 +248,14 @@ export function initDetails(ctx: AppContext) {
             els.detailContent.textContent = '';
             els.btnShowRaw.disabled = true;
             els.btnCopyContent.disabled = true;
+            resetBinary();
         }
         els.btnCopyDest.disabled = true;
         els.btnCopyReplMsgId.disabled = true;
         els.detailTypeBadge.classList.add('hidden');
         els.detailDestBadge.classList.add('hidden');
 
-        els.msgList.querySelectorAll('tr.selected').forEach((tr: any) => tr.classList.remove('selected'));
+        els.msgList.querySelectorAll('tr.selected').forEach((tr: Element) => tr.classList.remove('selected'));
     };
 
     ui.createTag = function (container: HTMLElement, key: string, val: any) {
@@ -234,7 +323,7 @@ export function initDetails(ctx: AppContext) {
         row.innerHTML = `
             <input type="text" class="form-control prop-key" placeholder="Key" list="standard-properties-list" value="${escapeHtml(key)}">
             <input type="text" class="form-control prop-value" placeholder="Value" value="${escapeHtml(value)}">
-            <button class="btn-icon btn-remove-prop" title="Remove" style="color: var(--status-disconnected);">
+            <button class="btn-icon btn-icon-danger btn-remove-prop" title="Remove">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="10"></circle>
                     <line x1="15" y1="9" x2="9" y2="15"></line>
@@ -263,9 +352,9 @@ export function initDetails(ctx: AppContext) {
 
         const rows = container.querySelectorAll('.property-filter-row');
         const filters: { key: string; value: string }[] = [];
-        rows.forEach((row: any) => {
-            const key = row.querySelector('.prop-key').value.trim();
-            const value = row.querySelector('.prop-value').value.trim();
+        rows.forEach((row: Element) => {
+            const key = (row.querySelector('.prop-key') as HTMLInputElement).value.trim();
+            const value = (row.querySelector('.prop-value') as HTMLInputElement).value.trim();
             if (key) {
                 filters.push({ key, value });
             }

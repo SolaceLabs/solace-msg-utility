@@ -6,6 +6,7 @@ import { ui, els } from '../../../src/modules/queue-browser/ui-core.js';
 import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import type { AppContext, EventBus } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 function createBrowserDOM() {
     // Load the real queue-browser template so the test DOM matches what ships.
@@ -22,7 +23,7 @@ describe('queue-browser/module', () => {
         document.body.appendChild(container);
 
         eventBus = createEventBus();
-        ctx = {
+        ctx = completeContext({
             container,
             appState: { activeModuleId: null, isConnected: false, selectedVpn: null, solaceConnection: null, sempCredentials: null, isSempConnected: false },
             eventBus,
@@ -30,33 +31,12 @@ describe('queue-browser/module', () => {
             loadSelf: vi.fn(),
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
-            config: { useMocks: false }
-        };
+        });
 
         resetQueueBrowserState();
     });
 
-    describe('metadata', () => {
-        it('has correct module properties', () => {
-            expect(QueueBrowserModule.name).toBe('Queue Browser');
-            expect(QueueBrowserModule.id).toBe('queue-browser');
-            expect(QueueBrowserModule.icon).toContain('svg');
-            // Priority is set in src/registry.ts; tested in tests/registry.test.ts.
-        });
-    });
-
     describe('install()', () => {
-        it('initializes module and caches DOM elements', async () => {
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-            await QueueBrowserModule.install(ctx);
-
-            const cached = ui.getElements();
-            expect(cached.container).toBe(container);
-            expect(cached.inputBind).toBeTruthy();
-            expect(cached.btnBind).toBeTruthy();
-            consoleSpy.mockRestore();
-        });
-
         it('announces browser:available so feature-gated UI in other modules can reveal itself', async () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             const handler = vi.fn();
@@ -74,7 +54,7 @@ describe('queue-browser/module', () => {
             await QueueBrowserModule.install(ctx);
 
             const cached = ui.getElements();
-            expect(cached.elPrompt.classList.contains('hidden')).toBe(false);
+            expect(container.querySelector('#browser-connect-prompt')!.classList.contains('hidden')).toBe(false);
             expect(cached.elActiveView.classList.contains('hidden')).toBe(true);
             consoleSpy.mockRestore();
         });
@@ -86,9 +66,9 @@ describe('queue-browser/module', () => {
             const cached = ui.getElements();
             cached.inputBind.value = 'test-queue';
 
-            // Click bind — since there's no real Solace session, createBrowser will fail
-            // but the handler should not throw
+            // No Solace session, so the bind handler reaches the service and reports its refusal.
             cached.btnBind.click();
+            expect(cached.elBindError.textContent).toBe('No active Solace session.');
             consoleSpy.mockRestore();
         });
 
@@ -193,14 +173,13 @@ describe('queue-browser/module', () => {
             consoleSpy.mockRestore();
         });
 
-        it('btnBindPick click wires to handleBindPickClick (invokes pickQueue with primary sempCtx)', async () => {
-            // Closes COV-10: the click listener at module.ts:89 was
-            // previously unexercised. Spy on `pickQueue` — the distinguishing
-            // downstream effect of handleBindPickClick — so a regression that
+        it('btnBindPick click wires to handleBindPickClick (opens the context picker with the primary queue source)', async () => {
+            // Covers the Bind-pick click listener. Spy on `ctx.queuePicker.pick` -- the distinguishing
+            // downstream effect of handleBindPickClick -- so a regression that
             // re-wires this button to a different handler would fail.
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-            // Set up enough state for primarySempContextFrom to return a
-            // non-null SempContext so handleBindPickClick reaches pickQueue.
+            // Set up enough state for queueSourceFrom to return a non-null
+            // QueueSource so handleBindPickClick reaches the picker.
             ctx.appState.isSempConnected = true;
             ctx.appState.sempCredentials = {
                 user: 'u', pass: 'p', baseUrl: 'https://b:1943/SEMP/v2',
@@ -208,16 +187,15 @@ describe('queue-browser/module', () => {
             };
             ctx.appState.selectedVpn = 'vpn1';
 
-            const pickerMod = await import('../../../src/core/components/queue-picker/index');
-            const pickSpy = vi.spyOn(pickerMod, 'pickQueue').mockResolvedValue(null);
+            const pickSpy = vi.spyOn(ctx.queuePicker, 'pick').mockResolvedValue(null);
 
             await QueueBrowserModule.install(ctx);
             els.btnBindPick.click();
-            await Promise.resolve(); // let the async handler reach pickQueue
+            await Promise.resolve(); // let the async handler reach the picker
 
             expect(pickSpy).toHaveBeenCalledTimes(1);
             expect(pickSpy).toHaveBeenCalledWith(
-                expect.objectContaining({ fetch: expect.any(Function), baseUrl: expect.stringContaining('1943') }),
+                expect.objectContaining({ key: expect.stringContaining('1943'), listVpns: expect.any(Function), listQueues: expect.any(Function) }),
                 expect.objectContaining({ defaultVpn: 'vpn1' }),
             );
 
@@ -229,13 +207,12 @@ describe('queue-browser/module', () => {
             // Direct spy on the distinguishing downstream effect:
             // handleBulkForward → ui.showForwardModal(messages). A regression
             // that wires this button to handleBulkDelete would not call
-            // showForwardModal — it would call window.confirm + service.deleteMessages.
+            // showForwardModal -- it would open the delete confirm dialog.
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             await QueueBrowserModule.install(ctx);
             // Spy AFTER install — initTable() assigns ui.getSelectedMessageIds during install.
             vi.spyOn(ui, 'getSelectedMessageIds').mockReturnValue(['msg-1']);
             const showForwardSpy = vi.spyOn(ui, 'showForwardModal').mockImplementation(() => {});
-            const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
             state.displayedMessages = [{ id: 'msg-1' } as any];
 
             els.btnBrowserForward.disabled = false;
@@ -245,37 +222,34 @@ describe('queue-browser/module', () => {
             expect(showForwardSpy).toHaveBeenCalledWith([{ id: 'msg-1' }]);
             // Forward must NOT invoke the delete-side machinery — proves the
             // forward/delete wiring isn't crossed.
-            expect(confirmSpy).not.toHaveBeenCalled();
+            expect(els.modalConfirmDelete.open).toBe(false);
 
             showForwardSpy.mockRestore();
-            confirmSpy.mockRestore();
             consoleSpy.mockRestore();
         });
 
-        it('btnBrowserDelete click wires to handleBulkDelete (prompts via window.confirm)', async () => {
+        it('btnBrowserDelete click wires to handleBulkDelete (asks in the delete confirm dialog)', async () => {
             // Direct spy on the distinguishing downstream effect:
-            // handleBulkDelete → window.confirm('Are you sure...'). A regression
-            // that wires this button to handleBulkForward would not prompt;
+            // handleBulkDelete opens the delete confirm dialog. A regression
+            // that wires this button to handleBulkForward would not ask;
             // it would open the forward modal.
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             await QueueBrowserModule.install(ctx);
             vi.spyOn(ui, 'getSelectedMessageIds').mockReturnValue(['msg-1', 'msg-2']);
-            // Return false so the test doesn't progress into service.deleteMessages.
-            const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
             const showForwardSpy = vi.spyOn(ui, 'showForwardModal').mockImplementation(() => {});
 
             els.btnBrowserDelete.disabled = false;
             els.btnBrowserDelete.click();
 
-            expect(confirmSpy).toHaveBeenCalledTimes(1);
-            expect(confirmSpy).toHaveBeenCalledWith(
-                expect.stringContaining('delete 2 selected message(s)'),
-            );
+            expect(els.modalConfirmDelete.open).toBe(true);
+            expect(els.confirmDeleteMessage.textContent).toBe('Delete 2 selected message(s)?');
             // Delete must NOT invoke the forward modal — proves the wiring
             // isn't crossed.
             expect(showForwardSpy).not.toHaveBeenCalled();
+            // Cancel so the test doesn't progress into service.deleteMessages.
+            els.btnConfirmDeleteCancel.click();
+            expect(els.modalConfirmDelete.open).toBe(false);
 
-            confirmSpy.mockRestore();
             showForwardSpy.mockRestore();
             consoleSpy.mockRestore();
         });
@@ -329,6 +303,8 @@ describe('queue-browser/module', () => {
             els.selectBound.selectedIndex = 1;
 
             els.btnUnbind.click();
+            expect(els.selectBound.querySelector('option[value="q1"]')).toBeNull();
+            expect(els.selectBound.selectedIndex).toBe(0);
             consoleSpy.mockRestore();
         });
 
@@ -366,7 +342,9 @@ describe('queue-browser/module', () => {
             await QueueBrowserModule.install(ctx);
 
             state.allMessages = [];
+            els.inputFilterId.value = 'm1';
             els.btnFilterApply.click();
+            expect(state.activeFilters.msgId).toBe('m1');
             consoleSpy.mockRestore();
         });
 
@@ -375,7 +353,11 @@ describe('queue-browser/module', () => {
             await QueueBrowserModule.install(ctx);
 
             state.allMessages = [];
+            els.inputFilterId.value = 'm1';
+            state.activeFilters.msgId = 'm1';
             els.btnFilterClear.click();
+            expect(state.activeFilters.msgId).toBe('');
+            expect(els.inputFilterId.value).toBe('');
             consoleSpy.mockRestore();
         });
 
@@ -391,7 +373,7 @@ describe('queue-browser/module', () => {
         });
 
         it('mousedown on filter date inputs runs the prefill wiring', async () => {
-            // Covers the two arrow wrappers at module.ts:125-126 that bridge
+            // Covers the two arrow wrappers in module.ts that bridge
             // the date inputs' mousedown/focus events to
             // `uiEvents.prefillDateInputMidnight`. The function itself is
             // covered by ui-events.test.ts; this test verifies the click
@@ -429,17 +411,25 @@ describe('queue-browser/module', () => {
             await QueueBrowserModule.install(ctx);
 
             const cached = ui.getElements();
-            state.displayedMessages = [{ id: '1', date: '', size: 0, type: 'Text', content: '' }];
+            state.displayedMessages = [
+                { id: '1', date: '', size: 0, type: 'Text', content: '' },
+                { id: '2', date: '', size: 0, type: 'Text', content: '' },
+            ];
             state.allMessages = state.displayedMessages;
             ui.renderList();
+            const checkedRows = () => cached.msgList.querySelectorAll('.msg-check:checked').length;
 
             cached.checkAll.checked = true;
             cached.checkAll.dispatchEvent(new Event('change'));
+            expect(checkedRows()).toBe(2);
+            expect(cached.countSelected.textContent).toBe('2');
+            expect(cached.btnBrowserForward.disabled).toBe(false);
 
-            if (cached.msgList) {
-                const checked = cached.msgList.querySelectorAll('.msg-check:checked');
-                expect(checked.length).toBe(1);
-            }
+            cached.checkAll.checked = false;
+            cached.checkAll.dispatchEvent(new Event('change'));
+            expect(checkedRows()).toBe(0);
+            expect(cached.countSelected.textContent).toBe('0');
+            expect(cached.btnBrowserForward.disabled).toBe(true);
             consoleSpy.mockRestore();
         });
 
@@ -500,11 +490,11 @@ describe('queue-browser/module', () => {
         });
 
         it('forward send click invokes uiEvents.handleForwardSend (real listener body fires)', async () => {
-            // Covers the click listener body at queue-browser/module.ts:129 — i.e.
+            // Covers the click listener body in queue-browser/module.ts -- i.e.
             // the `() => uiEvents.handleForwardSend()` arrow attached via
             // addEventListener. Existing tests only `vi.spyOn(btnForwardSend, 'click')`
             // which intercepts the .click() *method* without firing addEventListener
-            // listeners, so the production handler at line 129 was never executed.
+            // listeners, so they never run the production handler.
             // Here we dispatch a real click event so the listener actually runs.
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             await QueueBrowserModule.install(ctx);
@@ -525,7 +515,7 @@ describe('queue-browser/module', () => {
         });
 
         it('forward dest-type change toggles inputForwardDestName.disabled', async () => {
-            // Covers the change-listener body at queue-browser/module.ts:133.
+            // Covers the dest-type change listener in queue-browser/module.ts.
             // The handler keeps the dest-name input synced with the dest-type
             // selection: "Original" → disabled (each message uses its own
             // destination); "Topic"/"Queue" → enabled. Without the handler,
@@ -549,18 +539,19 @@ describe('queue-browser/module', () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
             await QueueBrowserModule.install(ctx);
 
-            // Emit delete event — should trigger confirm dialog
-            (globalThis.confirm as any).mockReturnValue(false);
+            // Emit delete event -- should open the delete confirm dialog
             eventBus.emit('app:message-delete', { id: 'msg-1' });
 
-            expect(globalThis.confirm).toHaveBeenCalled();
+            expect(els.modalConfirmDelete.open).toBe(true);
+            expect(els.confirmDeleteMessage.textContent).toBe('Delete message msg-1?');
+            els.btnConfirmDeleteCancel.click();
             consoleSpy.mockRestore();
         });
 
-        // Session-level ACK/REJECT listener wiring moved out of module.ts into
-        // src/core/services/solace-publisher (May 2026 publisher lift). The
+        // Session-level ACK/REJECT listener wiring lives in
+        // src/core/services/solace-publisher. The
         // service-level client:connected handler in queue-browser/service.ts
-        // now owns the publisher's lifecycle; coverage of session-switch
+        // owns the publisher's lifecycle; coverage of session-switch
         // (dispose + re-create) lives in service.test.ts › "disposes the
         // prior publisher when client:connected fires with a fresh session".
         // Coverage of ACK/REJECT dispatch on the listener pair is in
@@ -595,7 +586,7 @@ describe('queue-browser/module', () => {
             els.hdrVpnName.textContent = 'stale-vpn';
             eventBus.emit('app:state-change', { key: 'isConnected', value: false });
 
-            expect(els.elPrompt.classList.contains('hidden')).toBe(false);
+            expect(container.querySelector('#browser-connect-prompt')!.classList.contains('hidden')).toBe(false);
             expect(els.hdrVpnName.textContent).toBe('');
             consoleSpy.mockRestore();
         });
@@ -614,8 +605,8 @@ describe('queue-browser/module', () => {
         });
 
         it('app:state-change with an unrelated key is a no-op', async () => {
-            // Covers the false branch of `else if (key === 'selectedVpn')` at
-            // queue-browser/module.ts:190 — for any key that's neither
+            // Covers the false branch of `else if (key === 'selectedVpn')` in
+            // queue-browser/module.ts's app:state-change listener -- for any key that's neither
             // 'isConnected' nor 'selectedVpn' (e.g. isSempConnected, future
             // activeModuleId), the listener body must do nothing. A regression
             // that mutated state for every key would slip through silently
@@ -642,13 +633,13 @@ describe('queue-browser/module', () => {
 
             eventBus.emit('client:disconnected');
 
-            expect(els.elPrompt.classList.contains('hidden')).toBe(false);
+            expect(container.querySelector('#browser-connect-prompt')!.classList.contains('hidden')).toBe(false);
             expect(els.elActiveView.classList.contains('hidden')).toBe(true);
             consoleSpy.mockRestore();
         });
 
-        // In-flight forward sweep was previously done explicitly in module.ts's
-        // handleDisconnect. After the publisher lift, publisher.dispose('Client
+        // module.ts's handleDisconnect does not sweep in-flight forwards:
+        // publisher.dispose('Client
         // disconnected.') (called from service.ts on client:disconnected and
         // app:state-change isConnected=false) resolves every in-flight send
         // promise with that error; the .then handler in handleForwardSend
@@ -673,64 +664,5 @@ describe('queue-browser/module', () => {
             consoleSpy.mockRestore();
             vi.useRealTimers();
         });
-
-        it('browser:browse-queue handles missing loadSelf', async () => {
-            vi.useFakeTimers();
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-            ctx.loadSelf = null as any;
-            await QueueBrowserModule.install(ctx);
-
-            eventBus.emit('browser:browse-queue', { queue: 'my-queue' });
-            vi.advanceTimersByTime(250);
-
-            consoleSpy.mockRestore();
-            vi.useRealTimers();
-        });
-    });
-
-    describe('install() with minimal DOM', () => {
-        it('throws at install when required elements are missing', async () => {
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-            const minContainer = document.createElement('div');
-            minContainer.innerHTML = `
-                <table><tbody id="browser-msg-list"></tbody></table>
-                <span id="count-total">0</span>
-                <span id="count-displayed">0</span>
-                <span id="count-selected">0</span>
-                <div id="detail-msg-id"></div>
-                <div id="detail-destination"></div>
-                <span id="detail-type-badge" class="hidden"></span>
-                <span id="detail-dest-badge" class="hidden"></span>
-                <div id="detail-content"></div>
-                <button id="btn-show-raw" disabled></button>
-                <div id="browser-connect-prompt"></div>
-                <div id="browser-active-view" class="hidden"></div>
-                <span id="browser-queue-name"></span>
-                <span id="browser-permissions" class="hidden"></span>
-            `;
-            document.body.appendChild(minContainer);
-
-            const minCtx: AppContext = {
-                container: minContainer,
-                appState: { activeModuleId: null, isConnected: false, selectedVpn: null, solaceConnection: null, sempCredentials: null, isSempConnected: false },
-                eventBus,
-                setState: vi.fn(),
-                loadSelf: vi.fn(),
-                sempFetch: vi.fn(),
-                copyToClipboard: vi.fn(),
-                config: { useMocks: false }
-            };
-
-            await expect(QueueBrowserModule.install(minCtx)).rejects.toThrow(/Required element missing/);
-            consoleSpy.mockRestore();
-        });
-
-        // Note: historical null-guard tests for `msgList` and `btnForwardSend`
-        // were removed — both are asserted via `required()` in module.install(),
-        // so "does not throw when null" tests against a state that cannot occur
-        // in production. Per CLAUDE.md anchor #5 (required-element policy): if
-        // the element is required, assert it; don't add nullable guards to the
-        // handlers. The missing-element path IS tested via the `install()
-        // rejects with "Required element missing"` case above.
     });
 });

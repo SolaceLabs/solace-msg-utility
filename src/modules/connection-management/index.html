@@ -1,0 +1,139 @@
+<!-- The admin gate is created at install by createGate() (see module.ts). -->
+
+<!-- List view -->
+<div id="conn-mgmt-list-view" class="card hidden">
+    <!-- The page's name is the sidebar's; the card opens with its actions, then
+         the search on a row of its own across the card. -->
+    <div class="flex-row justify-end items-center gap-4 mb-4">
+        <button id="btn-conn-mgmt-refresh" class="btn btn-secondary" title="Reload the connection list">Refresh</button>
+        <button id="btn-conn-mgmt-add" class="btn btn-primary">Add connection</button>
+    </div>
+    <input type="search" id="conn-mgmt-search" class="form-control mb-4"
+        placeholder="Search connections (* = any)" aria-label="Search connections" autocomplete="off">
+    <div class="data-table-frame">
+        <table class="data-table">
+            <thead>
+                <tr><th>Broker</th><th>Host</th><th class="data-table-actions">Actions</th></tr>
+            </thead>
+            <tbody id="conn-mgmt-rows"></tbody>
+        </table>
+    </div>
+    <div id="conn-mgmt-list-error" class="text-error mt-2 hidden text-body-sm"></div>
+</div>
+
+<!-- Create / edit form view -->
+<div id="conn-mgmt-form-view" class="card hidden">
+    <div class="flex-row justify-between items-center mb-4">
+        <h2 id="conn-mgmt-form-title" class="card-title">Add connection</h2>
+    </div>
+    <div class="form-group flex-row">
+        <div class="w-full">
+            <label for="conn-mgmt-broker">Broker name</label>
+            <input type="text" id="conn-mgmt-broker" class="form-control" autocomplete="off">
+        </div>
+        <!-- One hostname for a software or cloud broker, two for an appliance
+             (core/connections/broker-hosts.ts). -->
+        <div class="w-full">
+            <label>Solace Event Broker Type</label>
+            <div class="segmented" id="conn-mgmt-broker-type" role="group" aria-label="Solace Event Broker Type">
+                <button type="button" class="segmented-option" data-broker-type="software" aria-pressed="true">Software / Cloud</button>
+                <button type="button" class="segmented-option" data-broker-type="appliance" aria-pressed="false">Appliance</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Each address is one row, read as a URL: scheme, hostname, port, then
+         the path the broker sits under when a reverse proxy serves it: a small
+         "+ URL path" button on the labels' line until a path is added
+         (core/optional-field.ts). A line sets each section off from the one
+         above. -->
+    <hr class="divider">
+    <h3 class="card-subtitle">SEMP (management)</h3>
+    <div class="form-group flex-row">
+        <div class="conn-mgmt-scheme">
+            <label>Scheme</label>
+            <div class="segmented" id="conn-mgmt-semp-scheme" role="group" aria-label="SEMP scheme">
+                <button type="button" class="segmented-option" data-scheme="https" aria-pressed="true" title="TLS">https</button>
+                <button type="button" class="segmented-option" data-scheme="http" aria-pressed="false" title="Plain, no TLS">http</button>
+            </div>
+        </div>
+        <div class="conn-mgmt-host">
+            <label id="lbl-conn-mgmt-hostname" for="conn-mgmt-hostname">Hostname</label>
+            <input type="text" id="conn-mgmt-hostname" class="form-control" autocomplete="off">
+        </div>
+        <div class="conn-mgmt-port">
+            <label for="conn-mgmt-semp-port">Port</label>
+            <input type="text" id="conn-mgmt-semp-port" class="form-control" autocomplete="off">
+        </div>
+        <div id="conn-mgmt-semp-path-field" class="optional-field">
+            <label for="conn-mgmt-semp-path">URL path</label>
+            <div class="optional-field-input">
+                <input type="text" id="conn-mgmt-semp-path" class="form-control" autocomplete="off">
+                <button type="button" id="btn-conn-mgmt-semp-path-clear" class="btn-icon optional-field-clear"
+                    title="Remove the URL path" aria-label="Remove the SEMP URL path">&#x2715;</button>
+            </div>
+            <button type="button" id="btn-conn-mgmt-semp-path-add" class="btn btn-secondary btn-sm optional-field-add"
+                title="Add a path after the port, before /SEMP (for a broker behind a reverse proxy)">+ URL path</button>
+        </div>
+    </div>
+    <div class="form-group flex-row">
+        <div class="w-full">
+            <label for="conn-mgmt-semp-user">Username</label>
+            <input type="text" id="conn-mgmt-semp-user" class="form-control" autocomplete="off">
+        </div>
+        <div class="w-full">
+            <label for="conn-mgmt-semp-pass">Password <span id="conn-mgmt-semp-pass-hint" class="text-secondary"></span></label>
+            <input type="password" id="conn-mgmt-semp-pass" class="form-control" autocomplete="new-password">
+        </div>
+    </div>
+
+    <hr class="divider">
+    <h3 class="card-subtitle">Client (messaging)</h3>
+    <div class="form-group flex-row">
+        <div class="conn-mgmt-scheme">
+            <label>Scheme</label>
+            <div class="segmented" id="conn-mgmt-client-scheme" role="group" aria-label="Client scheme">
+                <button type="button" class="segmented-option" data-scheme="wss" aria-pressed="true" title="TLS">wss</button>
+                <button type="button" class="segmented-option" data-scheme="ws" aria-pressed="false" title="Plain, no TLS">ws</button>
+            </div>
+        </div>
+        <div class="conn-mgmt-host">
+            <label for="conn-mgmt-client-hostname">Messaging hostname</label>
+            <input type="text" id="conn-mgmt-client-hostname" class="form-control" autocomplete="off" disabled>
+            <small id="conn-mgmt-client-hostname-hint" class="text-secondary text-xs">Follows the hostname above. Choose Appliance to set its own.</small>
+        </div>
+        <div class="conn-mgmt-port">
+            <label for="conn-mgmt-client-port">Port</label>
+            <input type="text" id="conn-mgmt-client-port" class="form-control" autocomplete="off">
+        </div>
+        <div id="conn-mgmt-client-path-field" class="optional-field">
+            <label for="conn-mgmt-client-path">URL path</label>
+            <div class="optional-field-input">
+                <input type="text" id="conn-mgmt-client-path" class="form-control" autocomplete="off">
+                <button type="button" id="btn-conn-mgmt-client-path-clear" class="btn-icon optional-field-clear"
+                    title="Remove the URL path" aria-label="Remove the messaging URL path">&#x2715;</button>
+            </div>
+            <button type="button" id="btn-conn-mgmt-client-path-add" class="btn btn-secondary btn-sm optional-field-add"
+                title="Add a path after the port, where the messaging socket is served (for a broker behind a reverse proxy)">+ URL path</button>
+        </div>
+    </div>
+    <hr class="divider">
+    <div class="form-group">
+        <!-- Retrieve VPNs asks the gateway to read the broker's Message VPNs over
+             SEMP, with the SEMP details above, and adds a row for each one the
+             list does not hold yet. -->
+        <div class="row-list-bar">
+            <span class="row-list-title" id="conn-mgmt-vpns-title">Message VPNs (name / user / password)</span>
+            <button id="btn-conn-mgmt-add-vpn" type="button" class="btn btn-secondary btn-sm">+ Add</button>
+            <button id="btn-conn-mgmt-retrieve-vpns" type="button" class="btn btn-secondary btn-sm"
+                title="Read the broker's Message VPNs over SEMP and add a row for each one not listed yet">Retrieve VPNs</button>
+        </div>
+        <div id="conn-mgmt-vpn-rows" role="group" aria-labelledby="conn-mgmt-vpns-title"></div>
+    </div>
+
+    <div class="flex-row gap-4 mt-2">
+        <button id="btn-conn-mgmt-save" class="btn btn-primary">Save</button>
+        <button id="btn-conn-mgmt-cancel" class="btn btn-secondary">Cancel</button>
+    </div>
+    <div id="conn-mgmt-form-error" class="text-error mt-2 hidden text-body-sm"></div>
+</div>

@@ -22,6 +22,7 @@ import { createEventBus } from '../../src/core/event-bus';
 import { loadModuleDOM } from '../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../helpers/resetQueueBrowserState';
 import type { AppContext, AppState } from '../../src/core/types';
+import { completeContext } from '../helpers/appContext';
 
 function makeCtx(container: HTMLElement): AppContext {
     const eventBus = createEventBus();
@@ -29,7 +30,7 @@ function makeCtx(container: HTMLElement): AppContext {
         activeModuleId: null, isConnected: true, selectedVpn: 'test-vpn',
         solaceConnection: null, sempCredentials: null, isSempConnected: false
     };
-    return {
+    return completeContext({
         container, appState, eventBus,
         setState: vi.fn((key: keyof AppState, value: any) => {
             (appState as any)[key] = value;
@@ -38,14 +39,13 @@ function makeCtx(container: HTMLElement): AppContext {
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
         copyToClipboard: vi.fn(),
-        config: { useMocks: false }
-    };
+    });
 }
 
 // Build a minimal Solace-looking message that onMessage's extraction logic will
 // happily consume. The payload bytes come from `content` — that's what the
 // content-filter actually matches against.
-function makeSolaceMessage(content: string, guaranteedId: number) {
+function makeSolaceMessage(content: string, guaranteedId: number, destType: 'QUEUE' | 'TOPIC' = 'QUEUE') {
     const solace = (globalThis as any).solace;
     return {
         getType: () => solace.MessageType.TEXT,
@@ -59,7 +59,7 @@ function makeSolaceMessage(content: string, guaranteedId: number) {
         getGuaranteedMessageId: () => guaranteedId,
         getDestination: () => ({
             getName: () => 'test-queue',
-            getType: () => solace.DestinationType.QUEUE
+            getType: () => solace.DestinationType[destType]
         }),
         getApplicationMessageId: () => null,
         getCacheRequestId: () => null,
@@ -101,7 +101,7 @@ describe('Integration: message pipeline (onMessage → filter → DOM)', () => {
         serviceEvents = createServiceEvents();
 
         // Prime the queue — ingestMessage short-circuits silently on an unknown
-        // queue name (6.3.6 guard), so we have to create the store entry first.
+        // queue name, so we have to create the store entry first.
         state.messageStore.set('test-queue', []);
         state.currentQueue = 'test-queue';
         state.allMessages = state.messageStore.get('test-queue')!;
@@ -138,6 +138,12 @@ describe('Integration: message pipeline (onMessage → filter → DOM)', () => {
         state.activeFilters = defaultActiveFilters();
         const rowsAfterClear = container.querySelectorAll('#browser-msg-list tr[data-id]');
         expect(rowsAfterClear).toHaveLength(1); // still just 'alpha'
+
+        // A message arriving after the clear is evaluated against the cleared
+        // filter and shown; the one hidden earlier stays absent.
+        serviceEvents.onMessage('test-queue', makeSolaceMessage('gamma three', 12));
+        const ids = Array.from(container.querySelectorAll<HTMLElement>('#browser-msg-list tr[data-id]')).map(r => r.dataset.id);
+        expect(ids).toEqual(['10', '12']);
     });
 
     it('msg for different queue: DOM untouched, but store still receives it', () => {
@@ -153,16 +159,17 @@ describe('Integration: message pipeline (onMessage → filter → DOM)', () => {
         expect(after).toBe(before);
     });
 
-    it('destination-type filter uses window.solace enum (previously guarded by if(window.solace))', () => {
-        // Locks in the S3 cleanup: removing the `if (window.solace)` guard in
-        // state.js shouldShowMessage means the enum is accessed directly, and
-        // destination-type filtering still works end-to-end through onMessage.
+    it('destination-type filter uses window.solace enum', () => {
+        // shouldShowMessage reads the enum from window.solace directly, and
+        // destination-type filtering works end-to-end through onMessage.
         state.activeFilters = { ...defaultActiveFilters(), type: 'Queue' };
         ui.renderList();
 
         serviceEvents.onMessage('test-queue', makeSolaceMessage('matches-by-type', 50));
+        serviceEvents.onMessage('test-queue', makeSolaceMessage('wrong-type', 51, 'TOPIC'));
 
-        const rows = container.querySelectorAll('#browser-msg-list tr[data-id]');
-        expect(rows).toHaveLength(1); // Queue type matched, rendered.
+        // Queue type matched and rendered; the Topic-destination message is excluded.
+        const ids = Array.from(container.querySelectorAll<HTMLElement>('#browser-msg-list tr[data-id]')).map(r => r.dataset.id);
+        expect(ids).toEqual(['50']);
     });
 });

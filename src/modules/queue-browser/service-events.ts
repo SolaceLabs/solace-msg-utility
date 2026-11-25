@@ -1,8 +1,13 @@
 import { state, ingestMessage, getMessages, shouldShowMessage } from './state.js';
-import { ui } from './ui-core.js';
+import { ui, NOTICE_TOAST_MS } from './ui-core.js';
 import { showPayload } from './features.js';
+import { attachmentBytes, classifyAttachment } from './payload.js';
+import { decodeSdt, toYaml, type SdtNode } from './sdt.js';
 import { showToast } from '../../core/toast';
+import { errMessage, solaceErrorText } from '../../core/utils';
 import { logger } from '../../core/logger';
+
+const log = logger.withTag('queue-browser');
 
 declare const solace: any;
 
@@ -13,7 +18,7 @@ declare const solace: any;
  * try/catch so any SDK getter that's missing or throws (common for older message
  * subtypes) is silently omitted rather than aborting the whole extraction.
  *
- * Preserves per-field truthiness rules from the pre-refactor version:
+ * Per-field truthiness rules:
  *   - Priority returns 0 (valid priority) but skips `null`
  *   - Delivery Mode translates the numeric enum to a readable label
  *   - Everything else skips falsy values ('', 0, null, undefined)
@@ -51,6 +56,40 @@ const STANDARD_PROPERTY_GETTERS: Array<[string, (m: any) => unknown]> = [
 ];
 
 /**
+ * The body as the payload flavor stores it: `content` is what the details pane
+ * shows; a binary attachment also keeps its original `bytes`, and `binary`
+ * marks a payload that is not text (see payload.ts). A map or stream keeps
+ * its wire bytes in `bytes` (what Download Content saves), its decoded value
+ * in `sdt`, and shows as YAML: text the body filter and Copy Content use.
+ * `contentType` is the publisher's HTTP Content-Type, a hint for the
+ * text/binary verdict.
+ */
+function extractPayload(msg: any, contentType: string | undefined): { content: string; bytes?: Uint8Array; binary: boolean; sdt?: SdtNode } {
+    let sdtCnt: any;
+    try {
+        sdtCnt = msg.getSdtContainer();
+        if (sdtCnt !== null && sdtCnt.getType() !== solace.SDTFieldType.STRING) {
+            const sdt = decodeSdt(sdtCnt, solace);
+            return { content: toYaml(sdt), bytes: attachmentBytes(msg.getBinaryAttachment()), binary: false, sdt };
+        }
+    } catch (e) {
+        // One body the SDK cannot parse: show its bytes, and browse on. (The SDK
+        // finds a container only in a non-empty attachment, so the bytes are there.)
+        log.warn(`A map or stream body could not be decoded (${errMessage(e)}); showing its bytes`);
+        return classifyAttachment(attachmentBytes(msg.getBinaryAttachment()), contentType);
+    }
+    if (sdtCnt !== null) return { content: sdtCnt.getValue(), binary: false };
+    const attachment = msg.getBinaryAttachment();
+    if (attachment) return classifyAttachment(attachmentBytes(attachment), contentType);
+    // getXmlContent() is the SDK's raw string in every profile (the wire bytes, one char
+    // per byte, so UTF-8 XML arrives as mojibake); getXmlContentDecoded() would hand back
+    // text but lose the original bytes. Route it through the attachment path instead.
+    const xml = msg.getXmlContent();
+    if (xml) return classifyAttachment(attachmentBytes(xml), contentType);
+    return { content: '', binary: false };
+}
+
+/**
  * Queue Browser service events.
  * Factory — no window.App references.
  * Uses wire() to receive a reference to service.disconnectBrowser (breaks circular dep).
@@ -63,7 +102,7 @@ export function createServiceEvents() {
     }
 
     function onBrowserUp(queueName: string) {
-        logger.info(`[${queueName}] Browser UP`);
+        log.info(`Browser UP for queue=${queueName}`);
 
         // Finalize Bind in UI
         ui.addQueueToDropdown(queueName);
@@ -84,33 +123,52 @@ export function createServiceEvents() {
         showToast(`Queue "${queueName}" bound`, 'ok');
     }
 
-    function onConnectFailed(queueName: string, err: any) {
-        logger.error(`[${queueName}] Connect Failed:`, err);
-
-        // Show Inline Error for binding
-        ui.showBindError(`Connection Failed: ${err.message || 'Unknown Error'}`);
-
-        // If active view
-        if (state.currentQueue === queueName) {
-            ui.showBrowserError(`Connection Failed: ${err.message || 'Unknown Error'}`);
-        }
-
-        // Cleanup browser instance so it can be retried.
-        // wire() is always called before any browser can connect, so _disconnectBrowser
-        // is guaranteed non-null here. Throw to surface missing wire() calls early.
-        if (!_disconnectBrowser) throw new Error('wire() not called before onConnectFailed');
+    // Free a binding's slot through the service (disconnect + drop its store).
+    // wire() is always called before any browser can connect, so _disconnectBrowser
+    // is guaranteed non-null here. Throw to surface missing wire() calls early.
+    function dropBrowser(queueName: string) {
+        if (!_disconnectBrowser) throw new Error('wire() not called before a browser event');
         _disconnectBrowser(queueName);
     }
 
-    function onBrowserDown(queueName: string, err: any) {
-        logger.error(`[${queueName}] Browser Down:`, err);
+    function onConnectFailed(queueName: string, err: any) {
+        log.error(`Connect failed for queue=${queueName}`, err);
+        const reason = solaceErrorText(err, 'Unknown Error');
+
+        // Show Inline Error for binding
+        ui.showBindError(`Connection Failed: ${reason}`);
+
+        // If active view
         if (state.currentQueue === queueName) {
-            ui.showBrowserError(`Browser connection error: ${err.message || err}`);
+            ui.showBrowserError(`Connection Failed: ${reason}`);
         }
+
+        // Cleanup browser instance so it can be retried.
+        dropBrowser(queueName);
+    }
+
+    function onBrowserDown(queueName: string, err: any) {
+        log.error(`Browser down for queue=${queueName}`, err);
+        // A DOWN for a queue that is no longer bound (unbound, or cleared with the
+        // session) is stale: there is no slot to free and nothing to tell the user.
+        if (!state.browserInstances.has(queueName)) return;
+
+        // The SDK re-binds by itself on retryable conditions and fires UP again.
+        // DOWN_ERROR means the broker ended the binding for good (permissions
+        // changed, egress disabled, queue deleted, admin unbind): free its slot,
+        // drop it from the bound list (moving the view on if it is on screen) and
+        // tell the user to bind it again.
+        dropBrowser(queueName);
+        ui.removeBoundQueue(queueName);
+        showToast(
+            `Queue "${queueName}" was disconnected: ${solaceErrorText(err, 'no reason given')}. Bind it again to continue.`,
+            'warn',
+            NOTICE_TOAST_MS,
+        );
     }
 
     function onGmDisabled(queueName: string) {
-        logger.error(`[${queueName}] GM Disabled`);
+        log.error(`Guaranteed messaging disabled for queue=${queueName}`);
         if (state.currentQueue === queueName) {
             ui.showBrowserError('Guaranteed Messaging is disabled on the broker.');
         }
@@ -124,39 +182,7 @@ export function createServiceEvents() {
             else if (msg.getType() === solace.MessageType.MAP) typeStr = 'Map';
             else if (msg.getType() === solace.MessageType.STREAM) typeStr = 'Stream';
         } catch (e) {
-            logger.warn('Failed to determine message type', e);
-        }
-
-        // Safely extract content — payload flavor only. In the no-payload flavor the body
-        // is never decoded, so it can never reach the message object stored in state; it
-        // stays completely inaccessible. Forward/Delete operate on _originalMsg, not this string.
-        let contentStr = '';
-        if (showPayload()) {
-            const attachment = msg.getBinaryAttachment();
-            const sdtCnt = msg.getSdtContainer();
-            if (sdtCnt !== null) {
-                if (sdtCnt.getType() === solace.SDTFieldType.STRING) {
-                    contentStr = sdtCnt.getValue();
-                } else if (sdtCnt.getType() === solace.SDTFieldType.MAP) {
-                    contentStr = '[SDT Map Data - Not Supported Yet]';
-                } else if (sdtCnt.getType() === solace.SDTFieldType.STREAM) {
-                    contentStr = '[SDT Stream Data - Not Supported Yet]';
-                } else {
-                    contentStr = '[SDT Unknown Data - Not Supported Yet]';
-                }
-            } else if (attachment) {
-                if (typeof attachment === 'string') {
-                    contentStr = attachment;
-                } else if (attachment instanceof Uint8Array || attachment instanceof ArrayBuffer) {
-                    try {
-                        contentStr = new TextDecoder().decode(attachment);
-                    } catch (e) { contentStr = '[Binary Data Error]'; }
-                } else {
-                    contentStr = '[Unknown Binary Data]';
-                }
-            } else {
-                contentStr = msg.getXmlContent() || '';
-            }
+            log.warn(`Failed to determine message type on queue=${queueName}`, e);
         }
 
         // TIMESTAMP Handling - Sender Timestamp preference
@@ -180,11 +206,12 @@ export function createServiceEvents() {
             else
                 dateStr = '(No Timestamp)';
         } catch (e) {
-            logger.warn('Failed to extract timestamp', e);
+            log.warn(`Failed to extract timestamp on queue=${queueName}`, e);
         }
 
+        const id = msg.getGuaranteedMessageId() ? msg.getGuaranteedMessageId().toString() : 'N/A';
         const m: any = {
-            id: msg.getGuaranteedMessageId() ? msg.getGuaranteedMessageId().toString() : 'N/A',
+            id,
             date: dateStr,
             dateMs,
             size: msg.smfHeader ? msg.smfHeader.messageLength : 0,
@@ -218,21 +245,25 @@ export function createServiceEvents() {
                         }
                     });
                     return obj;
-                } catch (e) { return {}; }
+                } catch (e) {
+                    log.warn(`Failed to read the user properties of message ${id} on queue=${queueName}; showing none`, e);
+                    return {};
+                }
             })(),
             _originalMsg: msg // Store original for details
         };
 
-        // Payload flavor only: attach the decoded body. The no-payload flavor leaves
-        // `content` off the stored object entirely, so the body is never accessible
-        // through app state.
+        // Payload flavor only: decode the body onto the stored message. The no-payload
+        // flavor never decodes it, so neither its text nor its bytes ever reach app
+        // state. Forward/Delete operate on _originalMsg, not on these fields.
         if (showPayload()) {
-            m.content = contentStr;
+            Object.assign(m, extractPayload(msg, m.msgProperties['HTTP Type']));
         }
 
         // Store in State — atomic ingest enforces the moving-window cap and keeps
         // displayedMessages + DOM in sync with the store in one synchronous pass.
-        ingestMessage(queueName, m);
+        // A message it already holds (re-delivered after a re-bind) adds no row.
+        if (!ingestMessage(queueName, m)) return;
 
         // Check if this queue is currently active in UI
         if (state.currentQueue === queueName) {

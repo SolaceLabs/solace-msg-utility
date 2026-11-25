@@ -1,14 +1,14 @@
 import type { SempContext } from '../../core/types';
-import { escapeXml } from '../../core/utils';
+import { escapeXml, solaceErrorText } from '../../core/utils';
 import { logger } from '../../core/logger';
+import { sempErrorText } from '../../core/services/semp-errors';
 import { BIND_PROBE_TIMEOUT_MS, ACCUMULATE_IDLE_MS } from './constants';
 import type { VerifyResult } from './state';
 
 declare const solace: any;
 
-// Re-export from ./constants so test files importing ACCUMULATE_IDLE_MS from
-// `./service-verify` continue to work. Value definition lives in
-// [`./constants.ts`](./constants.ts).
+// Re-exported beside verifySource, whose accumulate fallback it times. Value
+// definition lives in [`./constants.ts`](./constants.ts).
 export { ACCUMULATE_IDLE_MS };
 
 /** Solace SEMP `quota` is reported in megabytes; this converts to bytes. */
@@ -170,7 +170,7 @@ async function verifyViaSempV1(
             return result;
         }
         if (!res.ok) {
-            result.errors.push(`SEMP v1 returned ${res.status} ${res.statusText || ''}`.trim());
+            result.errors.push(await sempErrorText(res, 'SEMP v1 returned an error'));
             return result;
         }
         const text = await res.text();
@@ -250,12 +250,7 @@ async function fetchNewestMsgIdViaSempV1(
     if (!res.ok) return null;
 
     const text = await res.text();
-    let doc: XMLDocument;
-    try {
-        doc = new DOMParser().parseFromString(text, 'text/xml');
-    } catch {
-        return null;
-    }
+    const doc = new DOMParser().parseFromString(text, 'text/xml');
     if (doc.querySelector('parsererror')) return null;
 
     const execResult = doc.querySelector('rpc-reply > execute-result');
@@ -298,13 +293,7 @@ export function parseSempV1Response(
     requestedVpn: string,
     result: VerifyResult,
 ): VerifyResult {
-    let doc: XMLDocument;
-    try {
-        doc = new DOMParser().parseFromString(xml, 'text/xml');
-    } catch (e: any) {
-        result.errors.push(`SEMP v1 parse error: ${e?.message ?? 'unknown'}`);
-        return result;
-    }
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
 
     // DOMParser embeds parser errors as `<parsererror>` nodes rather than throwing.
     if (doc.querySelector('parsererror')) {
@@ -374,6 +363,20 @@ function verifyViaQueueBrowserAccumulate(
         return Promise.resolve(result);
     }
 
+    const props = new solace.QueueBrowserProperties();
+    props.queueDescriptor = new solace.QueueDescriptor({ name: queue, type: solace.QueueType.QUEUE });
+    let browser: any;
+    try {
+        browser = session.createQueueBrowser(props);
+    } catch (e) {
+        // e.g. the managed entitlement wrapper refusing the queue, or the SDK
+        // refusing a session that is going down: a failed verify, not a hang.
+        const reason = solaceErrorText(e, `Cannot browse source queue "${queue}".`);
+        logger.error(`[Verify] QB-fallback createQueueBrowser threw: ${reason}`);
+        result.errors.push(reason);
+        return Promise.resolve(result);
+    }
+
     return new Promise<VerifyResult>((resolve) => {
         let settled = false;
         let bound = false;
@@ -385,10 +388,6 @@ function verifyViaQueueBrowserAccumulate(
         let oldestId: string | null = null;
         let newestId: string | null = null;
         let idleTimer: ReturnType<typeof setTimeout> | null = null;
-
-        const props = new solace.QueueBrowserProperties();
-        props.queueDescriptor = new solace.QueueDescriptor({ name: queue, type: solace.QueueType.QUEUE });
-        const browser = session.createQueueBrowser(props);
 
         const cleanup = () => {
             try { browser.disconnect(); } catch { /* swallow — best-effort */ }
@@ -419,6 +418,9 @@ function verifyViaQueueBrowserAccumulate(
 
         browser.on(solace.QueueBrowserEventName.UP, () => {
             bound = true;
+            // Bound: from here only the idle window ends accumulation, however
+            // long a deep queue takes to browse.
+            clearTimeout(bindTimer);
             // Capture access type from the SDK's `_messageConsumer._permissions`
             // the same way queue-browser does (see src/modules/queue-browser/ui-table.ts).
             // The bind has just completed, so the consumer object is populated.
@@ -430,8 +432,10 @@ function verifyViaQueueBrowserAccumulate(
         });
 
         browser.on(solace.QueueBrowserEventName.CONNECT_FAILED_ERROR, (e: any) => {
-            logger.error(`[Verify] QB-fallback CONNECT_FAILED for "${queue}": ${e?.infoStr ?? '(no info)'}`);
-            settle(false, e?.infoStr ?? `Source queue "${queue}" not found or no read permission.`);
+            // OperationError carries the reason on `.message`, not `infoStr`.
+            const reason = solaceErrorText(e, `Source queue "${queue}" not found or no read permission.`);
+            logger.error(`[Verify] QB-fallback CONNECT_FAILED for "${queue}": ${reason}`);
+            settle(false, reason);
         });
 
         browser.on(solace.QueueBrowserEventName.DOWN_ERROR, (e: any) => {
@@ -439,12 +443,11 @@ function verifyViaQueueBrowserAccumulate(
                 logger.info(`[Verify] QB-fallback DOWN after UP — settling with accumulated count=${count}`);
                 settle(true);
             } else {
-                logger.error(`[Verify] QB-fallback DOWN before UP: ${e?.infoStr ?? '(no info)'}`);
-                settle(false, e?.infoStr ?? 'Browser bind failed.');
+                const reason = solaceErrorText(e, 'Browser bind failed.');
+                logger.error(`[Verify] QB-fallback DOWN before UP: ${reason}`);
+                settle(false, reason);
             }
         });
-
-        browser.on(solace.QueueBrowserEventName.GM_DISABLED, () => { /* not a verification result */ });
 
         browser.on(solace.QueueBrowserEventName.MESSAGE, (msg: any) => {
             count++;
@@ -466,23 +469,16 @@ function verifyViaQueueBrowserAccumulate(
         const onAbort = () => settle(false, 'Verification cancelled.');
         signal.addEventListener('abort', onAbort);
 
+        // A bind that never answers: UP clears this timer, so it fires only
+        // while the browser is still unbound.
         const bindTimer = setTimeout(() => {
-            /* v8 ignore start -- the entire body is defensively unreachable in
-             * tests: any QueueBrowserEventName.UP arms the idle timer (2s),
-             * which always fires before the 10s bind timer; settle() then
-             * runs cleanup() and clears bindTimer. The bind timer can only
-             * ever fire when bound is still false, so the `if (!bound)`
-             * guard below is itself dead — kept commented in case future
-             * timer-management changes break that invariant. */
-            // if (!bound)
             settle(false, `Verification timed out after ${BIND_PROBE_TIMEOUT_MS / 1000}s.`);
-            /* v8 ignore stop */
         }, BIND_PROBE_TIMEOUT_MS);
 
         try {
             browser.connect();
-        } catch (e: any) {
-            settle(false, e?.message ?? 'Failed to start verification probe.');
+        } catch (e) {
+            settle(false, solaceErrorText(e, 'Failed to start verification probe.'));
         }
     });
 }
@@ -496,15 +492,11 @@ function verifyViaQueueBrowserAccumulate(
  * but is handled defensively.
  */
 export function msgIdToString(msg: any): string | null {
-    try {
-        const id = msg?.getGuaranteedMessageId?.();
-        if (id === null || id === undefined) return null;
-        // SDK returns a `Long` instance with toString(); BigInt and plain
-        // number both also stringify cleanly.
-        return String(id);
-    } catch {
-        return null;
-    }
+    const id = msg?.getGuaranteedMessageId?.();
+    if (id === null || id === undefined) return null;
+    // SDK returns a `Long` instance with toString(); BigInt and plain
+    // number both also stringify cleanly.
+    return String(id);
 }
 
 /**

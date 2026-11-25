@@ -1,0 +1,136 @@
+<!-- The admin gate is created at install by createGate() (see module.ts). -->
+
+<!-- List view -->
+<div id="user-mgmt-list-view" class="card hidden">
+    <!-- The page's name is the sidebar's; the card opens with its actions, then
+         the search on a row of its own across the card, as on Connections. -->
+    <div class="flex-row justify-end items-center gap-4 mb-4">
+        <button id="btn-user-mgmt-refresh" class="btn btn-secondary" title="Reload the user list">Refresh</button>
+        <button id="btn-user-mgmt-add" class="btn btn-primary">Add user</button>
+    </div>
+    <input type="search" id="user-mgmt-search" class="form-control mb-4"
+        placeholder="Search users (* = any)" aria-label="Search users" autocomplete="off">
+    <div class="data-table-frame">
+        <table class="data-table">
+            <thead>
+                <tr><th>Username</th><th>Role</th><th>Two-factor</th><th class="data-table-actions">Actions</th></tr>
+            </thead>
+            <tbody id="user-mgmt-rows"></tbody>
+        </table>
+    </div>
+    <div id="user-mgmt-list-error" class="text-error mt-2 hidden text-body-sm"></div>
+</div>
+
+<!-- Create / edit form view: one card per section, stacked -->
+<div id="user-mgmt-form-view" class="hidden">
+    <div class="card">
+        <h2 id="user-mgmt-form-title" class="card-title mb-4">Add user</h2>
+        <div class="form-cols">
+            <div class="form-group">
+                <label for="user-mgmt-username">Username</label>
+                <input type="text" id="user-mgmt-username" class="form-control" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="user-mgmt-password">Password <span id="user-mgmt-password-hint" class="text-secondary"></span></label>
+                <input type="password" id="user-mgmt-password" class="form-control" autocomplete="new-password">
+            </div>
+        </div>
+        <div class="form-group user-mgmt-switches">
+            <label class="switch-field">
+                <span class="switch"><input type="checkbox" id="user-mgmt-admin"><span class="switch-slider"></span></span> Administrator
+            </label>
+            <label class="switch-field">
+                <span class="switch"><input type="checkbox" id="user-mgmt-must-change"><span class="switch-slider"></span></span> Must change password at next sign-in
+            </label>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2 class="card-title mb-4">Modules</h2>
+        <p class="user-mgmt-hint text-secondary mb-3">The app modules this user may open.</p>
+        <div class="mb-2">
+            <div class="slide-choice" id="user-mgmt-modules-mode" role="group" aria-label="Modules">
+                <span class="slide-choice-label active" data-choice="default">Deployment default</span>
+                <span class="switch" title="Toggle between Deployment default and Choose for this user">
+                    <input type="checkbox" aria-label="Choose the modules for this user">
+                    <span class="switch-slider"></span>
+                </span>
+                <span class="slide-choice-label" data-choice="choose">Choose for this user</span>
+            </div>
+        </div>
+        <!-- Shown while the user has a list of their own: under the default, the pills say it. -->
+        <p id="user-mgmt-modules-default-line" class="user-mgmt-hint text-secondary hidden">The deployment default gives: <span id="user-mgmt-modules-default-hint"></span></p>
+        <div id="user-mgmt-modules" class="user-mgmt-pills mt-2"></div>
+        <div id="user-mgmt-module-add" class="user-mgmt-menu-wrap mt-2">
+            <button type="button" id="btn-user-mgmt-add-module" class="btn btn-secondary btn-compact"
+                aria-haspopup="menu" aria-expanded="false">+ Add module</button>
+            <div id="user-mgmt-module-menu" class="user-mgmt-menu hidden" role="menu" aria-label="Modules to add"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2 class="card-title mb-4">Entitlements</h2>
+        <p id="user-mgmt-grants-notice" class="banner-warning" role="note">
+            These entitlements <strong>cover queues only</strong>. Sending messages depends on configured Client's
+            ACL Profile. Please make sure to <strong>provision minimum access</strong> required for actual client
+            usernames as much as possible.
+        </p>
+        <div class="form-group">
+            <div class="row-list-bar">
+                <span class="row-list-title" id="user-mgmt-operate-title">Operate entitlements (read + write)</span>
+                <button id="btn-user-mgmt-add-operate" type="button" class="btn btn-secondary btn-sm">+ Add</button>
+            </div>
+            <div id="user-mgmt-operate-rows" role="group" aria-labelledby="user-mgmt-operate-title"></div>
+        </div>
+        <div class="form-group">
+            <div class="row-list-bar">
+                <span class="row-list-title" id="user-mgmt-readonly-title">Read-only entitlements</span>
+                <button id="btn-user-mgmt-add-readonly" type="button" class="btn btn-secondary btn-sm">+ Add</button>
+            </div>
+            <div id="user-mgmt-readonly-rows" role="group" aria-labelledby="user-mgmt-readonly-title"></div>
+            <p id="user-mgmt-grants-hint" class="user-mgmt-hint text-secondary">
+                Each row names brokers, Message VPNs and queues; <code>*</code> matches any run of characters.
+                A user reaches a broker's Message VPN when any row, operate or read-only, matches both, and sees
+                the queues those rows' queue patterns match. The Administrator flag gives no broker access by itself.
+                The gateway enforces brokers and Message VPNs; queue patterns are applied by this app.
+            </p>
+        </div>
+    </div>
+
+    <div class="mb-4">
+        <div class="flex-row gap-4">
+            <button id="btn-user-mgmt-save" class="btn btn-primary">Save</button>
+            <button id="btn-user-mgmt-cancel" class="btn btn-secondary">Cancel</button>
+        </div>
+        <div id="user-mgmt-form-error" class="text-error mt-2 hidden text-body-sm"></div>
+    </div>
+</div>
+
+<!-- Permission test: shown with the list view (see access-test.ts) -->
+<div id="user-mgmt-test-view" class="card hidden">
+    <h2 class="card-title mb-4">Permission test</h2>
+    <div class="form-cols">
+        <div class="form-group">
+            <label for="user-mgmt-test-user">User</label>
+            <select id="user-mgmt-test-user" class="form-control"></select>
+        </div>
+        <div class="form-group">
+            <label for="user-mgmt-test-broker">Broker</label>
+            <input type="text" id="user-mgmt-test-broker" class="form-control" autocomplete="off">
+        </div>
+        <div class="form-group">
+            <label for="user-mgmt-test-vpn">Message VPN</label>
+            <input type="text" id="user-mgmt-test-vpn" class="form-control" autocomplete="off">
+        </div>
+        <div class="form-group">
+            <label for="user-mgmt-test-queue">Queue</label>
+            <input type="text" id="user-mgmt-test-queue" class="form-control" autocomplete="off">
+        </div>
+    </div>
+    <div id="user-mgmt-test-result" class="user-mgmt-test-result" aria-live="polite"></div>
+    <p class="user-mgmt-hint text-secondary">
+        Tests the user as saved, against their operate and read-only rows. Names are matched exactly and
+        case-sensitively; <code>*</code> is a wildcard only in the rows. The broker's own queue permissions
+        still apply, and the broker and Message VPN must be in Connection Management to be reached.
+    </p>
+</div>

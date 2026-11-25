@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderRows, renderCounter, uniqueQueues, updateVisibility, EMPTY_MESSAGES } from '../../../src/modules/queue-subscription-explorer/ui';
+import { renderRows, renderCounter, uniqueQueues, EMPTY_MESSAGES, MAX_RENDERED_ROWS } from '../../../src/modules/queue-subscription-explorer/ui';
 import type { SubscriptionRow } from '../../../src/modules/queue-subscription-explorer/service';
 
 function makeTbody(): HTMLElement {
@@ -48,6 +48,21 @@ describe('queue-subscription-explorer/ui', () => {
             expect(tbody.querySelectorAll('tr.subexp-row td')[0].textContent).toBe('v<script>');
             expect(tbody.querySelectorAll('tr.subexp-row td')[1].textContent).toBe('q&1');
             expect(tbody.querySelector('tr.subexp-row code')?.textContent).toBe('a/"b"');
+        });
+
+        it('draws at most MAX_RENDERED_ROWS rows, then a row saying how many matched', () => {
+            const tbody = makeTbody();
+            const rows = (n: number): SubscriptionRow[] => Array.from({ length: n }, (_, i) => ({ vpn: 'default', queue: `q${i}`, topic: 't' }));
+            renderRows(tbody, rows(MAX_RENDERED_ROWS), EMPTY_MESSAGES.typing);
+            expect(tbody.querySelectorAll('tr.subexp-row')).toHaveLength(MAX_RENDERED_ROWS);
+            expect(tbody.querySelector('tr.subexp-more-row')).toBeNull();
+
+            renderRows(tbody, rows(12_345), EMPTY_MESSAGES.typing);
+            const drawn = tbody.querySelectorAll('tr.subexp-row');
+            expect(drawn).toHaveLength(MAX_RENDERED_ROWS);
+            expect(drawn[MAX_RENDERED_ROWS - 1].children[1].textContent).toBe(`q${MAX_RENDERED_ROWS - 1}`);
+            expect(tbody.lastElementChild!.textContent)
+                .toBe(`Showing the first ${MAX_RENDERED_ROWS} of 12345 matches. Narrow the filters to see the rest.`);
         });
 
         it('replaces previously-rendered rows when re-rendered with a new list', () => {
@@ -114,34 +129,9 @@ describe('queue-subscription-explorer/ui', () => {
         });
     });
 
-    describe('updateVisibility', () => {
-        function makeTriple() {
-            const warning = document.createElement('div');
-            const about = document.createElement('div');
-            const table = document.createElement('div');
-            return { warning, about, table };
-        }
-
-        it('shows the warning and hides about+table when SEMP is disconnected', () => {
-            const { warning, about, table } = makeTriple();
-            warning.classList.add('hidden');
-            about.classList.remove('hidden');
-            table.classList.remove('hidden');
-            updateVisibility(warning, about, table, false);
-            expect(warning.classList.contains('hidden')).toBe(false);
-            expect(about.classList.contains('hidden')).toBe(true);
-            expect(table.classList.contains('hidden')).toBe(true);
-        });
-
-        it('hides the warning and reveals about+table when SEMP connects', () => {
-            const { warning, about, table } = makeTriple();
-            warning.classList.remove('hidden');
-            about.classList.add('hidden');
-            table.classList.add('hidden');
-            updateVisibility(warning, about, table, true);
-            expect(warning.classList.contains('hidden')).toBe(true);
-            expect(about.classList.contains('hidden')).toBe(false);
-            expect(table.classList.contains('hidden')).toBe(false);
-        });
-    });
+    // The gate (#subexp-warning) is now created + toggled via the shared
+    // module-gate component; the gate-visibility behaviour is covered through
+    // full install in module.test.ts ("installs and shows the SEMP warning…" /
+    // "reveals the content cards when SEMP is connected…"). The component's own
+    // show()/hide() is covered in tests/core/components/module-gate.
 });

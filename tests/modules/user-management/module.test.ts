@@ -1,0 +1,981 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { loadModuleDOM } from '../../helpers/loadModuleDOM';
+import { createEventBus } from '../../../src/core/event-bus';
+import type { AppContext, AppState, ManagedSession } from '../../../src/core/types';
+
+// --- mocked dependencies (hoisted so vi.mock factories can close over them) ---
+const svcMock = vi.hoisted(() => ({ listUsers: vi.fn(), saveUser: vi.fn(), deleteUser: vi.fn(), resetTwoFactor: vi.fn() }));
+const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
+
+vi.mock('../../../src/core/toast', () => ({ showToast: toastMock.showToast }));
+vi.mock('../../../src/modules/user-management/service', () => ({
+    createUserMgmtService: () => ({
+        listUsers: svcMock.listUsers, saveUser: svcMock.saveUser, deleteUser: svcMock.deleteUser,
+        resetTwoFactor: svcMock.resetTwoFactor,
+    }),
+}));
+
+// Import AFTER the mocks are registered.
+import { NO_OPERATE, NO_READ_ONLY, UserManagementModule } from '../../../src/modules/user-management/module';
+import { completeContext } from '../../helpers/appContext';
+import { answerConfirm } from '../../helpers/confirmDialog';
+
+const ADMIN: ManagedSession = {
+    admin: true, username: 'admin', broker: '', vpns: [], operate: [], readOnly: [], modules: [],
+};
+const USERS = [
+    { username: 'admin', admin: true, mustChangePassword: false, operate: [{ brokers: '*', msgVpns: '*', queues: '*' }], readOnly: [], modules: null, rev: 3, twoFactor: false },
+    { username: 'viewer', admin: false, mustChangePassword: false, operate: [], readOnly: [{ brokers: 'b1', msgVpns: 'v1', queues: '*' }], modules: ['queue-browser'], rev: 5, twoFactor: true },
+];
+/** The gateway's 200 answer to a save: the record's new rev. */
+const saved = (rev = 6) => ({ ok: true, data: { rev } });
+const failed = (status: number, code: string, extra: object = {}) => ({ ok: false, status, code, ...extra });
+/** The deployment offers only queue-browser of the two catalog modules. */
+const CHOICES = { catalog: ['queue-browser', 'queue-copy'], offered: ['queue-browser'], userDefault: 'all' };
+const listed = (users: unknown[], modules: unknown = CHOICES) => ({ ok: true, data: { users, modules } });
+
+function el<T extends HTMLElement>(c: HTMLElement, sel: string): T {
+    return c.querySelector(sel) as T;
+}
+const hidden = (c: HTMLElement, sel: string) => el(c, sel).classList.contains('hidden');
+
+function makeCtx(container: HTMLElement, managed: ManagedSession | null): AppContext {
+    const eventBus = createEventBus();
+    const appState: AppState = {
+        activeModuleId: null, isConnected: false, selectedVpn: null,
+        solaceConnection: null, sempCredentials: null, isSempConnected: false, managed,
+    };
+    return completeContext({
+        container, appState, eventBus,
+        setState: (k, v) => { (appState as any)[k] = v; eventBus.emit('app:state-change', { key: k, value: v }); },
+        loadSelf: vi.fn(), sempFetch: vi.fn(), copyToClipboard: vi.fn(),
+    });
+}
+
+async function setup(managed: ManagedSession | null = ADMIN) {
+    const container = loadModuleDOM('user-management');
+    const ctx = makeCtx(container, managed);
+    svcMock.listUsers.mockResolvedValue(listed(USERS));
+    await UserManagementModule.install(ctx);
+    if (managed?.admin) {
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').children.length).toBeGreaterThan(0));
+    }
+    return { container, ctx };
+}
+
+const rowCount = (c: HTMLElement) => el(c, '#user-mgmt-rows').querySelectorAll('tr').length;
+
+/** Click row `i`'s Edit (`.user-mgmt-edit`) or Delete (`.user-mgmt-delete`) icon button. */
+function clickRow(c: HTMLElement, i: number, cls: '.user-mgmt-edit' | '.user-mgmt-delete'): void {
+    el(c, '#user-mgmt-rows').querySelectorAll('tr')[i].querySelector<HTMLButtonElement>(cls)!.click();
+}
+
+/**
+ * Stand in for the module that owns the login (admin-login / the Managed
+ * panel): answer a sign-out request the way its logout does — clear the
+ * session, then emit rbac:changed.
+ */
+function answerSignOut(ctx: AppContext) {
+    const signOut = vi.fn(() => {
+        ctx.setState('managed', null);
+        ctx.eventBus.emit('rbac:changed');
+    });
+    ctx.eventBus.on('rbac:sign-out-requested', signOut);
+    return signOut;
+}
+
+beforeEach(() => {
+    svcMock.listUsers.mockReset();
+    svcMock.saveUser.mockReset();
+    svcMock.deleteUser.mockReset();
+    svcMock.resetTwoFactor.mockReset();
+    toastMock.showToast.mockReset();
+});
+
+describe('user-management — list', () => {
+    it('renders the user list for an admin on install', async () => {
+        const { container } = await setup();
+        expect(hidden(container, '#user-mgmt-gate')).toBe(true);
+        expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
+        const rows = el(container, '#user-mgmt-rows').querySelectorAll('tr');
+        expect(rows.length).toBe(2);
+        expect(rows[0].textContent).toContain('admin');
+        expect(rows[0].textContent).toContain('Admin');
+        expect(rows[1].textContent).toContain('viewer');
+        expect(rows[1].textContent).toContain('User');
+    });
+
+    it('gates (no fetch) when the session is not admin', async () => {
+        const { container } = await setup({ ...ADMIN, admin: false });
+        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
+        expect(hidden(container, '#user-mgmt-list-view')).toBe(true);
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
+    });
+
+    it('gates (no fetch) when there is no managed session', async () => {
+        const { container } = await setup(null);
+        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
+    });
+
+    it("shows the gateway's reason when the list fails", async () => {
+        const container = loadModuleDOM('user-management');
+        const ctx = makeCtx(container, ADMIN);
+        svcMock.listUsers.mockResolvedValue({ ok: false, status: 0, code: 'network' });
+        await UserManagementModule.install(ctx);
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-list-error').textContent).toBe('The gateway could not be reached.'));
+    });
+
+    it('a 401 on the list asks the session owner to sign out', async () => {
+        const container = loadModuleDOM('user-management');
+        const ctx = makeCtx(container, ADMIN);
+        const signOut = answerSignOut(ctx);
+        svcMock.listUsers.mockResolvedValue({ ok: false, status: 401, code: 'unauthenticated' });
+        await UserManagementModule.install(ctx);
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+        expect(toastMock.showToast).toHaveBeenCalledWith('Your session has ended. Sign in again.', 'error', 5000);
+        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
+        expect(hidden(container, '#user-mgmt-test-view')).toBe(true);
+    });
+
+    it('renders an empty-state row when there are no users', async () => {
+        const container = loadModuleDOM('user-management');
+        const ctx = makeCtx(container, ADMIN);
+        svcMock.listUsers.mockResolvedValue(listed([]));
+        await UserManagementModule.install(ctx);
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').textContent).toMatch(/no users/i));
+    });
+
+    it('fetches the list once at start with an admin restored', async () => {
+        const { container } = await setup();
+        await vi.waitFor(() => expect(rowCount(container)).toBe(2));
+        expect(svcMock.listUsers).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears the gate and loads the list when an admin logs in (rbac:changed)', async () => {
+        // Install with no session → gate; then an admin "logs in" and rbac:changed fires.
+        const { container, ctx } = await setup(null);
+        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
+        ctx.setState('managed', ADMIN);
+        ctx.eventBus.emit('rbac:changed');
+        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalled());
+        expect(hidden(container, '#user-mgmt-gate')).toBe(true);
+        expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
+    });
+});
+
+describe('user-management -- list rows and search', () => {
+    const MANY = ['alice', 'bob', 'ops-admin', 'ops-viewer'].map(username =>
+        ({ username, admin: false, operate: [], readOnly: [], modules: null }));
+
+    async function setupMany() {
+        const container = loadModuleDOM('user-management');
+        const ctx = makeCtx(container, ADMIN);
+        svcMock.listUsers.mockResolvedValue(listed(MANY));
+        await UserManagementModule.install(ctx);
+        await vi.waitFor(() => expect(rowCount(container)).toBe(4));
+        return container;
+    }
+    function search(c: HTMLElement, q: string): void {
+        const input = el<HTMLInputElement>(c, '#user-mgmt-search');
+        input.value = q;
+        input.dispatchEvent(new Event('input'));
+    }
+    const names = (c: HTMLElement) =>
+        [...el(c, '#user-mgmt-rows').querySelectorAll('tr')].map(tr => tr.cells[0].textContent);
+
+    it("each row's actions are icon buttons named for the user", async () => {
+        const { container } = await setup();
+        const row = el(container, '#user-mgmt-rows').querySelectorAll('tr')[1];
+        expect(row.querySelector('.user-mgmt-edit')!.getAttribute('aria-label')).toBe('Edit user "viewer"');
+        expect(row.querySelector('.user-mgmt-delete')!.getAttribute('aria-label')).toBe('Delete user "viewer"');
+        expect(row.querySelector('.user-mgmt-delete')!.classList.contains('btn-icon-danger')).toBe(true);
+    });
+
+    it('narrows the list as you type: contains, case-insensitive, * spanning any run; clearing restores it', async () => {
+        const container = await setupMany();
+        search(container, 'OPS');
+        expect(names(container)).toEqual(['ops-admin', 'ops-viewer']);
+        search(container, 'o*v');
+        expect(names(container)).toEqual(['ops-viewer']);
+        search(container, '');
+        expect(names(container)).toEqual(['alice', 'bob', 'ops-admin', 'ops-viewer']);
+        expect(svcMock.listUsers).toHaveBeenCalledTimes(1); // filtered in memory
+    });
+
+    it('says when no user matches, writing the query as text', async () => {
+        const container = await setupMany();
+        search(container, '<img src=x>');
+        expect(el(container, '#user-mgmt-rows').textContent).toBe('No users match "<img src=x>".');
+        expect(el(container, '#user-mgmt-rows').querySelector('td')!.colSpan).toBe(4); // the row spans the Two-factor column too
+        expect(el(container, '#user-mgmt-rows').querySelector('img')).toBeNull();
+    });
+
+    it('keeps the query across a Refresh', async () => {
+        const container = await setupMany();
+        search(container, 'ops');
+        svcMock.listUsers.mockResolvedValue(listed([...MANY, { ...MANY[0], username: 'ops-new' }]));
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-refresh').click();
+        await vi.waitFor(() => expect(names(container)).toEqual(['ops-admin', 'ops-viewer', 'ops-new']));
+    });
+});
+
+describe('user-management -- permission test card', () => {
+    it('shows with the list, offers the loaded users, and gives way to the form', async () => {
+        const { container } = await setup();
+        expect(hidden(container, '#user-mgmt-test-view')).toBe(false);
+        const options = [...el<HTMLSelectElement>(container, '#user-mgmt-test-user').options].map(o => o.value);
+        expect(options).toEqual(['', 'admin', 'viewer']);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        expect(hidden(container, '#user-mgmt-test-view')).toBe(true);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-cancel').click();
+        expect(hidden(container, '#user-mgmt-test-view')).toBe(false);
+    });
+});
+
+describe('user-management — create / edit form', () => {
+    it('Add opens the form in create mode', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(false);
+        expect(el<HTMLInputElement>(container, '#user-mgmt-username').disabled).toBe(false);
+        expect(el(container, '#user-mgmt-password-hint').textContent).toMatch(/required/i);
+    });
+
+    it('rejects a save with no username', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent).toMatch(/username/i));
+        expect(svcMock.saveUser).not.toHaveBeenCalled();
+    });
+
+    it('rejects a new user with no password', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-username').value = 'newbie';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent).toMatch(/password/i));
+        expect(svcMock.saveUser).not.toHaveBeenCalled();
+    });
+
+    it('Add refuses a username that already exists', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-username').value = 'viewer';
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'long-enough-pw';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent).toBe('User "viewer" already exists. Use Edit to change it.'));
+        expect(svcMock.saveUser).not.toHaveBeenCalled();
+    });
+
+    it('creates a user: sends the password as typed (the gateway hashes it)', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(saved());
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-username').value = 'newbie';
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'pw';
+        el<HTMLInputElement>(container, '#user-mgmt-admin').checked = true;
+        // add one operate glob row
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add-operate').click();
+        const opInputs = el(container, '#user-mgmt-operate-rows').querySelectorAll<HTMLInputElement>('input');
+        opInputs[0].value = '*'; opInputs[1].value = '*'; opInputs[2].value = 'orders.*';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+
+        // showView('list') is the LAST step of a successful save (after the
+        // saveUser + refreshList awaits) — wait for it, then everything earlier
+        // (the saveUser call, the toast) has necessarily already run.
+        await vi.waitFor(() => expect(hidden(container, '#user-mgmt-list-view')).toBe(false));
+        expect(svcMock.saveUser).toHaveBeenCalledWith({
+            username: 'newbie', password: 'pw', admin: true, mustChangePassword: true,
+            operate: [{ brokers: '*', msgVpns: '*', queues: 'orders.*' }], readOnly: [], modules: null, rev: 0,
+        });
+        expect(toastMock.showToast).toHaveBeenCalledWith('User saved', 'ok');
+    });
+
+    it("shows the gateway's reason when the save is rejected", async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue({
+            ok: false, status: 422, code: 'invalid', field: 'password', reason: 'Password must be 16 to 128 characters.',
+        });
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-username').value = 'x';
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'pw';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent).toBe('Password must be 16 to 128 characters.'));
+        expect(el<HTMLButtonElement>(container, '#btn-user-mgmt-save').disabled).toBe(false);
+    });
+
+    it('Edit pre-fills the form and keeps the password blank', async () => {
+        const { container } = await setup();
+        // second row = viewer
+        el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
+            .querySelector<HTMLButtonElement>('.user-mgmt-edit')!.click();
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(false);
+        expect(el<HTMLInputElement>(container, '#user-mgmt-username').value).toBe('viewer');
+        expect(el<HTMLInputElement>(container, '#user-mgmt-username').disabled).toBe(true);
+        expect(el<HTMLInputElement>(container, '#user-mgmt-admin').checked).toBe(false);
+        expect(el(container, '#user-mgmt-password-hint').textContent).toMatch(/keep/i);
+        // viewer has one read-only glob row pre-filled
+        const roInputs = el(container, '#user-mgmt-readonly-rows').querySelectorAll<HTMLInputElement>('input');
+        expect(roInputs[0].value).toBe('b1');
+    });
+
+    it('editing keeps the password blank in the payload', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(saved());
+        el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
+            .querySelector<HTMLButtonElement>('.user-mgmt-edit')!.click();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0].password).toBe('');
+    });
+
+    it('the forced-change switch is on for a new user and shows the stored value on an edit; a save sends it as it stands', async () => {
+        const { container } = await setup();
+        svcMock.listUsers.mockResolvedValue(listed([...USERS, { ...USERS[1], username: 'flagged', mustChangePassword: true }]));
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-refresh').click();
+        await vi.waitFor(() => expect(rowCount(container)).toBe(3));
+        const mustChange = el<HTMLInputElement>(container, '#user-mgmt-must-change');
+        svcMock.saveUser.mockResolvedValue(saved());
+
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        expect(mustChange.checked).toBe(true);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-cancel').click();
+
+        clickRow(container, 1, '.user-mgmt-edit');   // viewer: not stored
+        expect(mustChange.checked).toBe(false);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-cancel').click();
+
+        clickRow(container, 2, '.user-mgmt-edit');   // flagged: stored
+        expect(mustChange.checked).toBe(true);
+        mustChange.checked = false;
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0]).toMatchObject({ username: 'flagged', password: '', mustChangePassword: false });
+    });
+
+    it('a new password typed for someone else leaves the forced-change switch where the administrator set it', async () => {
+        const { container } = await setup();
+        const mustChange = el<HTMLInputElement>(container, '#user-mgmt-must-change');
+        const password = el<HTMLInputElement>(container, '#user-mgmt-password');
+        svcMock.saveUser.mockResolvedValue(saved());
+
+        clickRow(container, 1, '.user-mgmt-edit');   // viewer: stored off
+        password.value = 'new-password-1';
+        password.dispatchEvent(new Event('input'));
+        expect(mustChange.checked).toBe(false);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0]).toMatchObject({ username: 'viewer', password: 'new-password-1', mustChangePassword: false });
+    });
+
+    it('Cancel returns to the list and forgets the typed password', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'typed-but-cancelled';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-cancel').click();
+        expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(true);
+        expect(el<HTMLInputElement>(container, '#user-mgmt-password').value).toBe('');
+    });
+
+    it('a sign-out in the middle of an edit leaves no typed password in the hidden form', async () => {
+        const { container, ctx } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'typed-then-signed-out';
+        ctx.setState('managed', null);
+        ctx.eventBus.emit('rbac:changed');
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(true);
+        expect(el<HTMLInputElement>(container, '#user-mgmt-password').value).toBe('');
+    });
+
+    it("warns on the Entitlements card that the rows cover queues only and that sending depends on the client's ACL profile, with both key phrases in bold", async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        const notice = el(container, '#user-mgmt-grants-notice');
+
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(false);
+        expect(notice.getAttribute('role')).toBe('note');
+        expect(notice.textContent!.replace(/\s+/g, ' ').trim()).toBe(
+            "These entitlements cover queues only. Sending messages depends on configured Client's ACL Profile. "
+            + 'Please make sure to provision minimum access required for actual client usernames as much as possible.');
+        expect(Array.from(notice.querySelectorAll('strong'), s => s.textContent)).toEqual(['cover queues only', 'provision minimum access']);
+    });
+
+    it('says what each empty entitlement list means, and names the columns once a row is added', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        const operate = el(container, '#user-mgmt-operate-rows');
+        const shown = (sel: string, root: HTMLElement) => !root.querySelector(sel)!.classList.contains('hidden');
+
+        expect(operate.querySelector('.row-list-empty')!.textContent).toBe(NO_OPERATE);
+        expect(el(container, '#user-mgmt-readonly-rows').querySelector('.row-list-empty')!.textContent).toBe(NO_READ_ONLY);
+        expect(shown('.row-list-head', operate)).toBe(false);
+        // The hint under both lists: what a row grants, and that the Administrator flag grants no broker.
+        expect(el(container, '#user-mgmt-grants-hint').textContent).toContain('The Administrator flag gives no broker access by itself.');
+
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add-operate').click();
+        expect(shown('.row-list-empty', operate)).toBe(false);
+        expect(shown('.row-list-head', operate)).toBe(true);
+        expect(Array.from(operate.querySelectorAll('.row-list-label'), n => n.textContent)).toEqual(['Brokers', 'Message VPNs', 'Queues']);
+    });
+
+    it('Add read-only row button appends a row', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add-readonly').click();
+        expect(el(container, '#user-mgmt-readonly-rows').querySelectorAll('.row-list-row').length).toBe(1);
+    });
+
+    it('save is a no-op if the managed session vanished mid-form', async () => {
+        const { container, ctx } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        ctx.setState('managed', null);
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await Promise.resolve();
+        expect(svcMock.saveUser).not.toHaveBeenCalled();
+    });
+});
+
+describe('user-management — modules', () => {
+    const pills = (c: HTMLElement) => [...el(c, '#user-mgmt-modules').querySelectorAll<HTMLElement>('.user-mgmt-pill')];
+    const pillIds = (c: HTMLElement) => pills(c).map(p => p.dataset.module);
+    const menuIds = (c: HTMLElement) =>
+        [...el(c, '#user-mgmt-module-menu').querySelectorAll<HTMLElement>('.user-mgmt-menu-item')].map(i => i.dataset.module);
+    // The Modules slide choice: its switch is off for Deployment default and on for Choose for this user.
+    const modeSwitch = (c: HTMLElement) => el<HTMLInputElement>(c, '#user-mgmt-modules-mode input');
+    /** The highlighted answers of the Modules slide choice. */
+    const mode = (c: HTMLElement) =>
+        [...el(c, '#user-mgmt-modules-mode').querySelectorAll<HTMLElement>('.slide-choice-label.active')].map(l => l.textContent);
+    /** The line that says what the default gives, as shown: null while it is hidden. */
+    const defaultLine = (c: HTMLElement) => {
+        const line = el(c, '#user-mgmt-modules-default-line');
+        return line.classList.contains('hidden') ? null : line.textContent;
+    };
+    function slideMode(c: HTMLElement, on: boolean): void {
+        modeSwitch(c).checked = on;
+        modeSwitch(c).dispatchEvent(new Event('change'));
+    }
+    const addBtn = (c: HTMLElement) => el<HTMLButtonElement>(c, '#btn-user-mgmt-add-module');
+    /** Slide to "Choose for this user". */
+    function chooseForUser(c: HTMLElement): void {
+        slideMode(c, true);
+    }
+    function save(c: HTMLElement): void {
+        el<HTMLButtonElement>(c, '#btn-user-mgmt-save').click();
+    }
+    /** The catalog has three modules, two offered; the second offered one is not in the first user's reach. */
+    const THREE = { catalog: ['queue-browser', 'queue-copy', 'queue-subscriptions'], offered: ['queue-browser', 'queue-subscriptions'], userDefault: 'all' };
+
+    it('a new user starts on the deployment default: its modules as pills without remove buttons, no line repeating them, no Add module', async () => {
+        const { container } = await setup();
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        expect([modeSwitch(container).checked, mode(container)]).toEqual([false, ['Deployment default']]);
+        expect(defaultLine(container)).toBeNull();
+        expect(pillIds(container)).toEqual(['queue-browser']);
+        expect(el(container, '#user-mgmt-modules').querySelector('.user-mgmt-pill-remove')).toBeNull();
+        expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(true);
+    });
+
+    it("editing a user with a list of their own shows pills with remove buttons and the unchosen offered modules in the menu", async () => {
+        const container = loadModuleDOM('user-management');
+        svcMock.listUsers.mockResolvedValue(listed(USERS, THREE));
+        await UserManagementModule.install(makeCtx(container, ADMIN));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(2));
+        clickRow(container, 1, '.user-mgmt-edit'); // viewer: ['queue-browser']
+        expect([modeSwitch(container).checked, mode(container)]).toEqual([true, ['Choose for this user']]);
+        expect(pillIds(container)).toEqual(['queue-browser']);
+        expect(el(container, '#user-mgmt-modules').querySelectorAll('.user-mgmt-pill-remove')).toHaveLength(1);
+        expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(false);
+        expect(menuIds(container)).toEqual(['queue-subscriptions']);
+        expect(defaultLine(container)).toBe('The deployment default gives: Queue Browser, Queue Subscriptions');
+    });
+
+    it('Add module opens the menu, picking a module adds its pill and closes the menu, and the save sends the list', async () => {
+        const container = loadModuleDOM('user-management');
+        svcMock.listUsers.mockResolvedValue(listed(USERS, THREE));
+        svcMock.saveUser.mockResolvedValue(saved());
+        await UserManagementModule.install(makeCtx(container, ADMIN));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(2));
+        clickRow(container, 1, '.user-mgmt-edit');
+        addBtn(container).click();
+        expect(el(container, '#user-mgmt-module-menu').classList.contains('hidden')).toBe(false);
+        expect(addBtn(container).getAttribute('aria-expanded')).toBe('true');
+        addBtn(container).click(); // a second click closes it
+        expect(el(container, '#user-mgmt-module-menu').classList.contains('hidden')).toBe(true);
+        expect(addBtn(container).getAttribute('aria-expanded')).toBe('false');
+        addBtn(container).click();
+        el<HTMLButtonElement>(container, '.user-mgmt-menu-item').click();
+        expect(pillIds(container)).toEqual(['queue-browser', 'queue-subscriptions']);
+        expect(menuIds(container)).toEqual([]);
+        expect(addBtn(container).disabled).toBe(true);
+        expect(el(container, '#user-mgmt-module-menu').classList.contains('hidden')).toBe(true);
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0].modules).toEqual(['queue-browser', 'queue-subscriptions']);
+    });
+
+    it('Escape closes the open menu and returns focus to Add module; another key leaves it open', async () => {
+        const container = loadModuleDOM('user-management');
+        svcMock.listUsers.mockResolvedValue(listed(USERS, THREE));
+        await UserManagementModule.install(makeCtx(container, ADMIN));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(2));
+        clickRow(container, 1, '.user-mgmt-edit');
+        addBtn(container).click();
+        // Focus sits on an item in the open menu, not on the button.
+        const item = el<HTMLButtonElement>(container, '#user-mgmt-module-menu button');
+        item.focus();
+        expect(document.activeElement).toBe(item);
+        el(container, '#user-mgmt-module-add').dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+        expect(el(container, '#user-mgmt-module-menu').classList.contains('hidden')).toBe(false);
+        expect(document.activeElement).toBe(item);
+        el(container, '#user-mgmt-module-add').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        expect(el(container, '#user-mgmt-module-menu').classList.contains('hidden')).toBe(true);
+        expect(addBtn(container).getAttribute('aria-expanded')).toBe('false');
+        expect(document.activeElement).toBe(addBtn(container));
+    });
+
+    it('a remove button drops its pill, the module returns to the menu, and the save sends the shorter list', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(saved());
+        clickRow(container, 1, '.user-mgmt-edit'); // viewer: ['queue-browser']
+        el<HTMLButtonElement>(container, '.user-mgmt-pill-remove').click();
+        expect(pillIds(container)).toEqual([]);
+        expect(el(container, '#user-mgmt-modules').textContent).toBe('No modules.');
+        expect(menuIds(container)).toEqual(['queue-browser']);
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0].modules).toEqual([]);
+    });
+
+    it('a module no longer offered is a pill marked "not offered" that can be removed', async () => {
+        const container = loadModuleDOM('user-management');
+        const users = [{ ...USERS[1], modules: ['queue-browser', 'queue-copy'] }];
+        svcMock.listUsers.mockResolvedValue(listed(users));
+        svcMock.saveUser.mockResolvedValue(saved());
+        await UserManagementModule.install(makeCtx(container, ADMIN));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(1));
+        clickRow(container, 0, '.user-mgmt-edit');
+        const [offered, gone] = pills(container);
+        expect(offered.querySelector('.user-mgmt-pill-tag')).toBeNull();
+        expect(gone.querySelector('.user-mgmt-pill-tag')?.textContent).toBe('not offered');
+        expect(menuIds(container)).toEqual([]); // queue-copy is not offered, so never listed to add
+        (gone.querySelector('.user-mgmt-pill-remove') as HTMLButtonElement).click();
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0].modules).toEqual(['queue-browser']);
+    });
+
+    it("leaving the default starts the user's own list from what it grants; the save sends that list", async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(saved());
+        clickRow(container, 0, '.user-mgmt-edit'); // admin: default
+        chooseForUser(container);
+        expect([modeSwitch(container).checked, mode(container)]).toEqual([true, ['Choose for this user']]);
+        expect(pillIds(container)).toEqual(['queue-browser']);
+        expect(el(container, '#user-mgmt-modules').querySelectorAll('.user-mgmt-pill-remove')).toHaveLength(1);
+        expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(false);
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0].modules).toEqual(['queue-browser']);
+    });
+
+    it('returning to the default shows it again without remove buttons and sends no list', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(saved());
+        clickRow(container, 1, '.user-mgmt-edit'); // viewer: own list
+        el<HTMLButtonElement>(container, '.user-mgmt-pill-remove').click();
+        slideMode(container, false);
+        expect(pillIds(container)).toEqual(['queue-browser']);
+        expect(el(container, '#user-mgmt-modules').querySelector('.user-mgmt-pill-remove')).toBeNull();
+        expect(el(container, '#user-mgmt-module-add').classList.contains('hidden')).toBe(true);
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0].modules).toBeNull();
+    });
+
+    it('under a "none" default the pills are empty, and the line beside a list of the user\'s own says so', async () => {
+        const container = loadModuleDOM('user-management');
+        const ctx = makeCtx(container, ADMIN);
+        svcMock.listUsers.mockResolvedValue(listed(USERS, { ...CHOICES, userDefault: 'none' }));
+        await UserManagementModule.install(ctx);
+        await vi.waitFor(() => expect(rowCount(container)).toBe(2));
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        expect(defaultLine(container)).toBeNull();
+        expect(pillIds(container)).toEqual([]);
+        expect(el(container, '#user-mgmt-modules').textContent).toBe('No modules.');
+        chooseForUser(container);
+        expect(defaultLine(container)).toBe('The deployment default gives: no modules');
+    });
+});
+
+describe('user-management — delete', () => {
+    it('deletes a user after confirmation', async () => {
+        const { container } = await setup();
+        svcMock.deleteUser.mockResolvedValue({ ok: true });
+        el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
+            .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
+        expect(await answerConfirm(true)).toBe('Delete user "viewer"?');
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('User deleted', 'ok'));
+        expect(svcMock.deleteUser).toHaveBeenCalledWith('viewer', 5);
+    });
+
+    it('does nothing when the delete is cancelled', async () => {
+        const { container } = await setup();
+        el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
+            .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
+        await answerConfirm(false);
+        expect(svcMock.deleteUser).not.toHaveBeenCalled();
+    });
+
+    it("toasts the gateway's reason when the delete is rejected", async () => {
+        const { container } = await setup();
+        svcMock.deleteUser.mockResolvedValue(failed(500, 'store_write_failed'));
+        el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
+            .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith(
+            'The gateway could not write its data files, so nothing was changed. Its log has the cause.', 'error'));
+    });
+
+    it('delete is a no-op if the managed session vanished', async () => {
+        const { container, ctx } = await setup();
+        ctx.setState('managed', null);
+        el(container, '#user-mgmt-rows').querySelectorAll('tr')[1]
+            .querySelector<HTMLButtonElement>('.user-mgmt-delete')!.click();
+        await Promise.resolve();
+        expect(svcMock.deleteUser).not.toHaveBeenCalled();
+    });
+});
+
+// A new password or administrator flag on your own account, or deleting it,
+// ends the session at the gateway, so the module must hand the sign-out to the
+// session owner instead of patching the session or reloading.
+describe('user-management — your own session', () => {
+    it('changing your own password asks the session owner to sign out, with a sign-in-again message', async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        svcMock.saveUser.mockResolvedValue(saved());
+        svcMock.listUsers.mockClear();
+        clickRow(container, 0, '.user-mgmt-edit'); // admin = own record
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'new-pw';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+
+        expect(svcMock.saveUser).toHaveBeenCalledWith(expect.objectContaining({ username: 'admin', password: 'new-pw' }));
+        expect(toastMock.showToast).toHaveBeenCalledWith('Password changed. Sign in again.', 'ok', 5000);
+        expect(toastMock.showToast).not.toHaveBeenCalledWith('User saved', 'ok');
+        // Signed out → gated, and the list was never reloaded on the dead session.
+        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
+        expect(hidden(container, '#user-mgmt-list-error')).toBe(true);
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
+        expect(el<HTMLInputElement>(container, '#user-mgmt-password').value).toBe('');
+    });
+
+    it('clearing your own Administrator flag signs you out too', async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        svcMock.saveUser.mockResolvedValue(saved());
+        clickRow(container, 0, '.user-mgmt-edit');
+        el<HTMLInputElement>(container, '#user-mgmt-admin').checked = false;
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+        expect(toastMock.showToast).toHaveBeenCalledWith('Administrator flag changed. Sign in again.', 'ok', 5000);
+        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
+    });
+
+    it('editing your own entitlements without a password keeps you signed in', async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        const rbac = vi.fn();
+        ctx.eventBus.on('rbac:changed', rbac);
+        svcMock.saveUser.mockResolvedValue(saved());
+        svcMock.listUsers.mockClear();
+        clickRow(container, 0, '.user-mgmt-edit');
+        el(container, '#user-mgmt-operate-rows').querySelectorAll<HTMLInputElement>('input')[2].value = 'orders.*';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(rbac).toHaveBeenCalled());
+
+        expect(signOut).not.toHaveBeenCalled();
+        expect(ctx.appState.managed).toMatchObject({
+            username: 'admin', admin: true, operate: [{ brokers: '*', msgVpns: '*', queues: 'orders.*' }],
+        });
+        expect(toastMock.showToast).toHaveBeenCalledWith('User saved', 'ok');
+        expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
+        // The emit changes no user or flag, so the save itself reloads the list, once.
+        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalledTimes(1));
+        // Nothing later reloads it again: not the save's own follow-up, not a replayed rbac:changed.
+        ctx.eventBus.emit('rbac:changed');
+        for (let i = 0; i < 20; i++) await Promise.resolve();
+        expect(svcMock.listUsers).toHaveBeenCalledTimes(1);
+    });
+
+    it("changing another user's password keeps you signed in", async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        svcMock.saveUser.mockResolvedValue(saved());
+        svcMock.listUsers.mockClear();
+        clickRow(container, 1, '.user-mgmt-edit'); // viewer
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'pw2';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalled());
+
+        expect(svcMock.saveUser.mock.calls[0][0].password).toBe('pw2');
+        expect(signOut).not.toHaveBeenCalled();
+        expect(ctx.appState.managed).toBe(ADMIN);
+    });
+
+    it('a rejected save of your own password does not sign you out', async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        svcMock.saveUser.mockResolvedValue({ ok: false, status: 500, code: 'server_error' });
+        clickRow(container, 0, '.user-mgmt-edit');
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'new-pw';
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent)
+            .toBe('The gateway could not complete the request. Its log has the cause.'));
+
+        expect(signOut).not.toHaveBeenCalled();
+        expect(ctx.appState.managed).toBe(ADMIN);
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(false);
+    });
+
+    it('deleting your own account signs you out instead of reloading the list', async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        svcMock.deleteUser.mockResolvedValue({ ok: true });
+        svcMock.listUsers.mockClear();
+        clickRow(container, 0, '.user-mgmt-delete');
+        expect(await answerConfirm(true)).toBe('Delete your own account "admin"? You will be signed out.');
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+
+        expect(svcMock.deleteUser).toHaveBeenCalledWith('admin', 3);
+        expect(toastMock.showToast).toHaveBeenCalledWith('Account deleted. You have been signed out.', 'ok', 5000);
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
+        expect(hidden(container, '#user-mgmt-gate')).toBe(false);
+    });
+
+    it('a refused delete of your own account (last admin, 409) does not sign you out', async () => {
+        const { container, ctx } = await setup();
+        const signOut = answerSignOut(ctx);
+        svcMock.deleteUser.mockResolvedValue({ ok: false, status: 409, code: 'last_admin' });
+        clickRow(container, 0, '.user-mgmt-delete');
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('At least one administrator must remain.', 'error'));
+
+        expect(signOut).not.toHaveBeenCalled();
+        expect(ctx.appState.managed).toBe(ADMIN);
+    });
+});
+
+// The rev each row came with goes back with a save or a delete; when someone
+// else moved the record first, the admin is told and the list is reloaded.
+describe('user-management -- versions', () => {
+    const editViewer = (c: HTMLElement) => clickRow(c, 1, '.user-mgmt-edit');
+    const save = (c: HTMLElement) => el<HTMLButtonElement>(c, '#btn-user-mgmt-save').click();
+
+    it('a save of an opened user sends the rev the list gave it, and a create sends 0', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(saved());
+        editViewer(container);
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalledTimes(1));
+        expect(svcMock.saveUser.mock.calls[0][0]).toMatchObject({ username: 'viewer', rev: 5 });
+
+        await vi.waitFor(() => expect(hidden(container, '#user-mgmt-list-view')).toBe(false));
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-username').value = 'newbie';
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'long-enough-pw';
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalledTimes(2));
+        expect(svcMock.saveUser.mock.calls[1][0]).toMatchObject({ username: 'newbie', rev: 0 });
+    });
+
+    it('a refused save leaves the form open on the same rev: the retry sends it again', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValueOnce(failed(422, 'invalid', { reason: 'Modules must be known.' })).mockResolvedValue(saved());
+        editViewer(container);
+        save(container);
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent).toBe('Modules must be known.'));
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalledTimes(2));
+        expect(svcMock.saveUser.mock.calls.map(c => c[0].rev)).toEqual([5, 5]);
+    });
+
+    it('stale save: the dialog says so; Reload reloads the list (new revs) and closes the form', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(failed(409, 'stale', { rev: 9 }));
+        // Someone made viewer an admin: the reloaded row says Admin, with rev 9.
+        svcMock.listUsers.mockResolvedValue(listed([USERS[0], { ...USERS[1], admin: true, rev: 9 }]));
+        editViewer(container);
+        save(container);
+        expect(await answerConfirm(true)).toBe('This user was changed by someone else since you opened it.');
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-rows').querySelectorAll('tr')[1].textContent).toContain('Admin'));
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(true);
+        expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
+        expect(toastMock.showToast).not.toHaveBeenCalledWith('User saved', 'ok');
+
+        svcMock.saveUser.mockResolvedValue(saved());
+        editViewer(container);
+        save(container);
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalledTimes(2));
+        expect(svcMock.saveUser.mock.calls[1][0].rev).toBe(9);
+    });
+
+    it('stale save: Cancel keeps the form and the admin\'s edits, and reloads nothing', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(failed(409, 'stale', { rev: 9 }));
+        editViewer(container);
+        el<HTMLInputElement>(container, '#user-mgmt-admin').checked = true;
+        save(container);
+        await answerConfirm(false);
+        await vi.waitFor(() => expect(el<HTMLButtonElement>(container, '#btn-user-mgmt-save').disabled).toBe(false));
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(false);
+        expect(el<HTMLInputElement>(container, '#user-mgmt-admin').checked).toBe(true);
+        expect(svcMock.listUsers).toHaveBeenCalledTimes(1);
+    });
+
+    it('save of a user deleted meanwhile: says so and shows the reloaded list', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(failed(404, 'not_found'));
+        svcMock.listUsers.mockResolvedValue(listed([USERS[0]]));
+        editViewer(container);
+        save(container);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('This user was deleted by someone else.', 'error'));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(1));
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(true);
+        expect(hidden(container, '#user-mgmt-list-view')).toBe(false);
+    });
+
+    it('Add of a name that someone else created meanwhile: the existing already-exists message, form stays', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(failed(409, 'exists'));
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-add').click();
+        el<HTMLInputElement>(container, '#user-mgmt-username').value = 'newbie';
+        el<HTMLInputElement>(container, '#user-mgmt-password').value = 'long-enough-pw';
+        save(container);
+        await vi.waitFor(() => expect(el(container, '#user-mgmt-form-error').textContent).toBe('User "newbie" already exists. Use Edit to change it.'));
+        expect(hidden(container, '#user-mgmt-form-view')).toBe(false);
+    });
+
+    it('stale delete: the dialog offers Reload, which reloads the list', async () => {
+        const { container } = await setup();
+        svcMock.deleteUser.mockResolvedValue(failed(409, 'stale', { rev: 8 }));
+        clickRow(container, 1, '.user-mgmt-delete');
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(svcMock.deleteUser).toHaveBeenCalledTimes(1));
+        expect(await answerConfirm(true)).toBe('This user was changed by someone else since you opened it.');
+        await vi.waitFor(() => expect(svcMock.listUsers).toHaveBeenCalledTimes(2));
+        expect(svcMock.deleteUser).toHaveBeenCalledWith('viewer', 5);
+    });
+
+    it('delete of a user already deleted: says so and shows the reloaded list', async () => {
+        const { container } = await setup();
+        svcMock.deleteUser.mockResolvedValue(failed(404, 'not_found'));
+        svcMock.listUsers.mockResolvedValue(listed([USERS[0]]));
+        clickRow(container, 1, '.user-mgmt-delete');
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('This user was deleted by someone else.', 'error'));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(1));
+    });
+});
+
+// Two-factor sign-in: the column, and the Reset two-factor row action (a lost
+// phone). The gateway ends the user's sessions when a reset removes something.
+describe('user-management -- two-factor', () => {
+    const resetBtn = (c: HTMLElement, i: number) =>
+        el(c, '#user-mgmt-rows').querySelectorAll('tr')[i].querySelector<HTMLButtonElement>('.user-mgmt-reset-2fa');
+
+    it('shows On or Off per user, and Reset two-factor only on the rows that are On', async () => {
+        const { container } = await setup();
+        const cells = [...el(container, '#user-mgmt-rows').querySelectorAll('tr')].map(tr => tr.cells[2].textContent);
+        expect(cells).toEqual(['Off', 'On']);
+        expect(resetBtn(container, 0)).toBeNull();
+        expect(resetBtn(container, 1)!.getAttribute('aria-label')).toBe('Reset two-factor for user "viewer"');
+    });
+
+    it('keeps the button on the right row when the search narrows the list', async () => {
+        const { container } = await setup();
+        const input = el<HTMLInputElement>(container, '#user-mgmt-search');
+        input.value = 'viewer';
+        input.dispatchEvent(new Event('input'));
+        expect(rowCount(container)).toBe(1);
+        expect(resetBtn(container, 0)).not.toBeNull();
+        input.value = 'nobody';
+        input.dispatchEvent(new Event('input'));
+        expect(el(container, '#user-mgmt-rows').querySelector('.user-mgmt-reset-2fa')).toBeNull();
+    });
+
+    it('resets after confirmation: names the user, toasts, and reloads the list', async () => {
+        const { container } = await setup();
+        svcMock.resetTwoFactor.mockResolvedValue({ ok: true, data: { rev: 6 } });
+        svcMock.listUsers.mockResolvedValue(listed([USERS[0], { ...USERS[1], twoFactor: false, rev: 6 }]));
+        resetBtn(container, 1)!.click();
+        expect(await answerConfirm(true)).toBe('Reset two-factor sign-in for "viewer"? They will have to set it up again.');
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('Two-factor sign-in reset', 'ok'));
+        expect(svcMock.resetTwoFactor).toHaveBeenCalledWith('viewer');
+        await vi.waitFor(() => expect(resetBtn(container, 1)).toBeNull());
+    });
+
+    it('does nothing when the reset is cancelled', async () => {
+        const { container } = await setup();
+        resetBtn(container, 1)!.click();
+        await answerConfirm(false);
+        expect(svcMock.resetTwoFactor).not.toHaveBeenCalled();
+        expect(toastMock.showToast).not.toHaveBeenCalled();
+    });
+
+    it('a user deleted meanwhile: says so and shows the reloaded list', async () => {
+        const { container } = await setup();
+        svcMock.resetTwoFactor.mockResolvedValue(failed(404, 'not_found'));
+        svcMock.listUsers.mockResolvedValue(listed([USERS[0]]));
+        resetBtn(container, 1)!.click();
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith('This user was deleted by someone else.', 'error'));
+        await vi.waitFor(() => expect(rowCount(container)).toBe(1));
+    });
+
+    it("toasts the gateway's reason for any other refusal and leaves the list as it is", async () => {
+        const { container } = await setup();
+        svcMock.resetTwoFactor.mockResolvedValue(failed(500, 'store_write_failed'));
+        svcMock.listUsers.mockClear();
+        resetBtn(container, 1)!.click();
+        await answerConfirm(true);
+        await vi.waitFor(() => expect(toastMock.showToast).toHaveBeenCalledWith(
+            'The gateway could not write its data files, so nothing was changed. Its log has the cause.', 'error'));
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
+    });
+
+    it('resetting your own two-factor signs you out instead of reloading the list', async () => {
+        const { container, ctx } = await setup(ADMIN);
+        const signOut = answerSignOut(ctx);
+        svcMock.listUsers.mockResolvedValue(listed([{ ...USERS[0], twoFactor: true }, USERS[1]]));
+        el(container, '#btn-user-mgmt-refresh').click();
+        await vi.waitFor(() => expect(resetBtn(container, 0)).not.toBeNull());
+        svcMock.resetTwoFactor.mockResolvedValue({ ok: true, data: { rev: 3 } });
+        svcMock.listUsers.mockClear();
+        resetBtn(container, 0)!.click();
+        expect(await answerConfirm(true)).toBe('Reset your own two-factor sign-in? You will be signed out and must set it up again.');
+        await vi.waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
+        expect(toastMock.showToast).toHaveBeenCalledWith('Two-factor sign-in reset. You have been signed out.', 'ok', 5000);
+        expect(svcMock.listUsers).not.toHaveBeenCalled();
+    });
+
+    it('the reset is a no-op if the managed session vanished', async () => {
+        const { container, ctx } = await setup();
+        ctx.setState('managed', null);
+        resetBtn(container, 1)!.click();
+        await Promise.resolve();
+        expect(svcMock.resetTwoFactor).not.toHaveBeenCalled();
+    });
+
+    it('a save never carries the two-factor field', async () => {
+        const { container } = await setup();
+        svcMock.saveUser.mockResolvedValue(saved());
+        clickRow(container, 1, '.user-mgmt-edit');
+        el<HTMLButtonElement>(container, '#btn-user-mgmt-save').click();
+        await vi.waitFor(() => expect(svcMock.saveUser).toHaveBeenCalled());
+        expect(svcMock.saveUser.mock.calls[0][0]).not.toHaveProperty('twoFactor');
+    });
+});

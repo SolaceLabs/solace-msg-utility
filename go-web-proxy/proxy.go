@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -21,12 +22,28 @@ import (
 
 // ----- /hosted ----------------------------------------------------------------
 
-type hostedHandler struct {
-	hosted bool
+// hostedInfo is the /hosted response body. Beyond the hosted flag it carries the
+// deployment's connection-mode config (connModes / defaultConn), which is
+// the only channel the statically-served SPA has for reading container env — it
+// decides which connection tabs (Direct / Provisioned) the app offers.
+type hostedInfo struct {
+	Hosted      bool   `json:"hosted"`
+	ConnModes   string `json:"connModes"`
+	DefaultConn string `json:"defaultConn"`
 }
 
-func newHostedHandler(hosted bool) *hostedHandler {
-	return &hostedHandler{hosted: hosted}
+// hostedHandler reads connModes and defaultConn from live per request: both
+// keys apply without a restart. It is also the documented health probe, so it
+// answers 503 while ready (the app bundle check) fails: an orchestrator then
+// sees a gateway that cannot serve the app as unhealthy.
+type hostedHandler struct {
+	hosted bool
+	live   *live
+	ready  func() error
+}
+
+func newHostedHandler(hosted bool, lv *live, ready func() error) *hostedHandler {
+	return &hostedHandler{hosted: hosted, live: lv, ready: ready}
 }
 
 func (h *hostedHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
@@ -34,72 +51,172 @@ func (h *hostedHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html")
 	w.Header().Set("Cache-Control", "no-store")
+	if err := h.ready(); err != nil {
+		http.Error(w, "503 the app bundle cannot be served", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("true"))
+	cur := h.live.get()
+	_ = json.NewEncoder(w).Encode(hostedInfo{
+		Hosted:      true,
+		ConnModes:   cur.connModes,
+		DefaultConn: cur.defaultConn,
+	})
+}
+
+// ----- /solAdmin ---------------------------------------------------------------
+
+// adminHandler serves the standalone administration app (the `admin` variant's
+// solAdmin.html). It is a dedicated route rather than a file the SPA tree serves
+// on its own for two reasons: the entitlement editors must not be reachable from
+// a deployment that has no user list to edit, and the app's catch-all
+// would otherwise answer /solAdmin with a redirect to the ordinary app.
+//
+// Outside Provisioned mode the route 404s, which is also what a wrong URL
+// returns -- a probe cannot tell an admin-capable deployment from any
+// other. Authentication is still the app's job; this only decides whether the
+// surface exists at all.
+type adminHandler struct {
+	root    string
+	enabled bool
+	logger  *slog.Logger
+}
+
+func newAdminHandler(root string, enabled bool, logger *slog.Logger) *adminHandler {
+	return &adminHandler{root: root, enabled: enabled, logger: logger}
+}
+
+func (h *adminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !h.enabled {
+		http.NotFound(w, r)
+		return
+	}
+	// The bundle's relative vendor paths only resolve at /solAdmin.
+	if r.URL.Path == adminPath+"/" {
+		http.Redirect(w, r, adminPath, http.StatusPermanentRedirect)
+		return
+	}
+	data, err := os.ReadFile(h.root + "/" + adminIndexFile)
+	if err != nil {
+		// The route is enabled but the bundle isn't deployed — a packaging
+		// error, so say so in the log rather than leaving an operator to guess.
+		h.logger.Warn("admin app requested but not deployed", "file", adminIndexFile, "err", err)
+		http.NotFound(w, r)
+		return
+	}
+	setAppPageHeaders(w.Header())
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
+// appPageCSP is the policy the gateway adds to an app bundle's own. The
+// bundle carries its policy in a <meta> tag (scripts/csp.mjs), which holds
+// wherever the file runs but cannot say who may frame the page; and behind
+// the gateway every connection the page makes goes to the gateway itself
+// (the relays, the messaging socket, /hosted). The browser enforces both
+// policies, so the page gets the narrower of each.
+const appPageCSP = "frame-ancestors 'none'; connect-src 'self'"
+
+// setAppPageHeaders sets the headers of an app bundle's page: HTML, the
+// gateway's policy on top of the bundle's, no type sniffing and no referrer.
+func setAppPageHeaders(h http.Header) {
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Content-Security-Policy", appPageCSP)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "no-referrer")
 }
 
 // ----- PWA --------------------------------------------------------------------
 
 type pwaHandler struct {
 	root   string
+	index  string // the bundle served at /
 	fs     http.Handler
 	logger *slog.Logger
-	usable bool
 }
 
-func newPWAHandler(appDir string, logger *slog.Logger) *pwaHandler {
-	h := &pwaHandler{root: appDir, logger: logger}
-	info, err := os.Stat(appDir)
-	if err != nil {
-		logger.Warn("APP_DIR missing; PWA handler will return 404", "app_dir", appDir, "err", err)
-		return h
+// appIndexFile is the bundle the app is served from: the Direct-only one, or
+// in Provisioned mode the one that carries the sign-in.
+func appIndexFile(provisioned bool) string {
+	if provisioned {
+		return provisionedIndexFile
 	}
-	if !info.IsDir() {
-		logger.Warn("APP_DIR is not a directory; PWA handler will return 404", "app_dir", appDir)
-		return h
-	}
-	entries, err := os.ReadDir(appDir)
-	if err != nil || len(entries) == 0 {
-		logger.Warn("APP_DIR empty or unreadable; PWA handler will return 404", "app_dir", appDir, "err", err)
-		return h
+	return directIndexFile
+}
+
+// newPWAHandler serves the app from appDir. The mode's bundle must be there:
+// without it every page would be a 404, so a missing or unreadable one stops
+// the start, naming the file and what to do.
+func newPWAHandler(appDir, index string, logger *slog.Logger) (*pwaHandler, error) {
+	h := &pwaHandler{root: appDir, index: index, logger: logger}
+	if err := h.ready(); err != nil {
+		return nil, fmt.Errorf("%w. The gateway serves the app from %s: run the image's own files, or mount a build that holds %s there", err, appDir, index)
 	}
 	h.fs = http.FileServer(http.FS(os.DirFS(appDir)))
-	h.usable = true
-	return h
+	return h, nil
+}
+
+// ready reports whether the mode's bundle can be served: a regular file the
+// gateway can open. Checked at start, and by /hosted on every probe.
+func (h *pwaHandler) ready() error {
+	p := filepath.Join(h.root, h.index)
+	f, err := os.Open(p)
+	if err != nil {
+		return fmt.Errorf("app bundle %s cannot be read: %w", p, err)
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("app bundle %s is not a regular file", p)
+	}
+	return nil
 }
 
 func (h *pwaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !h.usable {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
+	// Every file is served as the type its name says (the vendor scripts
+	// among them), never as one a browser guesses.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	clean := path.Clean(r.URL.Path)
 	if clean == "." {
 		clean = "/"
 	}
-	// SPA history-mode fallback: if the requested path doesn't resolve to a real
-	// file, serve the root index.html inline. Asset requests (anything with a
-	// file extension) skip the fallback so a missing asset still 404s loudly.
-	if clean != "/" && !fileResolvable(h.root, clean) {
-		if hasExt(clean) {
-			http.NotFound(w, r)
-			return
-		}
-		serveIndex(w, h.root)
+	// The image ships the admin and the Provisioned bundles in this directory,
+	// but each has one way in: /solAdmin behind its admin gate, and / in
+	// Provisioned mode. Case-insensitive for file systems that are.
+	if strings.EqualFold(clean, "/"+adminIndexFile) || strings.EqualFold(clean, "/"+provisionedIndexFile) {
+		http.NotFound(w, r)
+		return
+	}
+	// / is the mode's bundle. The app has no client-side routes, and the
+	// bundle's relative vendor paths only resolve at /, so there is no
+	// history-mode fallback: a path that doesn't resolve to a real file is a
+	// 404, whatever it looks like. It is never redirected: a browser keeps a
+	// permanent redirect, and would go on sending a path to / after the
+	// gateway had started to serve it.
+	if clean == "/" {
+		h.serveIndex(w, r)
+		return
+	}
+	if !fileResolvable(h.root, clean) {
+		http.NotFound(w, r)
 		return
 	}
 	h.fs.ServeHTTP(w, r)
 }
 
-func serveIndex(w http.ResponseWriter, root string) {
-	data, err := os.ReadFile(root + "/index.html")
+// serveIndex answers with the mode's bundle. The start checked it, so a
+// missing one went away under a running gateway (a mount changed): the 404
+// names it and so does a warn line.
+func (h *pwaHandler) serveIndex(w http.ResponseWriter, r *http.Request) {
+	p := filepath.Join(h.root, h.index)
+	data, err := os.ReadFile(p)
 	if err != nil {
-		http.Error(w, "index.html not found", http.StatusNotFound)
+		requestLogger(h.logger, r).Warn("app bundle missing; answered 404", "file", p, "err", err)
+		http.Error(w, h.index+" not found", http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	setAppPageHeaders(w.Header())
 	_, _ = w.Write(data)
 }
 
@@ -127,20 +244,75 @@ type reverseProxy struct {
 	logger *slog.Logger
 }
 
-func newReverseProxy(trustPool *x509.CertPool, insecure bool, logger *slog.Logger) *reverseProxy {
-	tlsCfg := &tls.Config{
-		RootCAs:            trustPool,
-		InsecureSkipVerify: insecure, // gated by SSL_INSECURE_SKIP_VERIFY=true
-	}
-	transport := &http.Transport{
-		TLSClientConfig:       tlsCfg,
-		ForceAttemptHTTP2:     true,
+// upstreamDialTimeout bounds the TCP connect to a broker. Without it a
+// blackholed address held the request until the client gave up.
+const upstreamDialTimeout = 10 * time.Second
+
+// newUpstreamTransport is the one transport for every broker-bound request:
+// the Direct relay, the SEMP relay and the SMF gate. It trusts what the trust
+// holder holds when each connection is made (the files in the trust
+// directory, the standard roots while config.yaml's tls.standardRoots is on,
+// and tls.insecureSkipVerify), so a
+// change reaches the next connection with no restart, and it never follows
+// redirects (the ReverseProxy calls RoundTrip directly). A change of trust
+// closes the idle connections, so the next request handshakes under it.
+//
+// It makes its own TLS connections (dialUpstreamTLS): crypto/tls reads a fixed
+// RootCAs, which could not follow a change, and a VerifyConnection set on the
+// transport's config cannot tell an IP address from no name at all.
+func newUpstreamTransport(trust *trustHolder) *http.Transport {
+	dialer := &net.Dialer{Timeout: upstreamDialTimeout, KeepAlive: 30 * time.Second}
+	tr := &http.Transport{
+		DialContext: dialer.DialContext,
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialUpstreamTLS(ctx, dialer, trust, network, addr)
+		},
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 	}
+	trust.onChange(tr.CloseIdleConnections)
+	return tr
+}
 
+// upstreamHandshakeTimeout bounds the TLS handshake with a broker.
+const upstreamHandshakeTimeout = 10 * time.Second
+
+// dialUpstreamTLS connects to addr and handshakes, verifying the broker's
+// certificate against the trust holder's current state and the host in addr
+// (an IP address is checked against the certificate's IP addresses). Its own
+// verification is off (InsecureSkipVerify) because verify does it, or skips it
+// when the holder says so.
+func dialUpstreamTLS(ctx context.Context, d *net.Dialer, trust *trustHolder, network, addr string) (net.Conn, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := d.DialContext(ctx, network, addr)
+	if err != nil {
+		return nil, err
+	}
+	// HTTP/1.1 only. A WebSocket upgrade (the SMF gate, the Direct relay's ws
+	// and wss paths) needs it, and net/http forces it for an upgrade only on
+	// its own TLS path, which this dialer replaces. HTTP/2 would gain nothing
+	// for SEMP, and a TLS proxy in front of a broker that picked it would fail
+	// every upgrade.
+	conn := tls.Client(raw, &tls.Config{
+		ServerName:         host,
+		NextProtos:         []string{"http/1.1"},
+		InsecureSkipVerify: true,
+		VerifyConnection:   func(cs tls.ConnectionState) error { return trust.verify(cs, host) },
+	})
+	hctx, cancel := context.WithTimeout(ctx, upstreamHandshakeTimeout)
+	defer cancel()
+	if err := conn.HandshakeContext(hctx); err != nil {
+		_ = raw.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+func newReverseProxy(transport http.RoundTripper, logger *slog.Logger) *reverseProxy {
 	p := &reverseProxy{logger: logger}
 
 	p.rp = &httputil.ReverseProxy{
@@ -154,7 +326,14 @@ func newReverseProxy(trustPool *x509.CertPool, insecure bool, logger *slog.Logge
 			pr.Out.URL.RawQuery = pr.In.URL.RawQuery
 			pr.Out.Host = target.Host
 			pr.Out.Header = pr.In.Header.Clone()
-			// Intentionally NOT calling pr.SetXForwarded() — transparent passthrough.
+			dropSessionCookie(pr.Out.Header)
+			setForwarded(pr.Out.Header, pr.In)
+		},
+		// Runs for a 101 upgrade answer too, before its headers are copied.
+		ModifyResponse: func(res *http.Response) error {
+			dropSessionSetCookie(res.Header)
+			dropAuthChallenge(res.Header)
+			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			logger.Warn("upstream proxy error",
@@ -168,10 +347,74 @@ func newReverseProxy(trustPool *x509.CertPool, insecure bool, logger *slog.Logge
 	return p
 }
 
+// dropAuthChallenge removes a Direct upstream's sign-in challenge. A broker
+// answers wrong SEMP credentials with 401 and WWW-Authenticate: Basic, and
+// that answer is served on the gateway's own origin, where a browser raises
+// its own username and password prompt for it. The app reads the 401 and
+// reports it itself; the status passes as sent.
+func dropAuthChallenge(h http.Header) {
+	h.Del("WWW-Authenticate")
+	h.Del("Proxy-Authenticate")
+}
+
+// sessionCookie carries the Provisioned sign-in session id (session.go). The
+// __Host- prefix makes the browser insist on Secure, Path=/ and no Domain, so
+// no sibling host can set or read it. It is declared here, beside the Direct
+// relay, which must strip it in every mode.
+const sessionCookie = "__Host-smu-session"
+
+// dropSessionCookie removes the gateway's own sign-in cookies (the session and
+// the half-finished sign-in's ticket, session.go) from a request bound
+// upstream. The Direct relay forwards every other header unchanged, but for
+// the forwarding ones (setForwarded), so without this a Direct connection to
+// any host would hand that host a live gateway session. Every Cookie line is
+// rebuilt; other cookies pass as sent.
+func dropSessionCookie(h http.Header) {
+	lines := h.Values("Cookie")
+	if len(lines) == 0 {
+		return
+	}
+	h.Del("Cookie")
+	for _, line := range lines {
+		var kept []string
+		for _, part := range strings.Split(line, ";") {
+			part = strings.TrimSpace(part)
+			name, _, _ := strings.Cut(part, "=")
+			if part == "" || name == sessionCookie || name == signinCookie {
+				continue
+			}
+			kept = append(kept, part)
+		}
+		if len(kept) > 0 {
+			h.Add("Cookie", strings.Join(kept, "; "))
+		}
+	}
+}
+
+// dropSessionSetCookie removes every Set-Cookie line naming one of the
+// gateway's sign-in cookies (session and ticket) from a Direct upstream's
+// answer. That answer is served on the gateway's own origin, so without this
+// any host a user connects to could replace a cookie (signing the user in to
+// an account of the host's choosing) or expire it. Other cookies pass as sent.
+func dropSessionSetCookie(h http.Header) {
+	lines := h.Values("Set-Cookie")
+	if len(lines) == 0 {
+		return
+	}
+	h.Del("Set-Cookie")
+	for _, line := range lines {
+		pair, _, _ := strings.Cut(line, ";")
+		name, _, _ := strings.Cut(pair, "=")
+		if n := strings.TrimSpace(name); n != sessionCookie && n != signinCookie {
+			h.Add("Set-Cookie", line)
+		}
+	}
+}
+
 type targetURLKey struct{}
 
 func (p *reverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	target, err := parseProxyPath(r.URL.Path)
+	target, err := parseProxyPath(r.URL.EscapedPath())
 	if err != nil {
 		http.Error(w, fmt.Sprintf("400 bad request: %s\n", err.Error()), http.StatusBadRequest)
 		return
@@ -183,6 +426,13 @@ func (p *reverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func contextWithTarget(ctx context.Context, u *url.URL) context.Context {
 	return context.WithValue(ctx, targetURLKey{}, u)
+}
+
+// refuseRelay answers the relay paths in files-only mode (hosted: false), where
+// the app connects to brokers itself: the gateway relays nothing, and a 403
+// says so where the app's redirect to / would hide it.
+func refuseRelay(w http.ResponseWriter, _ *http.Request) {
+	http.Error(w, "403 forbidden: this deployment serves the app's files only and relays no broker connection", http.StatusForbidden)
 }
 
 // isProxyPath returns true for any path whose first segment is a known proxy
@@ -203,28 +453,44 @@ func firstSegment(p string) string {
 	return p
 }
 
-// parseProxyPath converts an incoming gateway path into an upstream URL.
+// parseProxyPath converts an incoming gateway path into an upstream URL. The
+// path comes escaped as the browser sent it (URL.EscapedPath).
 //
 //	/{http|https}/{port}/{host}/{rest...}
 //	/{ws|wss}/{port}/{host}/{rest...}
+//
+// The scheme, port and host are read decoded. The rest keeps its escapes: a
+// name that holds a "/" arrives as %2F (the Message VPN a/b in
+// /SEMP/v2/monitor/msgVpns/a%2Fb/queues) and must reach the broker so, or it
+// would name another path there.
 //
 // IPv6 hosts may be bare ("2001:db8::1") or bracketed ("[2001:db8::1]") and are
 // normalised to the bracketed form for URL construction. WebSocket schemes map
 // to their HTTP equivalents on the upstream URL so net/http's Transport can
 // dial: ws→http (TCP), wss→https (TCP+TLS). httputil.ReverseProxy detects the
 // Upgrade header on its own and hijacks the connection.
-func parseProxyPath(p string) (*url.URL, error) {
-	rest := strings.TrimPrefix(p, "/")
+func parseProxyPath(escaped string) (*url.URL, error) {
+	rest := strings.TrimPrefix(escaped, "/")
 	parts := strings.SplitN(rest, "/", 4)
 	if len(parts) < 3 {
 		return nil, errors.New("path must be /{scheme}/{port}/{host}[/rest]")
 	}
-	scheme := parts[0]
-	portStr := parts[1]
-	host := parts[2]
-	tail := ""
+	var head [3]string
+	for i := range head {
+		s, err := url.PathUnescape(parts[i])
+		if err != nil {
+			return nil, fmt.Errorf("invalid escape in %q", parts[i])
+		}
+		head[i] = s
+	}
+	scheme, portStr, host := head[0], head[1], head[2]
+	rawTail := ""
 	if len(parts) == 4 {
-		tail = parts[3]
+		rawTail = parts[3]
+	}
+	tail, err := url.PathUnescape(rawTail)
+	if err != nil {
+		return nil, errors.New("invalid escape in the path after the host")
 	}
 
 	var upstreamScheme string
@@ -246,13 +512,27 @@ func parseProxyPath(p string) (*url.URL, error) {
 	if host == "" {
 		return nil, errors.New("host segment empty")
 	}
+	// The host is held to the rule broker connections follow (validHost): a
+	// host with user info, spaces or other characters never reaches the URL.
+	bare := host
+	if strings.HasPrefix(bare, "[") && strings.HasSuffix(bare, "]") {
+		bare = bare[1 : len(bare)-1]
+		if net.ParseIP(bare) == nil {
+			return nil, fmt.Errorf("invalid host %q: brackets hold an IPv6 address only", host)
+		}
+	}
+	if !validHost(bare) {
+		return nil, fmt.Errorf("invalid host %q: %s", host, hostRule)
+	}
 	hostPort := joinHostPort(host, port)
 
-	upath := "/" + tail
+	// RawPath carries the escapes as they came: url.URL sends it while it
+	// is a valid encoding of Path, which the browser's own escaping is.
 	u := &url.URL{
-		Scheme: upstreamScheme,
-		Host:   hostPort,
-		Path:   upath,
+		Scheme:  upstreamScheme,
+		Host:    hostPort,
+		Path:    "/" + tail,
+		RawPath: "/" + rawTail,
 	}
 	return u, nil
 }
@@ -274,9 +554,15 @@ func joinHostPort(host string, port int) string {
 
 // ----- Access log middleware --------------------------------------------------
 
+// accessLog records one INFO line per request: the client withClient
+// resolved (it runs inside withClient), the signed-in user once a gate found
+// one, the status, the bytes and the time. A handler that takes over the
+// connection (a WebSocket) is logged as 101 with hijacked=true, and the time
+// is the socket's lifetime.
 func accessLog(next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// /hosted is polled frequently by the PWA — skip to avoid log spam.
+		// /hosted is skipped: the app asks it once per page load and a health
+		// probe asks it every few seconds, so its lines would drown the rest.
 		if r.URL.Path == "/hosted" {
 			next.ServeHTTP(w, r)
 			return
@@ -284,14 +570,11 @@ func accessLog(next http.Handler, logger *slog.Logger) http.Handler {
 		start := time.Now()
 		rec := &recordingResponseWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(rec, r)
-		logger.Info("request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"remote", r.RemoteAddr,
-			"status", rec.status,
-			"bytes", rec.bytes,
-			"duration_ms", time.Since(start).Milliseconds(),
-		)
+		attrs := []any{"status", rec.status, "bytes", rec.bytes, "duration_ms", time.Since(start).Milliseconds()}
+		if rec.hijacked {
+			attrs = append(attrs, "hijacked", true)
+		}
+		requestLogger(logger, r).Info("request", attrs...)
 	})
 }
 
@@ -300,7 +583,12 @@ type recordingResponseWriter struct {
 	status      int
 	bytes       int64
 	wroteHeader bool
+	hijacked    bool
 }
+
+// Unwrap lets http.ResponseController reach the connection beneath it, for
+// the read deadline a handler sets on its body (bodyDeadline).
+func (r *recordingResponseWriter) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 func (r *recordingResponseWriter) WriteHeader(code int) {
 	if r.wroteHeader {
@@ -322,12 +610,17 @@ func (r *recordingResponseWriter) Write(b []byte) (int, error) {
 
 // Hijack lets the WebSocket upgrade path keep working when the underlying
 // ResponseWriter supports it (httputil.ReverseProxy requires Hijacker for ws).
+// From then on the handler answers on the raw connection, with a 101.
 func (r *recordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	h, ok := r.ResponseWriter.(http.Hijacker)
 	if !ok {
 		return nil, nil, errors.New("response writer does not support hijack")
 	}
-	return h.Hijack()
+	conn, brw, err := h.Hijack()
+	if err == nil {
+		r.status, r.wroteHeader, r.hijacked = http.StatusSwitchingProtocols, true, true
+	}
+	return conn, brw, err
 }
 
 func (r *recordingResponseWriter) Flush() {
@@ -335,4 +628,3 @@ func (r *recordingResponseWriter) Flush() {
 		f.Flush()
 	}
 }
-

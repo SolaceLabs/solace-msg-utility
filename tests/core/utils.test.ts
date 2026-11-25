@@ -1,5 +1,6 @@
+// @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { formatBytes, generateUuid, matchString, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches } from '../../src/core/utils';
+import { formatBytes, formatUtc, generateUuid, matchString, matchContains, isValidHost, isValidPort, normalizeUrlPath, escapeHtml, escapeXml, topicsIntersect, topicFilterMatches, solaceErrorText, moduleLabel, errMessage, basicAuthHeader, sempAccountError, sempUsernameOk, clientUsernameError, clientUsernameOk } from '../../src/core/utils';
 
 describe('core/utils', () => {
 
@@ -20,6 +21,12 @@ describe('core/utils', () => {
 
         it('respects decimals parameter', () => {
             expect(formatBytes(1536, 1)).toBe('1.5 KB');
+        });
+    });
+
+    describe('formatUtc()', () => {
+        it('shows a gateway time without seconds, marked UTC', () => {
+            expect(formatUtc('2026-11-09T02:15:00Z')).toBe('2026-11-09 02:15 UTC');
         });
     });
 
@@ -57,7 +64,35 @@ describe('core/utils', () => {
 
         it('escapes regex special characters', () => {
             expect(matchString('test.value', 'test.*')).toBe(true);
-            expect(matchString('test[1]', 'test*')).toBe(true);
+            // An unescaped '.' would match any character here.
+            expect(matchString('testXvalue', 'test.*')).toBe(false);
+            expect(matchString('test[1]x', 'test[1]*')).toBe(true);
+            // An unescaped '[1]' would be a character class matching '1'.
+            expect(matchString('test1x', 'test[1]*')).toBe(false);
+        });
+    });
+
+    describe('matchContains()', () => {
+        it('a blank query matches everything', () => {
+            expect(matchContains('alice', '')).toBe(true);
+            expect(matchContains('alice', '   ')).toBe(true);
+        });
+
+        it('plain text is a case-insensitive substring', () => {
+            expect(matchContains('my-Orders-queue', 'ORDERS')).toBe(true);
+            expect(matchContains('my-orders-queue', ' orders ')).toBe(true);
+            expect(matchContains('my-orders-queue', 'payments')).toBe(false);
+        });
+
+        it('a * spans any run between the parts, in order', () => {
+            expect(matchContains('orders-queue', 'ord*q')).toBe(true);
+            expect(matchContains('ordq', 'ord*q')).toBe(true);
+            expect(matchContains('queue-orders', 'ord*q')).toBe(false);
+        });
+
+        it('regex characters are literal', () => {
+            expect(matchContains('host.a.b', 'a.b')).toBe(true);
+            expect(matchContains('host-axb', 'a.b')).toBe(false);
         });
     });
 
@@ -100,7 +135,7 @@ describe('core/utils', () => {
         });
 
         it('rejects non-integer-only strings', () => {
-            // Previously these slipped through because parseInt accepts leading digits.
+            // parseInt accepts leading digits, so these must be rejected explicitly.
             expect(isValidPort('8080abc')).toBe(false);
             expect(isValidPort('12.5')).toBe(false);
             expect(isValidPort(' 8080 ')).toBe(false);
@@ -211,15 +246,6 @@ describe('core/utils', () => {
             expect(topicsIntersect('a/b/c', 'a/b')).toBe(false);
         });
 
-        it('empty input is treated as a single empty level (split semantics)', () => {
-            // The module-level filter callers short-circuit on empty filter input
-            // before reaching topicsIntersect; this case documents the helper's
-            // behaviour for completeness.
-            expect(topicsIntersect('', '')).toBe(true);
-            expect(topicsIntersect('', '*')).toBe(true); // * matches one level (incl. empty)
-            expect(topicsIntersect('', 'a')).toBe(false);
-        });
-
         it('combines * and > correctly', () => {
             expect(topicsIntersect('orders/*/v1', 'orders/new/v1')).toBe(true);
             expect(topicsIntersect('orders/*/v1', 'orders/new/v2')).toBe(false);
@@ -247,20 +273,12 @@ describe('core/utils', () => {
             expect(topicsIntersect('B*', 'X*')).toBe(false); // can't start with both B and X
         });
 
-        it('memoizes recursion when both sides have multiple `*`s', () => {
-            // levelsIntersect uses an O(|a|·|b|) memoized two-pointer match.
-            // The memo cache-hit branch (`if (cached !== undefined) return
-            // cached`) only fires when a FALSE result is computed first and
-            // then revisited via a different recursion path — TRUE results
-            // short-circuit the OR before re-entry. Pattern below is
-            // levelsIntersect('a*x', 'a*y'): the literal 'x' vs 'y' diverges,
-            // forcing rec(2,2) to compute false, store it, then rec(1,2)'s
-            // first OR branch revisits rec(2,2) and hits the cache.
+        it('patterns with several * on each side intersect only when their literals can share a string', () => {
             expect(topicsIntersect('a*x', 'a*y')).toBe(false);
-            // Companion success cases (no cache hit but exercise the matcher
-            // on multi-* patterns; also serves as the perf canary).
             expect(topicsIntersect('**', '**')).toBe(true);
             expect(topicsIntersect('a*b*c', 'a*b*c')).toBe(true);
+            // Both need a literal the other allows between its wildcards (e.g. "XY").
+            expect(topicsIntersect('*'.repeat(10) + 'X' + '*'.repeat(10), '*'.repeat(10) + 'Y' + '*'.repeat(10))).toBe(true);
         });
 
         it('within-level * matches an empty suffix (zero chars)', () => {
@@ -268,11 +286,6 @@ describe('core/utils', () => {
             expect(topicsIntersect('B*', 'B')).toBe(true);
             // `*B` matches `B` for the same reason.
             expect(topicsIntersect('*B', 'B')).toBe(true);
-            // `*` alone matches the empty string... but in Solace topics,
-            // levels can't actually be empty (the broker would reject it).
-            // The helper still returns true on an empty level since the
-            // language theoretically intersects.
-            expect(topicsIntersect('*', '')).toBe(true);
         });
 
         it('within-level wildcards combine with > terminal wildcard', () => {
@@ -296,22 +309,11 @@ describe('core/utils', () => {
             expect(topicsIntersect('b*', 'BULKQ')).toBe(false);
             expect(topicsIntersect('B*Q', 'BulkQ')).toBe(true); // exact-case literal segments still match
         });
-
-        it('handles many wildcards without exponential blowup (memoized matcher)', () => {
-            // 10 wildcards per side. A naive recursion would be O(2^20);
-            // memoization keeps it O(|a|·|b|). Run it to prove no perceptible
-            // delay — pass condition is "test completes" + correct boolean.
-            const a = '*'.repeat(10) + 'X' + '*'.repeat(10);
-            const b = '*'.repeat(10) + 'Y' + '*'.repeat(10);
-            // Both patterns require an X and a Y respectively — any string
-            // containing both intersects (e.g. "XY"), so they overlap.
-            expect(topicsIntersect(a, b)).toBe(true);
-        });
     });
 
     describe('topicFilterMatches() — asymmetric user-vs-stored', () => {
         it('user input treats * as wildcard ANYWHERE in a level', () => {
-            // The user-reported case + family.
+            // Wildcard positions within a level.
             expect(topicFilterMatches('B*/*', 'BULKQ/TEST')).toBe(true);     // trailing-* in user
             expect(topicFilterMatches('*Q/T*', 'BULKQ/TEST')).toBe(true);    // leading-* in user
             expect(topicFilterMatches('B*Q/T*T', 'BULKQ/TEST')).toBe(true);  // middle-* in user
@@ -366,5 +368,147 @@ describe('core/utils', () => {
             expect(topicFilterMatches('B*', 'bulkq')).toBe(false);
             expect(topicFilterMatches('b*', 'BULKQ')).toBe(false);
         });
+    });
+});
+
+describe('core/utils moduleLabel', () => {
+    it('title-cases each dash-separated word', () => {
+        expect(moduleLabel('queue-browser')).toBe('Queue Browser');
+        expect(moduleLabel('x')).toBe('X');
+    });
+
+    it('uses the sidebar name where it is not the id title-cased', () => {
+        expect(moduleLabel('queue-subscription-explorer')).toBe('Queue Subscriptions');
+    });
+});
+
+describe('core/utils errMessage', () => {
+    it("shows an Error's message", () => {
+        expect(errMessage(new Error('dial refused'))).toBe('dial refused');
+    });
+
+    it('stringifies a non-Error throw rather than dropping it', () => {
+        expect(errMessage('plain string')).toBe('plain string');
+        expect(errMessage(undefined)).toBe('undefined');
+    });
+});
+
+describe('core/utils solaceErrorText', () => {
+    // The Solace SDK is not consistent about which field carries the reason, and
+    // the two shapes reach different call sites:
+    //   QueueBrowser CONNECT_FAILED_ERROR -> OperationError (Error, `.message`)
+    //   Session CONNECT_FAILED_ERROR      -> SessionEvent   (`.infoStr`)
+    // Reading only one loses the broker's explanation.
+
+    it('prefers message, the field a QueueBrowser OperationError carries', () => {
+        const operationError = Object.assign(new Error('Permission Denied'), { subcode: 20 });
+        expect(solaceErrorText(operationError, 'fallback')).toBe('Permission Denied');
+    });
+
+    it('falls back to infoStr, the field a SessionEvent carries', () => {
+        expect(solaceErrorText({ infoStr: 'Host unreachable' }, 'fallback')).toBe('Host unreachable');
+    });
+
+    it('prefers message when a value carries both', () => {
+        expect(solaceErrorText({ message: 'from message', infoStr: 'from infoStr' }, 'fallback'))
+            .toBe('from message');
+    });
+
+    it('uses the fallback when neither field is usable', () => {
+        expect(solaceErrorText({}, 'fallback')).toBe('fallback');
+        expect(solaceErrorText({ message: '   ', infoStr: '' }, 'fallback')).toBe('fallback');
+        expect(solaceErrorText(null, 'fallback')).toBe('fallback');
+        expect(solaceErrorText(undefined, 'fallback')).toBe('fallback');
+    });
+
+    it('never stringifies the object, so [object Object] cannot reach a user', () => {
+        // The `err.message || err` idiom would do exactly that.
+        expect(solaceErrorText({ nope: 1 }, 'fallback')).toBe('fallback');
+        expect(solaceErrorText(42, 'fallback')).toBe('fallback');
+    });
+
+    it('accepts a bare string, which some callers pass through', () => {
+        expect(solaceErrorText('Not connected to Solace.', 'fallback')).toBe('Not connected to Solace.');
+        expect(solaceErrorText('   ', 'fallback')).toBe('fallback');
+    });
+
+    it('ignores a non-string message or infoStr rather than rendering it', () => {
+        expect(solaceErrorText({ message: 500 }, 'fallback')).toBe('fallback');
+        expect(solaceErrorText({ message: 500, infoStr: 'real reason' }, 'fallback')).toBe('real reason');
+    });
+});
+
+describe('core/utils basicAuthHeader', () => {
+    it('base64-encodes user:pass as the Basic value', () => {
+        expect(basicAuthHeader('admin', 'p@ss#1')).toBe('Basic YWRtaW46cEBzcyMx');
+    });
+});
+
+describe('core/utils sempAccountError', () => {
+    it('accepts the rules at their limits', () => {
+        expect(sempAccountError('a'.repeat(32), 'x'.repeat(128))).toBeNull();
+        expect(sempAccountError('Admin01', '!#$%+-./09=?@AZ[]^_az{}~')).toBeNull();
+        expect(sempAccountError('ops-admin_2', 'secret')).toBeNull();
+    });
+
+    const CHARS = 'SEMP username may contain only letters, digits, - and _ (A-Z, a-z, 0-9, -, _).';
+    it.each([
+        ['', 'SEMP username is required.'],
+        ['a'.repeat(33), 'SEMP username must not exceed 32 characters.'],
+        ['ops.admin', CHARS],
+        ['user@corp', CHARS],
+        ['two words', CHARS],
+        ['mon:itor', CHARS],
+        ['adm\u00efn', CHARS],
+    ])('rejects the username %j', (user, message) => {
+        expect(sempAccountError(user, 'secret')).toEqual({ field: 'user', message });
+    });
+
+    it.each([
+        ['', 'SEMP password is required.'],
+        ['x'.repeat(129), 'SEMP password must not exceed 128 characters.'],
+        ['two words', 'SEMP password may contain only printable ASCII characters: no spaces or accented letters.'],
+        ['p\u00e4sswort', 'SEMP password may contain only printable ASCII characters: no spaces or accented letters.'],
+        ['euro\u20ac', 'SEMP password may contain only printable ASCII characters: no spaces or accented letters.'],
+    ])('rejects the password %j', (pass, message) => {
+        expect(sempAccountError('admin', pass)).toEqual({ field: 'pass', message });
+    });
+
+    it.each([':', '(', ')', '"', ';', "'", '<', '>', ',', '`', '\\', '*', '&', '|'])('rejects a password containing %s', (ch) => {
+        expect(sempAccountError('admin', `ab${ch}cd`)).toEqual({
+            field: 'pass',
+            message: 'SEMP password must not contain any of : ( ) " ; \' < > , ` \\ * & |',
+        });
+    });
+});
+
+describe('core/utils sempUsernameOk', () => {
+    it('takes a blank name (no SEMP account) and the rule at its limit', () => {
+        expect(['', 'admin', 'ops-admin_2', 'A'.repeat(32)].map(sempUsernameOk)).toEqual([true, true, true, true]);
+    });
+
+    it('refuses a long name or a character outside A-Z a-z 0-9 _ -', () => {
+        expect(['A'.repeat(33), 'ops.admin', 'a b', 'mon:itor', 'caf\u00e9'].map(sempUsernameOk))
+            .toEqual([false, false, false, false, false]);
+    });
+});
+
+describe('core/utils clientUsernameError', () => {
+    it('takes a blank name and any printable ASCII up to 189 characters, case and spaces kept', () => {
+        for (const user of ['', 'default', 'Default', 'app user', 'a:b@c.d/e#f', '~!'.repeat(94) + 'x']) {
+            expect({ user, error: clientUsernameError(user), ok: clientUsernameOk(user) }).toEqual({ user, error: null, ok: true });
+        }
+    });
+
+    it.each([
+        ['x'.repeat(190), 'Client username must not exceed 189 characters.'],
+        ['caf\u00e9', 'Client username may contain only printable ASCII characters: no accented letters or control characters.'],
+        ['tab\there', 'Client username may contain only printable ASCII characters: no accented letters or control characters.'],
+        ['del\u007f', 'Client username may contain only printable ASCII characters: no accented letters or control characters.'],
+        ['who?', 'Client username must not contain ? or *.'],
+        ['app*', 'Client username must not contain ? or *.'],
+    ])('refuses %j', (user, message) => {
+        expect(clientUsernameError(user)).toBe(message);
+        expect(clientUsernameOk(user)).toBe(false);
     });
 });

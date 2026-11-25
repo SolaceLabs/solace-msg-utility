@@ -1,7 +1,14 @@
 /**
  * Global test setup — mocks for browser APIs and external libraries.
+ *
+ * It runs for every test file, including those that run in Node rather than
+ * jsdom (a `// @vitest-environment node` line at the top of the file): the
+ * mocks that need a page (window, document, localStorage) are installed only
+ * where there is one.
  */
 import { vi, beforeEach, afterEach } from 'vitest';
+
+const hasDom = typeof window !== 'undefined';
 
 // ---- Global mocks ----
 
@@ -26,7 +33,7 @@ const localStorageMock = {
     get length() { return Object.keys(store).length; },
     key: vi.fn(localStorageDefaults.key)
 };
-Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, writable: true });
+if (hasDom) Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, writable: true });
 
 // Mock navigator.clipboard
 Object.defineProperty(navigator, 'clipboard', {
@@ -34,8 +41,10 @@ Object.defineProperty(navigator, 'clipboard', {
     writable: true
 });
 
-// Mock fetch
-(globalThis as any).fetch = vi.fn();
+// Mock fetch. beforeEach resets it and puts it back, so every test starts
+// from this bare vi.fn() (resolving undefined).
+const fetchMock = vi.fn();
+(globalThis as any).fetch = fetchMock;
 
 // Mock btoa (jsdom may not have it)
 if (typeof globalThis.btoa === 'undefined') {
@@ -49,8 +58,8 @@ if (typeof globalThis.atob === 'undefined') {
 URL.createObjectURL = vi.fn(() => 'blob:mock-url');
 URL.revokeObjectURL = vi.fn();
 
-// Mock confirm/alert
-globalThis.confirm = vi.fn(() => true);
+// Mock alert. No confirm mock: src code never calls confirm() (eslint no-alert); a yes/no
+// question is src/core/components/confirm-dialog, answered in tests via tests/helpers/confirmDialog.ts.
 globalThis.alert = vi.fn();
 
 // Polyfill HTMLDialogElement imperative methods. jsdom (as of v22/v23) creates
@@ -168,11 +177,10 @@ function createBrowserMock() {
         }),
         connect: vi.fn(),
         disconnect: vi.fn(),
-        // start/stop are used by the copy engine for per-message backpressure:
-        // after each MESSAGE event we stop() the browser, process the message
-        // (clone + publish + await ACK), then start() to receive the next one.
-        // This bounds memory at one in-flight message rather than letting the
-        // SDK buffer accumulate during a slow publish path.
+        // start/stop are used by the copy engine for backpressure: it stop()s
+        // the browser while too many publishes await their ACK and start()s
+        // it again once they drain, so the SDK buffer cannot grow during a
+        // slow publish path.
         start: vi.fn(),
         stop: vi.fn(),
         removeMessageFromQueue: vi.fn(),
@@ -181,7 +189,9 @@ function createBrowserMock() {
     };
 }
 
-function createMessageMock() {
+// `any`: the SDK message surface is far wider than this base, so a test adds
+// the getters it exercises (isRedelivered, smfHeader, ...) on top of it.
+function createMessageMock(): any {
     const props: Record<string, any> = {};
     // All setters use .mockReturnThis() so `msg.setDestination(...).setBinaryAttachment(...)`
     // chaining works transparently. The real SDK returns `this` from setters; without
@@ -247,8 +257,14 @@ function createMessageMock() {
 export { createSolaceMock, createSessionMock, createBrowserMock, createMessageMock };
 
 // Install solace mock by default
-(window as any).solace = createSolaceMock();
-(window as any).APP_CONFIG = { useMocks: false };
+if (hasDom) {
+    (window as any).solace = createSolaceMock();
+    // The shell's vendor loader sets this in the browser; `connect()` refuses to
+    // open a session without it (src/core/services/solace-client.ts). Default it
+    // true so suites exercise the normal path -- the refusal branch is driven by the
+    // one test that sets it false explicitly.
+    (window as any).solaceLibLoaded = true;
+}
 
 // Reset mocks between tests
 beforeEach(() => {
@@ -264,20 +280,29 @@ beforeEach(() => {
     localStorageMock.clear();
 
     // Same re-install pattern for the other global mocks — a test that calls
-    // `confirm.mockReturnValue(false)` or `URL.createObjectURL.mockReturnValueOnce(null)`
+    // `URL.createObjectURL.mockReturnValueOnce(null)`
     // would otherwise leak its override into the next test where a different
     // default is assumed.
-    (globalThis.confirm as any).mockImplementation(() => true);
     (globalThis.alert as any).mockImplementation(() => {});
     (URL.createObjectURL as any).mockImplementation(() => 'blob:mock-url');
     (URL.revokeObjectURL as any).mockImplementation(() => {});
     (navigator.clipboard.writeText as any).mockResolvedValue(undefined);
+    // clearAllMocks leaves a vi.fn()'s implementation and any unconsumed *Once
+    // values in place, so a test's `fetch.mockImplementation(...)` would answer
+    // the next test's requests. Reset it, and reinstall it over whatever a test
+    // assigned to fetch, so no test passes on another's stub.
+    fetchMock.mockReset();
+    (globalThis as any).fetch = fetchMock;
 
+    if (!hasDom) return;
     // Fresh Solace SDK mock every test — stale `_handlers` entries from a prior
     // test's `mockSession._handlers[UP_NOTICE] = …` assignments cannot fire in
     // the next test. Test files that instantiate their own mock in their own
-    // `beforeEach` simply overwrite this default, so this is backwards-compatible.
+    // `beforeEach` overwrite this default.
     (window as any).solace = createSolaceMock();
+    // Re-assert alongside it: `restoreAllMocks` doesn't touch plain property
+    // assignments, so a test that flips this false would otherwise leak.
+    (window as any).solaceLibLoaded = true;
 
     document.body.innerHTML = '';
 });

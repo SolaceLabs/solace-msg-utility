@@ -3,6 +3,7 @@ import { ui } from '../../../src/modules/queue-browser/ui-core.js';
 import { wireForward } from '../../../src/modules/queue-browser/ui-forward.js';
 import { state } from '../../../src/modules/queue-browser/state.js';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
+import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 
 function createBrowserDOM() {
     return loadModuleDOM('queue-browser');
@@ -13,7 +14,7 @@ describe('queue-browser/ui-forward', () => {
         const container = createBrowserDOM();
         document.body.appendChild(container);
         ui.initElements(container);
-        state.forwardQueue = [];
+        resetQueueBrowserState();
         // Spy (not direct reassign) so vi.restoreAllMocks() in the global afterEach
         // puts the real generateUuid back even if a test throws before its own
         // cleanup line would run. Counter is local per-test so there's no
@@ -23,25 +24,17 @@ describe('queue-browser/ui-forward', () => {
     });
 
     describe('getStatusIcon()', () => {
-        it('returns gray circle for QUEUED', () => {
-            expect(ui.getStatusIcon('QUEUED')).toContain('svg');
-            expect(ui.getStatusIcon('QUEUED')).toContain('circle');
-        });
+        it('shows no icon for a status the row does not know', () => {
+            state.forwardQueue = [{ correlationValue: 'cv-1', status: 'SENDING', originalMsg: { content: '' }, id: '1' }];
+            const statusEl = document.createElement('div');
+            statusEl.className = 'forward-item-status';
+            statusEl.dataset.cv = 'cv-1';
+            ui.getElements().listForwardMsgs.appendChild(statusEl);
 
-        it('returns spinner for SENDING', () => {
-            expect(ui.getStatusIcon('SENDING')).toContain('icon-spin');
-        });
-
-        it('returns checkmark for SUCCESS', () => {
-            expect(ui.getStatusIcon('SUCCESS')).toContain('polyline');
-        });
-
-        it('returns red circle for FAILED', () => {
-            expect(ui.getStatusIcon('FAILED')).toContain('disconnected');
-        });
-
-        it('returns empty for unknown status', () => {
-            expect(ui.getStatusIcon('UNKNOWN')).toBe('');
+            ui.updateForwardItemStatus('cv-1', 'SENDING');
+            expect(statusEl.innerHTML).not.toBe('');
+            ui.updateForwardItemStatus('cv-1', 'UNKNOWN');
+            expect(statusEl.innerHTML).toBe('');
         });
     });
 
@@ -134,6 +127,25 @@ describe('queue-browser/ui-forward', () => {
             expect(list.innerHTML).toContain('Error reason');
         });
 
+        it('shows the message id, the content preview and the error as text, never as markup', () => {
+            state.forwardQueue = [{
+                originalMsg: { content: '<img src=x onerror=alert(1)>' },
+                id: '<b>id</b>',
+                correlationValue: 'cv-1',
+                status: 'FAILED',
+                error: '<script>bad()</script>',
+            }];
+
+            ui.renderForwardList();
+
+            const list = ui.getElements().listForwardMsgs;
+            expect(list.querySelector('img, b, script')).toBeNull();
+            const [idEl, contentEl] = list.querySelectorAll('.browser-forward-row span');
+            expect(idEl.textContent).toBe('<b>id</b>');
+            expect(contentEl.textContent).toBe('<img src=x onerror=alert(1)>');
+            expect(list.querySelector('.browser-forward-error')!.textContent!.trim()).toBe('<script>bad()</script>');
+        });
+
         it('truncates long content', () => {
             state.forwardQueue = [
                 { originalMsg: { content: 'A'.repeat(50) }, id: 'msg-1', correlationValue: 'cv-1', status: 'QUEUED', error: null }
@@ -155,12 +167,11 @@ describe('queue-browser/ui-forward', () => {
     });
 
     describe('closeForwardModal()', () => {
-        it('hides modal and clears state', () => {
+        it('closes the modal', () => {
             ui.showForwardModal({ id: 'msg-1', content: 'test' });
             ui.closeForwardModal();
 
             expect(ui.getElements().modalForward.open).toBe(false);
-            expect(state.selectedForwardMsg).toBeNull();
         });
     });
 
@@ -176,12 +187,7 @@ describe('queue-browser/ui-forward', () => {
         it('shows error message string', () => {
             ui.onForwardFailure('Something went wrong');
             expect(ui.getElements().elForwardError.style.display).toBe('block');
-            expect(ui.getElements().elForwardError.textContent).toContain('Something went wrong');
-        });
-
-        it('shows error from Error object', () => {
-            ui.onForwardFailure({ message: 'Error message' });
-            expect(ui.getElements().elForwardError.textContent).toContain('Error message');
+            expect(ui.getElements().elForwardError.textContent).toBe('Error: Something went wrong');
         });
     });
 
@@ -190,8 +196,9 @@ describe('queue-browser/ui-forward', () => {
             state.forwardQueue = [{ correlationValue: 'cv-1', status: 'QUEUED', originalMsg: { content: '' }, id: '1' }];
 
             const statusEl = document.createElement('div');
-            statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
+            statusEl.className = 'forward-item-status';
+            statusEl.dataset.cv = 'cv-1';
+            ui.getElements().listForwardMsgs.appendChild(statusEl);
 
             ui.updateForwardItemStatus('cv-1', 'SUCCESS');
             expect(state.forwardQueue[0].status).toBe('SUCCESS');
@@ -202,29 +209,49 @@ describe('queue-browser/ui-forward', () => {
             state.forwardQueue = [{ correlationValue: 'cv-1', status: 'SENDING', originalMsg: { content: '' }, id: '1' }];
 
             const statusEl = document.createElement('div');
-            statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
+            statusEl.className = 'forward-item-status';
+            statusEl.dataset.cv = 'cv-1';
+            ui.getElements().listForwardMsgs.appendChild(statusEl);
 
             const errorEl = document.createElement('div');
-            errorEl.id = 'error-cv-1';
+            errorEl.className = 'forward-item-error';
+            errorEl.dataset.cv = 'cv-1';
             errorEl.classList.add('hidden');
-            document.body.appendChild(errorEl);
+            ui.getElements().listForwardMsgs.appendChild(errorEl);
 
             ui.updateForwardItemStatus('cv-1', 'FAILED', 'Rejected');
             expect(errorEl.textContent).toBe('Rejected');
             expect(errorEl.classList.contains('hidden')).toBe(false);
         });
 
+        it('updates the rendered row in the forward list, not a same-keyed element elsewhere in the page', () => {
+            state.forwardQueue = [{ correlationValue: 'cv-1', status: 'SENDING', originalMsg: { content: 'a' }, id: '1', error: null }];
+            ui.renderForwardList();
+            const stray = document.createElement('div');
+            stray.className = 'forward-item-error hidden';
+            stray.dataset.cv = 'cv-1';
+            document.body.insertBefore(stray, document.body.firstChild);
+
+            ui.updateForwardItemStatus('cv-1', 'FAILED', 'Rejected');
+
+            const row = ui.getElements().listForwardMsgs.querySelector('.forward-item-error[data-cv="cv-1"]') as HTMLElement;
+            expect([row.textContent, row.classList.contains('hidden')]).toEqual(['Rejected', false]);
+            expect(stray.classList.contains('hidden')).toBe(true);
+            stray.remove();
+        });
+
         it('hides error on non-FAILED status', () => {
             state.forwardQueue = [{ correlationValue: 'cv-1', status: 'SENDING', originalMsg: { content: '' }, id: '1' }];
 
             const errorEl = document.createElement('div');
-            errorEl.id = 'error-cv-1';
-            document.body.appendChild(errorEl);
+            errorEl.className = 'forward-item-error';
+            errorEl.dataset.cv = 'cv-1';
+            ui.getElements().listForwardMsgs.appendChild(errorEl);
 
             const statusEl = document.createElement('div');
-            statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
+            statusEl.className = 'forward-item-status';
+            statusEl.dataset.cv = 'cv-1';
+            ui.getElements().listForwardMsgs.appendChild(statusEl);
 
             ui.updateForwardItemStatus('cv-1', 'SUCCESS');
             expect(errorEl.classList.contains('hidden')).toBe(true);
@@ -335,7 +362,7 @@ describe('queue-browser/ui-forward', () => {
 
         it('does nothing when forwardQueue is null — button untouched', () => {
             // Covers the truthy branch of `if (!state.forwardQueue || !els.btnForwardSend)
-            // return;` at ui-forward.js:194. forwardQueue is reset to null after
+            // return;` in checkForwardCompletion. forwardQueue is reset to null after
             // the forward modal closes; if checkForwardCompletion runs against
             // that state (e.g. late ACK arrival after close), the guard must
             // short-circuit before reading `.length` / `.filter` on null.
@@ -355,8 +382,8 @@ describe('queue-browser/ui-forward', () => {
 
     describe('updateForwardCount() null-forwardQueue guard', () => {
         it('does nothing when forwardQueue is null — count element untouched', () => {
-            // Covers the truthy branch of `if (!state.forwardQueue) return;` at
-            // ui-forward.js:179. Late status updates or test-isolation scenarios
+            // Covers the truthy branch of `if (!state.forwardQueue) return;` in
+            // updateForwardCount. Late status updates or test-isolation scenarios
             // can hit updateForwardCount after forwardQueue has been reset; the
             // guard prevents a throw on `state.forwardQueue.length`.
             const els = ui.getElements();
@@ -404,7 +431,7 @@ describe('queue-browser/ui-forward', () => {
 
         it('handles missing icon container', () => {
             state.forwardQueue = [{ correlationValue: 'cv-1', status: 'QUEUED', originalMsg: { content: '' }, id: '1' }];
-            // No status-cv-1 element in DOM
+            // No status element in the list
             ui.updateForwardItemStatus('cv-1', 'SUCCESS');
             expect(state.forwardQueue[0].status).toBe('SUCCESS');
         });
@@ -412,9 +439,10 @@ describe('queue-browser/ui-forward', () => {
         it('handles missing error container', () => {
             state.forwardQueue = [{ correlationValue: 'cv-1', status: 'QUEUED', originalMsg: { content: '' }, id: '1' }];
             const statusEl = document.createElement('div');
-            statusEl.id = 'status-cv-1';
-            document.body.appendChild(statusEl);
-            // No error-cv-1 element
+            statusEl.className = 'forward-item-status';
+            statusEl.dataset.cv = 'cv-1';
+            ui.getElements().listForwardMsgs.appendChild(statusEl);
+            // No error element in the list
             ui.updateForwardItemStatus('cv-1', 'FAILED', 'error msg');
             expect(state.forwardQueue[0].status).toBe('FAILED');
         });

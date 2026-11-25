@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 372" width="760" height="372" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="760" height="372" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="16" width="690" height="292" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="44" font-size="15" font-weight="700">Entitlements</text>
+    <rect x="40" y="54" width="650" height="26" fill="#fffbeb" rx="4" stroke="#b45309"/>
+    <text x="50" y="71" font-size="11">These entitlements </text>
+    <text x="167.04" y="71" font-size="11" font-weight="700">cover queues only</text>
+    <text x="279.24" y="71" font-size="11">. Sending messages depends on configured Client's ACL Profile ...</text>
+    <circle cx="730" cy="67" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="730" y="71" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <text x="40" y="112" font-weight="700">Operate entitlements (read + write)</text>
+    <rect x="304" y="100" width="44" height="16" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="326" y="111" font-size="9" font-weight="700" text-anchor="middle">+ Add</text>
+    <circle cx="372" cy="108" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="372" y="112" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <text x="40" y="134" font-size="11" fill="#64748b" font-weight="700">Brokers</text>
+    <text x="240" y="134" font-size="11" fill="#64748b" font-weight="700">Message VPNs</text>
+    <text x="440" y="134" font-size="11" fill="#64748b" font-weight="700">Queues</text>
+    <rect x="40" y="142" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="160">east-prod</text>
+    <rect x="240" y="142" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="250" y="160">default</text>
+    <rect x="440" y="142" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="450" y="160">orders.*</text>
+    <rect x="646" y="144" width="24" height="24" fill="#ffffff" rx="4" stroke="#e2e8f0"/>
+    <text x="658" y="161" fill="#64748b" font-weight="700" text-anchor="middle">x</text>
+    <circle cx="730" cy="156" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="730" y="160" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <rect x="40" y="174" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="192">*</text>
+    <rect x="240" y="174" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="250" y="192">default</text>
+    <rect x="440" y="174" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="450" y="192">audit.*</text>
+    <rect x="646" y="176" width="24" height="24" fill="#ffffff" rx="4" stroke="#e2e8f0"/>
+    <text x="658" y="193" fill="#64748b" font-weight="700" text-anchor="middle">x</text>
+    <circle cx="685" cy="188" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="685" y="192" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+    <text x="40" y="238" font-weight="700">Read-only entitlements</text>
+    <rect x="210" y="226" width="44" height="16" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="232" y="237" font-size="9" font-weight="700" text-anchor="middle">+ Add</text>
+    <circle cx="278" cy="234" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="278" y="238" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+    <text x="40" y="260" font-size="11" fill="#64748b" font-weight="700">Brokers</text>
+    <text x="240" y="260" font-size="11" fill="#64748b" font-weight="700">Message VPNs</text>
+    <text x="440" y="260" font-size="11" fill="#64748b" font-weight="700">Queues</text>
+    <rect x="40" y="266" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="50" y="284">west-test</text>
+    <rect x="240" y="266" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="250" y="284">default</text>
+    <rect x="440" y="266" width="190" height="28" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+    <text x="450" y="284">*</text>
+    <rect x="646" y="268" width="24" height="24" fill="#ffffff" rx="4" stroke="#e2e8f0"/>
+    <text x="658" y="285" fill="#64748b" font-weight="700" text-anchor="middle">x</text>
+    <rect x="20" y="322" width="90" height="28" fill="#00C895" rx="5"/>
+    <text x="65" y="340" fill="#ffffff" font-weight="700" text-anchor="middle">Save</text>
+    <rect x="120" y="322" width="90" height="28" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="165" y="340" font-weight="700" text-anchor="middle">Cancel</text>
+    <circle cx="240" cy="336" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="240" y="340" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+</svg>

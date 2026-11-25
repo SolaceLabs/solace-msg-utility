@@ -1,5 +1,7 @@
+// @ts-nocheck -- checkJs backlog (JSDoc types for this file are pending; remove this line once they are in).
 import { isValidHost, isValidPort } from '../../core/utils';
 import { required, attachBackdropClose } from '../../core/dom';
+import { createSegmented } from '../../core/segmented';
 
 /** @type {any} */
 export const ui = {};
@@ -14,8 +16,13 @@ export const ui = {};
     ui.cacheElements = function (container) {
         elements.container = container;
 
-        // Broker Inputs — required: module installs require these.
+        // Broker type and its two host boxes (core/connections/broker-hosts.ts) -- required.
+        elements.elBrokerType = required(container, '#conn-broker-type');
+        elements.elBrokerTypeHint = required(container, '#conn-broker-type-hint');
         elements.elHost = required(container, '#conn-host');
+        elements.lblHost = required(container, '#lbl-conn-host');
+        elements.elSolHost = required(container, '#solace-host');
+        elements.elSolHostHint = required(container, '#solace-host-hint');
         elements.btnSave = required(container, '#btn-save-config');
         elements.btnLoad = required(container, '#btn-load-config');
         elements.btnReset = required(container, '#btn-reset-form');
@@ -24,13 +31,21 @@ export const ui = {};
         elements.elSolProtocol = required(container, '#solace-protocol');
         elements.elSolPort = required(container, '#solace-port');
         elements.elSolUrlPath = required(container, '#solace-url-path');
+        elements.elSolUrlPathField = required(container, '#solace-url-path-field');
+        elements.btnSolUrlPathAdd = required(container, '#btn-solace-url-path-add');
+        elements.btnSolUrlPathClear = required(container, '#btn-solace-url-path-clear');
         elements.elSolVpn = required(container, '#solace-vpn');
         elements.elSolUser = required(container, '#solace-username');
         elements.elSolPass = required(container, '#solace-password');
         elements.elSolClientNameId = required(container, '#solace-client-name-id');
         elements.elSolClientNameIdError = required(container, '#solace-client-name-id-error');
         elements.btnSolace = required(container, '#btn-solace-connect');
-        elements.radiosAuth = container.querySelectorAll('input[name="solace-auth-mode"]');
+        // Basic or OAuth2: the pressed button of the control (core/segmented.ts).
+        elements.authMode = createSegmented(required(container, '#solace-auth-mode'), {
+            attr: 'data-auth-mode',
+            choices: ['basic', 'oauth'],
+            onChange: () => ui.updateAuthUI(),
+        });
         elements.lblSolUser = container.querySelector('#lbl-solace-username');
         elements.lblSolPass = container.querySelector('#lbl-solace-password');
 
@@ -38,6 +53,9 @@ export const ui = {};
         elements.elSempProtocol = required(container, '#semp-protocol');
         elements.elSempPort = required(container, '#semp-port');
         elements.elSempUrlPath = required(container, '#semp-url-path');
+        elements.elSempUrlPathField = required(container, '#semp-url-path-field');
+        elements.btnSempUrlPathAdd = required(container, '#btn-semp-url-path-add');
+        elements.btnSempUrlPathClear = required(container, '#btn-semp-url-path-clear');
         elements.elSempUser = required(container, '#semp-username');
         elements.elSempPass = required(container, '#semp-password');
         elements.btnSemp = required(container, '#btn-semp-connect');
@@ -72,8 +90,6 @@ export const ui = {};
         els.btnCloseSsl.addEventListener('click', () => els.elSslModal.close());
         attachBackdropClose(els.elSettingsModal);
         attachBackdropClose(els.elSslModal);
-        // Auth Toggle — radiosAuth is a NodeList from querySelectorAll (never null).
-        els.radiosAuth.forEach(r => r.addEventListener('change', ui.updateAuthUI));
     };
 
     ui.showConnectError = function (el, msg, helpUrl) {
@@ -131,17 +147,12 @@ export const ui = {};
     };
 
     ui.getAuthMode = function () {
-        // `radiosAuth` is a NodeList from querySelectorAll — never null, empty if no matches.
-        for (const r of elements.radiosAuth) {
-            if (r.checked) return r.value;
-        }
-        return 'basic';
+        return elements.authMode.value();
     };
 
+    // A mode the control does not offer (a saved config from elsewhere) changes nothing.
     ui.setAuthMode = function (mode) {
-        for (const r of elements.radiosAuth) {
-            if (r.value === mode) r.checked = true;
-        }
+        elements.authMode.set(mode);
         ui.updateAuthUI();
     };
 
@@ -159,22 +170,23 @@ export const ui = {};
 
     // CRITICAL: Matches global state logic to disable inputs
     // Accepts appState parameter — no window.App references.
+    // The broker type and the host boxes are locked by module.ts, with the
+    // same two facts (BrokerHosts.lock).
     ui.updateInputState = function (appState) {
         const isSempConnected = appState.isSempConnected;
         const isSolaceConnected = appState.isConnected;
         const els = elements;
 
-        const anyConnected = isSolaceConnected || isSempConnected;
-        els.elHost.disabled = anyConnected;
-
         // Solace Fields
         els.elSolProtocol.disabled = isSolaceConnected;
         els.elSolPort.disabled = isSolaceConnected;
         els.elSolUrlPath.disabled = isSolaceConnected;
+        els.btnSolUrlPathAdd.disabled = isSolaceConnected;
+        els.btnSolUrlPathClear.disabled = isSolaceConnected;
         els.elSolVpn.disabled = isSolaceConnected;
         els.elSolUser.disabled = isSolaceConnected;
         els.elSolPass.disabled = isSolaceConnected;
-        els.radiosAuth.forEach(r => r.disabled = isSolaceConnected);
+        els.authMode.setDisabled(isSolaceConnected);
         // Settings modal stays openable while connected so the user can review
         // the values that took effect — each field inside is disabled below
         // so nothing can be edited mid-session.
@@ -191,6 +203,8 @@ export const ui = {};
         els.elSempProtocol.disabled = isSempConnected;
         els.elSempPort.disabled = isSempConnected;
         els.elSempUrlPath.disabled = isSempConnected;
+        els.btnSempUrlPathAdd.disabled = isSempConnected;
+        els.btnSempUrlPathClear.disabled = isSempConnected;
     };
 
     // Delegate to core/utils

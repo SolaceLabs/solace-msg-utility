@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { createService } from '../../../src/modules/queue-subscription-explorer/service';
 import { createEventBus } from '../../../src/core/event-bus';
 import type { AppContext, AppState } from '../../../src/core/types';
+import { managedErrorMessage } from '../../../src/core/services/managed-api';
+import { completeContext } from '../../helpers/appContext';
 
 function createTestContext(overrides: Partial<AppState> = {}): AppContext {
     const eventBus = createEventBus();
@@ -15,7 +17,7 @@ function createTestContext(overrides: Partial<AppState> = {}): AppContext {
         isSempConnected: true,
         ...overrides,
     };
-    return {
+    return completeContext({
         container: document.createElement('div'),
         appState,
         eventBus,
@@ -23,8 +25,7 @@ function createTestContext(overrides: Partial<AppState> = {}): AppContext {
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
         copyToClipboard: vi.fn(),
-        config: {},
-    };
+    });
 }
 
 function textRes(text: string, init: { ok?: boolean; statusText?: string } = {}): Response {
@@ -98,6 +99,36 @@ describe('queue-subscription-explorer/service', () => {
         expect(opts.body).toContain('<subscriptions/>');
     });
 
+    it("keeps only the signed-in user's rows in a Provisioned session: a provisioned VPN and a visible queue", async () => {
+        const PAGE = `<rpc-reply>
+  <rpc><show><queue><queues>
+    <queue><name>orders.new</name><info><message-vpn>orders</message-vpn></info>
+      <subscriptions><subscription><topic>o/new</topic></subscription></subscriptions>
+    </queue>
+    <queue><name>audit.x</name><info><message-vpn>orders</message-vpn></info>
+      <subscriptions><subscription><topic>o/audit</topic></subscription></subscriptions>
+    </queue>
+    <queue><name>orders.new</name><info><message-vpn>payments</message-vpn></info>
+      <subscriptions><subscription><topic>p/new</topic></subscription></subscriptions>
+    </queue>
+  </queues></queue></show></rpc>
+  <execute-result code="ok"/>
+</rpc-reply>`;
+        const ctx = createTestContext({
+            managed: {
+                admin: false, username: 'u', broker: 'b1', vpns: ['orders'], modules: ['queue-subscription-explorer'],
+                operate: [{ brokers: 'b1', msgVpns: '*', queues: 'orders.*' }], readOnly: [],
+            },
+        });
+        (ctx.sempFetch as any).mockResolvedValueOnce(textRes(PAGE));
+
+        const pages = await allPages(createService(ctx).fetchAllSubscriptions());
+        // audit.x: no row's queue pattern; payments: not a provisioned VPN.
+        expect(pages).toEqual([{ ok: true, data: [{ vpn: 'orders', queue: 'orders.new', topic: 'o/new' }] }]);
+        // The request still asks the broker for every VPN; the browser filters.
+        expect((ctx.sempFetch as any).mock.calls[0][1].body).toContain('<vpn-name>*</vpn-name>');
+    });
+
     it('follows <more-cookie> to fetch additional pages, throttling between them', async () => {
         vi.useFakeTimers();
         const ctx = createTestContext();
@@ -135,12 +166,28 @@ describe('queue-subscription-explorer/service', () => {
         vi.useRealTimers();
     });
 
-    it('terminates the stream on a non-ok HTTP response', async () => {
+    it('terminates the stream on a non-ok HTTP response, naming the status', async () => {
         const ctx = createTestContext();
-        (ctx.sempFetch as any).mockResolvedValueOnce({ ok: false, statusText: 'Server Error' });
+        (ctx.sempFetch as any).mockResolvedValueOnce({ ok: false, status: 500, statusText: 'Server Error' });
 
         const pages = await allPages(createService(ctx).fetchAllSubscriptions());
-        expect(pages).toEqual([{ ok: false, error: 'Server Error' }]);
+        expect(pages).toEqual([{ ok: false, error: 'Error fetching subscriptions (HTTP 500 Server Error)' }]);
+    });
+
+    it("reports a relay refusal as the gateway code's sentence", async () => {
+        const ctx = createTestContext();
+        (ctx.sempFetch as any).mockResolvedValueOnce({ ok: false, status: 502, statusText: '', json: async () => ({ error: 'upstream_unavailable' }) });
+
+        const pages = await allPages(createService(ctx).fetchAllSubscriptions());
+        expect(pages).toEqual([{ ok: false, error: managedErrorMessage({ ok: false, status: 502, code: 'upstream_unavailable' }) }]);
+    });
+
+    it('reports a request that timed out with the deadline', async () => {
+        const ctx = createTestContext();
+        (ctx.sempFetch as any).mockRejectedValueOnce(new DOMException('The operation timed out.', 'TimeoutError'));
+
+        const pages = await allPages(createService(ctx).fetchAllSubscriptions());
+        expect(pages).toEqual([{ ok: false, error: 'Error fetching subscriptions: no answer within 30 s.' }]);
     });
 
     it('terminates the stream on a parse-level error', async () => {
@@ -171,11 +218,11 @@ describe('queue-subscription-explorer/service', () => {
         expect(pages).toEqual([{ ok: false, error: 'Error fetching subscriptions' }]);
     });
 
-    it('falls back to a generic error when the response has no statusText', async () => {
+    it('names the bare status when an HTTP/2 response has no statusText', async () => {
         const ctx = createTestContext();
-        (ctx.sempFetch as any).mockResolvedValueOnce({ ok: false, statusText: '' });
+        (ctx.sempFetch as any).mockResolvedValueOnce({ ok: false, status: 403, statusText: '' });
 
         const pages = await allPages(createService(ctx).fetchAllSubscriptions());
-        expect(pages).toEqual([{ ok: false, error: 'Error fetching subscriptions' }]);
+        expect(pages).toEqual([{ ok: false, error: 'Error fetching subscriptions (HTTP 403)' }]);
     });
 });

@@ -1,3 +1,4 @@
+// @ts-nocheck -- checkJs backlog (JSDoc types for this file are pending; remove this line once they are in).
 /**
  * @typedef {import('../../core/connections/types').ConnectionConfig} ConnectionConfig
  */
@@ -17,13 +18,13 @@ export const config = /** @type {any} */ ({});
     // anyone with DevTools access can still recover the value (the XOR key
     // lives in this file). The goal is to prevent casual glance-reading of
     // hostnames / VPN names / SEMP URLs when a user happens to open
-    // Application → Local Storage. See improvement-plan 3.9.
+    // Application -> Local Storage.
     //
     // Format: `OBF1:` prefix + base64(xor(utf8(json), OBF_KEY)). The prefix
     // lets us (a) reject anything not matching the current scheme and (b)
     // evolve the format later (OBF2, etc.) without colliding. Any stored
     // value that isn't OBF1 is treated as missing — no legacy plaintext
-    // fallback, so a bad/corrupted/old value forces a clean reconfigure.
+    // fallback, so a bad/corrupted value forces a clean reconfigure.
     const OBF_PREFIX = 'OBF1:';
     const OBF_KEY = 'SolaceMsgUtility_v1';
 

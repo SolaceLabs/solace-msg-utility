@@ -9,6 +9,7 @@ import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
 import type { AppContext } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
 
 /**
  * Spec for the no-payload build flavor (`VITE_SHOW_PAYLOAD=false`).
@@ -31,7 +32,7 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
         container = loadModuleDOM('queue-browser');
         document.body.appendChild(container);
 
-        ctx = {
+        ctx = completeContext({
             container,
             appState: { activeModuleId: null, isConnected: false, selectedVpn: null, solaceConnection: null, sempCredentials: null, isSempConnected: false },
             eventBus: createEventBus(),
@@ -39,8 +40,7 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
             loadSelf: vi.fn(),
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
-            config: { useMocks: false }
-        };
+        });
 
         resetQueueBrowserState();
         // Real install performs the payload-DOM removal, the conditional required()
@@ -58,6 +58,7 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
         it('removes every payload-bearing element from the live DOM', () => {
             for (const sel of [
                 '#detail-content', '#btn-copy-content', '#btn-show-raw',
+                '#btn-show-content', '#detail-binary-note', '#detail-preview',
                 '#browser-raw-content-modal', '#raw-content-text', '#btn-raw-close',
                 '#btn-browser-download-content', '#btn-browser-download-full', '#filter-content'
             ]) {
@@ -105,6 +106,24 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
             expect(stored.type).toBe('Text');
             expect(stored._originalMsg).toBe(msg);       // raw SDK msg retained for Forward/Delete
         });
+
+        it('keeps a binary attachment off the stored message: no text, no bytes', () => {
+            const se = createServiceEvents();
+            state.messageStore.set('q1', []);
+            state.currentQueue = 'q1';
+            const msg = {
+                ...makeSdkMessage(),
+                getType: () => 1,
+                getSdtContainer: () => null,
+                getBinaryAttachment: () => '\x89PNG secret bytes'
+            };
+
+            se.onMessage('q1', msg);
+
+            const stored = state.messageStore.get('q1')![0];
+            expect(['content', 'bytes', 'binary'].filter(k => k in stored)).toEqual([]);
+            expect(stored.type).toBe('Binary');
+        });
     });
 
     describe('ui-table.ts', () => {
@@ -116,12 +135,14 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
             expect(html).toContain('btn-delete-row');
         });
 
-        it('renderList wires Forward (no download buttons) and updateCounts does not throw', () => {
+        it('renderList wires Forward (no download buttons) and updateCounts still counts', () => {
             const msg = { id: 'm1', date: '', size: 0, type: 'Text' };
             state.allMessages = [msg];
             state.displayedMessages = [msg];
             ui.renderList();                       // createRowHtml + attachRowListeners, flag off
-            expect(() => ui.updateCounts()).not.toThrow();
+            els.countTotal.textContent = '';
+            ui.updateCounts();
+            expect(els.countTotal.textContent).toBe('1');
 
             const row = container.querySelector('#browser-msg-list tr') as HTMLElement;
             expect(row.querySelector('.btn-download-content')).toBeNull();
@@ -158,8 +179,16 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
         });
 
         it('clearDetails clears metadata without touching the removed payload nodes', () => {
+            const msg = makeMsg('m1');
+            state.displayedMessages = [msg];
+            state.allMessages = [msg];
+            ui.renderList();
+            ui.selectMessage('m1');
+            expect(els.detailId.textContent).toBe('m1');
+
             expect(() => ui.clearDetails()).not.toThrow();
             expect(els.detailId.textContent).toBe('');
+            expect(els.detailDest.textContent).toBe('');
         });
     });
 
@@ -173,34 +202,52 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
             } as any);
         }
 
-        it('applyFilters leaves the body-content filter at its default and does not throw', () => {
+        it('applyFilters reads the remaining inputs and leaves the body-content filter at its default', () => {
             const uiEvents = makeUiEvents();
+            els.inputFilterId.value = 'm1';
             expect(() => uiEvents.applyFilters()).not.toThrow();
+            expect(state.activeFilters.msgId).toBe('m1');
             expect(state.activeFilters.content).toBe('');
         });
 
-        it('clearFilters does not throw with the body input removed', () => {
+        it('clearFilters resets the remaining inputs with the body input removed', () => {
             const uiEvents = makeUiEvents();
+            els.inputFilterId.value = 'm1';
+            state.activeFilters.msgId = 'm1';
             expect(() => uiEvents.clearFilters()).not.toThrow();
+            expect(els.inputFilterId.value).toBe('');
+            expect(state.activeFilters.msgId).toBe('');
             expect(state.activeFilters.content).toBe('');
         });
 
-        it('handleDropdownChange does not throw with the body input removed', () => {
+        it('handleDropdownChange resets the queue and filters with the body input removed', () => {
             const uiEvents = makeUiEvents();
+            state.currentQueue = 'q1';
+            els.inputFilterId.value = 'm1';
+            state.activeFilters.msgId = 'm1';
             expect(() => uiEvents.handleDropdownChange()).not.toThrow();
+            expect(state.currentQueue).toBe('');
+            expect(els.inputFilterId.value).toBe('');
+            expect(state.activeFilters.msgId).toBe('');
         });
     });
 
-    describe('ui-core.ts resetQueueSelection', () => {
-        it('does not throw with the body input removed', () => {
+    describe('ui-core.js resetQueueSelection', () => {
+        it('resets the queue and filters with the body input removed', () => {
+            state.currentQueue = 'q1';
+            els.inputFilterId.value = 'm1';
+            state.activeFilters.msgId = 'm1';
             expect(() => ui.resetQueueSelection()).not.toThrow();
+            expect(state.currentQueue).toBe('');
+            expect(els.inputFilterId.value).toBe('');
+            expect(state.activeFilters.msgId).toBe('');
         });
     });
 
-    describe('ui-forward.ts renderForwardList', () => {
+    describe('ui-forward.js renderForwardList', () => {
         it('renders the message id with an empty body preview', () => {
             state.forwardQueue = [{
-                originalMsg: { id: 'm1' },   // no `content` in the no-payload flavor
+                originalMsg: { id: 'm1', content: 'secret body' },   // never set in the no-payload flavor; seeded to prove it is not rendered
                 id: 'm1',
                 correlationValue: 'c1',
                 status: 'QUEUED',
@@ -211,6 +258,8 @@ describe('queue-browser/no-payload flavor (VITE_SHOW_PAYLOAD=false)', () => {
 
             const listHtml = els.listForwardMsgs.innerHTML;
             expect(listHtml).toContain('m1');
+            expect(listHtml).not.toContain('secret body');
+            expect(els.listForwardMsgs.querySelector('span.text-xs')!.textContent).toBe('');
         });
     });
 });

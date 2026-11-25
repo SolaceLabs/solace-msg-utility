@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createEventBus } from '../../src/core/event-bus';
+import { createManagedProfile } from '../../src/core/services/managed-profile';
 import { loadModuleDOM } from '../helpers/loadModuleDOM';
 import type { AppContext, AppState } from '../../src/core/types';
 
@@ -24,7 +25,6 @@ const mockFetchQueues = vi.fn();
 const mockSolaceInit = vi.fn();
 const mockSolaceConnect = vi.fn();
 const mockSolaceDisconnect = vi.fn();
-const mockSolaceCleanup = vi.fn();
 
 const mockSempConnect = vi.fn();
 const mockSempDisconnect = vi.fn();
@@ -47,7 +47,7 @@ vi.mock('../../src/modules/queue-discovery/service.js', () => ({
 }));
 
 vi.mock('../../src/core/services/solace-client', () => ({
-    // Factory signature changed from (ctx) to (hooks) in Stage B. The hooks
+    // The factory takes lifecycle hooks, not ctx. The hooks
     // object is captured but not invoked here — integration tests assert on
     // cross-module events (emitted by connections module's bridging code),
     // not on factory-internal SDK wiring. Hooks are exercised in
@@ -57,7 +57,6 @@ vi.mock('../../src/core/services/solace-client', () => ({
         init: mockSolaceInit,
         connect: mockSolaceConnect,
         disconnect: mockSolaceDisconnect,
-        cleanup: mockSolaceCleanup,
     })
 }));
 
@@ -74,6 +73,7 @@ import { QueueBrowserModule } from '../../src/modules/queue-browser/module';
 import { QueueDiscoveryModule } from '../../src/modules/queue-discovery/module';
 import { state, ingestMessage } from '../../src/modules/queue-browser/state.js';
 import { resetQueueBrowserState } from '../helpers/resetQueueBrowserState';
+import { completeContext } from '../helpers/appContext';
 
 // ---- Helpers ----
 
@@ -83,7 +83,7 @@ function makeCtx(overrides: Partial<AppContext> = {}): AppContext {
         activeModuleId: null, isConnected: false, selectedVpn: null,
         solaceConnection: null, sempCredentials: null, isSempConnected: false
     };
-    const ctx: AppContext = {
+    const ctx: AppContext = completeContext({
         container: document.createElement('div'),
         appState,
         eventBus,
@@ -93,10 +93,10 @@ function makeCtx(overrides: Partial<AppContext> = {}): AppContext {
         }),
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
+        managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
-        config: { useMocks: false },
         ...overrides
-    };
+    });
     return ctx;
 }
 
@@ -116,7 +116,6 @@ describe('Integration: module cross-talk', () => {
         mockSolaceInit.mockReset();
         mockSolaceConnect.mockReset();
         mockSolaceDisconnect.mockReset();
-        mockSolaceCleanup.mockReset();
         mockSempConnect.mockReset();
         mockSempDisconnect.mockReset();
 
@@ -128,7 +127,7 @@ describe('Integration: module cross-talk', () => {
         vi.restoreAllMocks();
     });
 
-    describe('Scenario #2 — Discover → Browse flow', () => {
+    describe('Discover -> Browse flow', () => {
         it('connection:check-connection on same VPN emits browser:browse-queue → bind fires', async () => {
             vi.useFakeTimers();
 
@@ -167,7 +166,7 @@ describe('Integration: module cross-talk', () => {
         });
     });
 
-    describe('Scenario #3 — config:max-messages-changed caps ingest', () => {
+    describe('config:max-messages-changed caps ingest', () => {
         it('cap set at connect-time bounds subsequent ingestMessage arrivals', async () => {
             // In real use, config:max-messages-changed only fires from Connections
             // at Connect click time — before any browser is bound and before any
@@ -197,11 +196,11 @@ describe('Integration: module cross-talk', () => {
         });
     });
 
-    describe('Scenario #4 — client:disconnected triggers disconnectAll', () => {
+    describe('client:disconnected triggers disconnectAll', () => {
         it('client:disconnected calls disconnectAll', async () => {
-            // Post-publisher-lift, the explicit forward-queue sweep was removed
-            // from queue-browser/module.ts: in-flight forward promises are
-            // resolved by publisher.dispose('Client disconnected.') inside
+            // queue-browser/module.ts does not sweep the forward queue: in-flight
+            // forward promises are resolved by
+            // publisher.dispose('Client disconnected.') inside
             // service.ts, and the .then handler in ui-events.handleForwardSend
             // calls ui.updateForwardItemStatus with the disposal reason. That
             // end-to-end flow is covered by tests/core/services/solace-publisher
@@ -220,7 +219,7 @@ describe('Integration: module cross-talk', () => {
         });
     });
 
-    describe('Scenario #6 — SEMP disconnect resets QueueDiscovery UI', () => {
+    describe('SEMP disconnect resets QueueDiscovery UI', () => {
         it('setState(isSempConnected=false) hides content, shows warning, clears VPN input', async () => {
             // fetchVpns runs on install when isSempConnected=true — give it a valid
             // empty async iterable so the install path doesn't explode.

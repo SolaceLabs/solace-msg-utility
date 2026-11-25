@@ -1,0 +1,255 @@
+<!-- @module-base -->
+<article class="manual-chapter">
+    <h2>Provisioned connections</h2>
+    <p class="manual-lead">Sign in to the gateway and connect to the brokers an administrator has granted you. You choose a broker and a Message VPN by name. You never see or type a broker address, a username or a password for the broker.</p>
+    <p>Provisioned connections need a gateway in Provisioned mode: the gateway serves this page and holds the brokers' accounts. You also need an account on the gateway, and at least one broker and Message VPN granted to it. The Provisioned tab is on the Connections page, so everything here continues the Connections chapter above.</p>
+
+    <h3>The page at a glance</h3>
+    <figure class="manual-figure">
+        <img src="help/provisioned-page.svg" width="760" height="290" alt="The Connections page when you are signed in: the account icons at the top of the sidebar, the Direct and Provisioned tabs, and the Connect to a broker card with Refresh, Broker, Message VPN and Connect.">
+        <figcaption>The Provisioned tab of the Connections page, signed in and not yet connected.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The account control at the top of the sidebar: <strong>Change password</strong>, <strong>Two-factor sign-in</strong> and <strong>Sign out</strong>, then your username. See "The sidebar in Provisioned mode" below.</li>
+        <li>The <strong>Direct</strong> and <strong>Provisioned</strong> tabs.</li>
+        <li><strong>Refresh</strong> reads your list of brokers and Message VPNs from the gateway again.</li>
+        <li><strong>Broker</strong>: the brokers granted to you.</li>
+        <li><strong>Message VPN</strong>: the Message VPNs granted to you on that broker.</li>
+        <li><strong>Connect</strong> opens the connection. While you are connected it reads <strong>Disconnect</strong>.</li>
+    </ol>
+
+    <h3>The sidebar in Provisioned mode</h3>
+    <aside class="manual-note" data-kind="important">
+        <p>This section is for Provisioned mode only, where you sign in to a gateway. Standalone mode (the app opened as a file, or from a web server) and Gateway mode (a gateway serves the app, with no sign-in) have no accounts. Their sidebar has no account control and always lists every page, as "Finding your way around" in the Connections chapter above shows.</p>
+    </aside>
+    <p>Signing in changes the sidebar in two ways. An account control appears at the top, above the page list, and stays there on every page. The page list shrinks to the pages your administrator gave you.</p>
+    <figure class="manual-figure">
+        <img src="help/provisioned-sidebar.svg" width="640" height="420" alt="The sidebar of a signed-in user, open and collapsed. Open: three account icons and the username alice above a divider, then the pages Connections, Queue Browser, Queue Copy and About, and the Client and SEMP indicators, both green. Collapsed: the three account icons stacked, the page icons and the two indicators.">
+        <figcaption>The sidebar while you are signed in and connected: open on the left, collapsed on the right.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Change password</strong>, the key. It opens the gateway's page for a new password. See "Changing your password" below.</li>
+        <li><strong>Two-factor sign-in</strong>, the padlock. It opens the gateway's page where you set two-factor sign-in up, or set it up again. See "Two-factor sign-in" below.</li>
+        <li><strong>Sign out</strong>, the arrow leaving a box. It closes your connection and ends your session on the gateway.</li>
+        <li>Your username. An administrator's name is followed by a small <code>admin</code> tag. A long name is cut short: rest the pointer on it to read <code>Signed in as alice</code>.</li>
+        <li>The page list. It holds Connections and About, and then only the pages your administrator gave you, out of Queue Browser, Queue Copy and Queue Subscriptions. Here Queue Subscriptions was not given, so it is not listed.</li>
+        <li>The Client and SEMP indicators. A Provisioned connection is both connections, so both are green while you are connected, and both are red after <strong>Disconnect</strong>.</li>
+        <li>The collapsed sidebar. The three icons stack and your username is hidden. Rest the pointer on an icon to read its name.</li>
+    </ol>
+    <p>What the sidebar shows follows where you stand:</p>
+    <table>
+        <thead>
+            <tr><th>Where you stand</th><th>Account control</th><th>Page list</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Signed out</td><td>Not shown.</td><td>Every page. Each page other than Connections and About shows <strong>Connection Required</strong>.</td></tr>
+            <tr><td>Signed in, connected on the Provisioned tab or not yet connected</td><td>Shown.</td><td>Connections, About and the pages you were given.</td></tr>
+            <tr><td>Signed in, after <strong>Connect</strong> on the Direct tab</td><td>Shown: you are still signed in.</td><td>Every page, as for any Direct connection. Your own list returns when you press <strong>Connect</strong> on the Provisioned tab.</td></tr>
+        </tbody>
+    </table>
+    <p>When an administrator changes your pages, the list changes after you press <strong>Refresh</strong> on the Connect card or reload the page. If the page you are on is taken away, the app opens the first page you still have.</p>
+
+    <h3>The two tabs</h3>
+    <p>The tabs appear only when your deployment offers both ways to connect. <strong>Direct</strong> is the form of the Connections chapter above, where you type the broker's details yourself. <strong>Provisioned</strong> is where you sign in. When a deployment offers one way only, there are no tabs and you see that one panel.</p>
+    <p>The deployment decides which tab opens first. After you sign in, the <strong>Provisioned</strong> tab opens. When the gateway offers only Provisioned connections, opening the app takes you straight to the gateway's sign-in page.</p>
+    <aside class="manual-note" data-kind="important">
+        <p>Only one way of connecting is live at a time. Connecting on the Direct tab closes your Provisioned connection. You stay signed in, and the Provisioned tab keeps your brokers, but while the Direct connection is in use the rules of your account do not apply: the sidebar and the queue lists are those of a Direct connection. Connecting on the Provisioned tab closes a Direct connection and brings your account's rules back. Moving between the tabs changes nothing: only <strong>Connect</strong> does.</p>
+    </aside>
+    <p>Each tab warns you before its <strong>Connect</strong> closes the other connection. The Direct tab shows <code>A Provisioned connection is open. Connect here closes it, and you stay signed in.</code> The Provisioned tab shows <code>A Direct connection is open. Connect here closes it.</code> When you press <strong>Connect</strong> on the Provisioned tab then, the gateway is first asked whether your session still stands. If it has ended, the Direct connection is left alone and the tab returns to the <strong>Sign in</strong> card.</p>
+    <p>If the page cannot tell whether the gateway serves it, it shows <strong>Could not check whether this page is served by the gateway.</strong> in place of the panels. Press <strong>Retry</strong> to ask again.</p>
+
+    <h3>Signing in</h3>
+    <p>While you are signed out, the Provisioned tab shows a <strong>Sign in</strong> card. The button is a link to the gateway's own sign-in page. You type your password there, never in this app.</p>
+    <figure class="manual-figure">
+        <img src="help/provisioned-signin.svg" width="760" height="280" alt="The Sign in card of the Provisioned tab on the left, and the gateway's sign-in page on the right, with Username, Password and a Sign in button.">
+        <figcaption>The Sign in card, and the gateway's page it leads to.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Sign in</strong> on the card opens the gateway's page.</li>
+        <li><strong>Username</strong> and <strong>Password</strong>: the account your administrator gave you.</li>
+        <li><strong>Sign in</strong> on the gateway's page sends them.</li>
+    </ol>
+    <ol class="manual-steps">
+        <li>Open the <strong>Provisioned</strong> tab and press <strong>Sign in</strong>. If only Provisioned connections are offered, the gateway's page opens by itself.</li>
+        <li>Type your <strong>Username</strong> and <strong>Password</strong> and press <strong>Sign in</strong>.</li>
+        <li>If your account uses two-factor sign-in, the gateway asks for a code next. See "Two-factor sign-in" below.</li>
+        <li>You return to the app with the <strong>Provisioned</strong> tab open and the Connect card ready.</li>
+    </ol>
+    <p>If the gateway asks you to choose a password first, the card's button reads <strong>Change password</strong> instead of <strong>Sign in</strong>. Press it and follow "Changing your password" below.</p>
+    <p>Your sign-in survives a reload of the page. It ends when you sign out, after a period without activity, and a fixed time after you signed in; your administrator sets both limits. Activity is your own typing, clicking and scrolling anywhere in the app: while you work, the page keeps the sign-in in use, and a page left alone runs out. Unless your administrator has changed them, they are 10 minutes without activity and 30 minutes after you signed in. It also ends when an administrator changes your account. If it ends while you are using the page, the card says <code>Your session has ended. Sign in again.</code></p>
+
+    <h3>Connecting to a broker</h3>
+    <p>The <strong>Connect to a broker</strong> card, called the Connect card in this chapter, holds the lists and the button.</p>
+    <ol class="manual-steps">
+        <li>Choose a <strong>Broker</strong>. The list holds only the brokers granted to you.</li>
+        <li>Choose a <strong>Message VPN</strong>. The list holds only the Message VPNs granted to you on that broker, and changes when you change the broker.</li>
+        <li>Press <strong>Connect</strong>. The button reads <strong>Connecting...</strong> and stays off until the attempt ends.</li>
+        <li>A status line names each step: <code>Connecting SEMP (management) to broker "east-prod"...</code>, then <code>Connecting messaging (client) to broker "east-prod", VPN "default"...</code></li>
+        <li>When both connections are up, the card gives way to the connected view.</li>
+    </ol>
+    <p>A Provisioned connection is two connections that one press of <strong>Connect</strong> opens together. <strong>SEMP (management)</strong> is the connection the pages use to read lists, such as the queues you can bind. <strong>Messaging (client)</strong> carries the messages themselves. You are connected only when both are up. If one fails, the one that came up is closed again, so nothing stays half-connected.</p>
+    <p>If your account has no broker granted, the card shows <code>No connections are available for your account. Ask an administrator to grant access.</code> in place of the lists. Once an administrator has granted access, press <strong>Refresh</strong>.</p>
+
+    <h3>When a connection fails</h3>
+    <p>The card says which of the two connections failed and why, one line for each. A connection that comes up and is closed again because the other failed gets a line too. The page tries the messaging connection even when SEMP has failed, so one attempt can show both reasons.</p>
+    <figure class="manual-figure">
+        <img src="help/provisioned-failed.svg" width="760" height="250" alt="The Connect to a broker card after a failed attempt, with two red lines under the Connect button: the SEMP connection could not reach the broker, and the messaging connection is closed because of it.">
+        <figcaption>A failed attempt: SEMP could not reach the broker, so the messaging connection is closed again.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Connect</strong> is on again: you can try once more.</li>
+        <li>One line for each connection: its name, then a short reason.</li>
+    </ol>
+    <p>The full text of each failure goes to the notification bell. Open the bell when the card only says <code>failed, details in the log</code>.</p>
+    <table>
+        <thead>
+            <tr><th>Reason on the card</th><th>What it means and what to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>broker not reachable</code></td><td>The gateway could not reach the broker. A SEMP failure that timed out reads <code>broker not reachable (timed out)</code>, and a messaging one <code>timed out</code>. Try again. If it keeps happening, tell your administrator.</td></tr>
+            <tr><td><code>broker refused the gateway's account</code></td><td>The broker turned down the account the gateway holds for it. Your administrator must put it right.</td></tr>
+            <tr><td><code>not available to your account</code></td><td>The gateway does not offer you that broker or Message VPN. Press <strong>Refresh</strong>, then ask your administrator if it is still missing.</td></tr>
+            <tr><td><code>too many attempts, wait a minute</code></td><td>The gateway limits how often you may connect. Wait a minute and try again.</td></tr>
+            <tr><td><code>gateway not reachable</code></td><td>This page could not reach the gateway. Check your network.</td></tr>
+            <tr><td><code>gateway did not answer in time</code></td><td>The gateway took too long to answer. Try again.</td></tr>
+            <tr><td><code>the gateway could not complete it</code></td><td>The gateway failed on its side. Tell your administrator.</td></tr>
+            <tr><td>The broker's own words, when short</td><td>For example a refused client login. A longer reason reads <code>failed, details in the log</code>.</td></tr>
+        </tbody>
+    </table>
+    <p>The two connection names are <code>SEMP (management)</code> and <code>Messaging (client)</code>. A line for a connection that is closed again reads, for example, <code>Messaging (client): connected, closed because SEMP failed</code>.</p>
+    <p>If your session has ended while you connect, you return to the <strong>Sign in</strong> card, which says <code>Your session has ended. Sign in again.</code></p>
+
+    <h3>The connected view</h3>
+    <figure class="manual-figure">
+        <img src="help/provisioned-connected.svg" width="760" height="150" alt="The Connected card: a Disconnect button at the right and a line naming the broker and the Message VPN.">
+        <figcaption>The connected view.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Disconnect</strong> closes both connections.</li>
+        <li>The broker and the Message VPN you are connected to.</li>
+    </ol>
+    <p>The other pages of the sidebar now work on this connection, limited to what you were granted.</p>
+    <p>While you are connected, the Connect card and its <strong>Refresh</strong> button are hidden. To change broker or Message VPN, or to press <strong>Refresh</strong>, press <strong>Disconnect</strong> first.</p>
+    <p>If the messaging connection drops without you asking, SEMP is closed too and the card returns with <code>Messaging (client): connection dropped, so SEMP was closed too</code>. Press <strong>Connect</strong> again. <strong>Disconnect</strong> and <strong>Sign out</strong> are not faults, so the card simply reads as not connected.</p>
+
+    <h3>Refreshing your list</h3>
+    <p>Press <strong>Refresh</strong> to read your brokers, Message VPNs and pages from the gateway again. It does not sign you out and does not reload the page. Use it after an administrator has changed what you may use. The pages in the sidebar change to match.</p>
+    <p>If the gateway cannot be reached, the card shows the reason and keeps the list you had. If your session has ended, you return to the <strong>Sign in</strong> card.</p>
+
+    <h3>Switching to another Message VPN</h3>
+    <p>There are two ways.</p>
+    <ul>
+        <li>Press <strong>Disconnect</strong>, choose the other Message VPN in the Connect card and press <strong>Connect</strong>. Both connections open again.</li>
+        <li>Pick a queue that lives on another Message VPN from the queue list of Queue Browser or Queue Copy. The app asks <code>Current VPN is "default". Switch to "billing"?</code> Press <strong>Switch</strong> to continue, or <strong>Cancel</strong> to stay as you are. On <strong>Switch</strong> the messaging connection closes and opens again on the other Message VPN, and SEMP stays up. The page you came from then opens with the queue.</li>
+    </ul>
+    <p>If you are not connected when you pick such a queue, the app takes you to the Connect card and you choose the broker and Message VPN yourself.</p>
+    <p>A switch that cannot finish leaves the reason on the Connect card and in a warning that begins <code>Could not switch to VPN "billing":</code> and then gives the reason. The reasons are:</p>
+    <ul>
+        <li><code>the session on VPN "default" did not close within 10 s.</code></li>
+        <li><code>VPN "billing" did not connect within 30 s.</code></li>
+        <li><code>the connection to VPN "billing" closed before it came up.</code></li>
+        <li><code>Messaging (client):</code> followed by the reason of a failed connect, as in the table above. SEMP is closed too, because the connection is one connection. Press <strong>Connect</strong> to start again.</li>
+    </ul>
+    <p>While a connect is running, a request to switch is refused with <code>A connection attempt is in progress. Try again once it has finished.</code></p>
+
+    <h3>Disconnecting and signing out</h3>
+    <ul>
+        <li><strong>Disconnect</strong> closes both connections and returns to the Connect card. You stay signed in.</li>
+        <li><strong>Sign out</strong> is the last icon of the account control. It closes your connection if there is one, ends your session on the gateway and returns the tab to the <strong>Sign in</strong> card. The sidebar's account control goes away.</li>
+    </ul>
+
+    <h3>Changing your password</h3>
+    <p>Press <strong>Change password</strong>, the key icon at the top of the sidebar. It opens the gateway's own page. The page is a link away from the app, so leaving it closes your connection. Press <strong>Connect</strong> again when you return.</p>
+    <ol class="manual-steps">
+        <li>Type your <strong>Current password</strong>.</li>
+        <li>Type the <strong>New password</strong> twice: in <strong>New password</strong> and in <strong>Confirm new password</strong>. The page says how long it may be, as <code>N to 128 characters</code>. Your administrator sets the shortest length.</li>
+        <li>Press <strong>Change password</strong>. You return to the app and stay signed in here. Any other browser you were signed in on is signed out.</li>
+    </ol>
+    <p>Press <strong>Cancel</strong> to leave without changing anything. When the gateway insists on a change first, the page says <code>You must set a new password before you continue.</code> and has no <strong>Cancel</strong>.</p>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>What to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>The current password is not correct.</code></td><td>Type your current password again. A wrong password counts like a failed sign-in.</td></tr>
+            <tr><td><code>The new passwords do not match.</code></td><td>Type the same text in both new-password boxes.</td></tr>
+            <tr><td><code>The new password must be N to 128 characters.</code></td><td>Choose one of a length the page allows.</td></tr>
+            <tr><td><code>The new password must differ from the current one.</code></td><td>Choose a different password.</td></tr>
+            <tr><td><code>Too many attempts. Try again in N seconds.</code></td><td>Wait as long as the message says.</td></tr>
+            <tr><td><code>The password could not be checked. Try again.</code> or <code>The password could not be saved.</code></td><td>Nothing changed. Try again, and tell your administrator if it repeats.</td></tr>
+            <tr><td><code>Your account was changed while this request ran. Sign in again.</code></td><td>Sign in again, then repeat the change.</td></tr>
+            <tr><td><code>The gateway cannot record changes right now, so it refused this one. Try again later or tell an administrator.</code></td><td>Nothing changed. Try again later.</td></tr>
+        </tbody>
+    </table>
+
+    <h3>Two-factor sign-in</h3>
+    <p>Two-factor sign-in asks for a six-digit code from an authenticator app on your phone after your password. Your administrator decides whether it is optional, required for administrators, or required for everyone. Whatever the rule, you can set it up yourself, and once it is on, the gateway always asks for a code.</p>
+    <h4>Setting it up</h4>
+    <p>When the gateway requires it of you and you have not set it up, the sign-in carries on to the page <strong>Set up two-factor sign-in</strong> after your password, and you are not signed in until you finish. Start at step 2 below. To set it up of your own accord, press <strong>Two-factor sign-in</strong>, the lock icon at the top of the sidebar.</p>
+    <ol class="manual-steps">
+        <li>On the page <strong>Two-factor sign-in</strong>, type your <strong>Password</strong>. If two-factor is already on, also type <strong>Current code or a recovery code</strong>. Press <strong>Continue</strong>. <strong>Cancel</strong> leaves without changing anything.</li>
+        <li>On <strong>Set up two-factor sign-in</strong>, scan the picture with an authenticator app. Or type the <strong>Key</strong> shown under it into the app. If the picture cannot be drawn, the page says <code>The picture could not be drawn. Type the key into your app instead.</code></li>
+        <li>Type the six-digit code the app shows in <strong>Code</strong> and press <strong>Turn on two-factor sign-in</strong>.</li>
+        <li>The page <strong>Recovery codes</strong> lists ten codes in groups of four characters. Save them somewhere other than your phone. Each works once, and this page is the only place they are shown. Press <strong>Continue</strong>. If you must also choose a new password, <strong>Continue</strong> takes you to that page first.</li>
+    </ol>
+    <aside class="manual-note" data-kind="warning">
+        <p>The recovery codes are shown only once. If you lose your phone and have no recovery code left, only an administrator can reset your two-factor sign-in. You cannot turn it off yourself, and your password alone does not get you in.</p>
+    </aside>
+    <p>If you lose your phone but still have a recovery code, type it in <strong>Code</strong> to sign in. Then set two-factor sign-in up again on the new phone.</p>
+    <p>Setting it up again, for example on another phone, replaces the key and the recovery codes and signs you out everywhere else. This browser stays signed in.</p>
+    <h4>Signing in with a code</h4>
+    <p>After your password, the page <strong>Two-factor sign-in</strong> says <code>Enter the 6-digit code from your authenticator app, or one of your recovery codes.</code> Type the code in <strong>Code</strong> and press <strong>Continue</strong>. Spaces or hyphens inside the digits do not matter. A recovery code works once, and its letters may be in either case, with or without hyphens or spaces. <strong>Start again</strong> goes back to the password. A half-finished sign-in is dropped after the time your administrator allows, 10 minutes unless they have changed it.</p>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>What to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>The code is not correct.</code></td><td>Type the code the app currently shows. A code works once, so if you sign in again straight away, wait for the app's next code. The same message appears on the set-up page when the first code is wrong, and the page shows the same key again. A used recovery code does not work again. Wrong codes count like wrong passwords.</td></tr>
+            <tr><td><code>The password or the code is not correct.</code></td><td>On the page <strong>Two-factor sign-in</strong> that asks for your password, check both and try again.</td></tr>
+            <tr><td><code>Too many attempts. Try again in N seconds.</code></td><td>Wait as long as the message says.</td></tr>
+            <tr><td><code>The gateway cannot record changes right now, so it cannot accept a recovery code. Sign in with the code from your authenticator app, or try again later.</code></td><td>Use the code from the app, or wait.</td></tr>
+        </tbody>
+    </table>
+
+    <h3>What you can see and do</h3>
+    <p>The gateway shows you only what an administrator granted you. Each grant names brokers, Message VPNs and queues, and gives one of two levels.</p>
+    <table>
+        <thead>
+            <tr><th>Level</th><th>What it lets you do on a queue</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Operate</td><td>Browse the queue, forward messages and delete them.</td></tr>
+            <tr><td>Read-only</td><td>Browse the queue and forward messages. Queue Browser marks the queue with a <strong>Read-Only</strong> badge and hides <strong>Delete</strong>. Queue Copy can copy from it, but not move from it.</td></tr>
+        </tbody>
+    </table>
+    <ul>
+        <li>The <strong>Broker</strong> and <strong>Message VPN</strong> lists, and the queue lists in the pages, hold only what you were granted.</li>
+        <li>If you type the name of a queue you were not granted, it does not bind, and Queue Browser says <code>You are not entitled to browse queue "orders.private".</code></li>
+        <li>In Queue Copy, the queue lists of the destination hold only queues on which you hold Operate, because copying into a queue changes it.</li>
+        <li>The page applies the queue limits itself: the gateway checks that you were granted the broker, and the page then narrows each list to the queues you were granted.</li>
+        <li>Queue Subscriptions lists only subscriptions on queues you may see, as the Queue Subscriptions chapter says.</li>
+        <li>In Queue Copy, a destination queue you may not write to gives <code>You are not entitled to write to queue "orders.archive".</code> A topic destination is not checked against your grants: the broker decides where the connection may publish.</li>
+        <li>The sidebar lists only the pages your administrator gave you, as "The sidebar in Provisioned mode" above says.</li>
+    </ul>
+    <p>If an administrator takes away something you were using while you work, whatever depended on it stops. The gateway also closes your messaging connection when you sign out, in this tab or another, when your password or administrator status changes, and when an administrator removes your access to that broker or Message VPN. SEMP is closed with it, as in "The connected view" above.</p>
+
+    <h3>Other messages</h3>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>What it means and what to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>Your session has ended. Sign in again.</code></td><td>The gateway ended your sign-in. Press <strong>Sign in</strong>.</td></tr>
+            <tr><td><code>You must change your password before you continue.</code></td><td>Press <strong>Change password</strong> and choose a password.</td></tr>
+            <tr><td><code>Sign-in failed. Check the username and password.</code></td><td>On the gateway's page: check both. The message is the same whatever went wrong.</td></tr>
+            <tr><td><code>Sign-in could not be checked. Try again.</code></td><td>The gateway could not look up your account. Try again.</td></tr>
+            <tr><td><code>Too many requests. Wait a minute and try again.</code> or, on the gateway's page, <code>Too many requests from this address. Wait a minute and try again.</code></td><td>Wait a minute.</td></tr>
+            <tr><td><code>The gateway could not be reached.</code></td><td>Check your network, then press <strong>Refresh</strong>.</td></tr>
+            <tr><td><code>The gateway did not answer in time.</code> followed by a sentence about changes</td><td>If you were changing something, reload the page to see where things stand before you try again.</td></tr>
+            <tr><td><code>Broker "east-prod" is not provisioned for this account.</code> or <code>VPN "default" is not provisioned on broker "east-prod".</code></td><td>Your account does not hold that grant. Press <strong>Refresh</strong>, or ask your administrator.</td></tr>
+            <tr><td><code>The broker refused the credential the gateway holds for it. Ask an administrator to check the connection.</code></td><td>Only an administrator can fix this.</td></tr>
+            <tr><td><code>The gateway could not reach the broker, or the broker gave an answer it cannot pass on. Its log has the cause.</code></td><td>Tell your administrator.</td></tr>
+            <tr><td><code>The gateway relays SEMP reads only; this request would change the broker.</code></td><td>A Provisioned connection only reads through SEMP. Nothing is changed.</td></tr>
+        </tbody>
+    </table>
+</article>

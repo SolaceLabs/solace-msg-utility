@@ -1,75 +1,42 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 
 describe('main.ts entry point', () => {
+    let startSpy: Mock<() => Promise<void>>;
+    let createKernel: Mock;
+
     beforeEach(() => {
         vi.resetModules();
-        // Provide minimal DOM for kernel
-        document.body.innerHTML = `
-            <nav id="sidebar-nav"></nav>
-            <div id="module-container"></div>
-            <h1 id="page-title"></h1>
-            <div id="status-indicator-client"></div>
-            <div id="status-indicator-semp"></div>
-        `;
+        vi.doMock('../src/registry', () => ({ modules: [] }));
+        // main.ts gets this kernel from createKernel, so its start() is the spy.
+        startSpy = vi.fn(() => Promise.resolve());
+        createKernel = vi.fn(() => ({ start: startSpy, navigateTo: vi.fn() }));
+        vi.doMock('../src/core/kernel', () => ({ createKernel }));
     });
 
-    it('boots immediately when solace is available and DOM is ready', async () => {
-        (window as any).solace = {
-            SolclientFactoryProperties: vi.fn(() => ({})),
-            SolclientFactoryProfiles: { version10: 'version10' },
-            LogLevel: { WARN: 'WARN' },
-            SolclientFactory: { init: vi.fn() }
-        };
+    afterEach(() => {
+        vi.doUnmock('../src/core/kernel');
+        vi.doUnmock('../src/registry');
+        document.body.innerHTML = '';
+    });
 
-        // Mock the modules import to return empty array
-        vi.doMock('../src/registry', () => ({ modules: [] }));
+    it('starts the kernel at once when solace is available', async () => {
+        (window as any).solace = {};
 
-        const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
         await import('../src/main');
 
-        // Allow microtask queue to flush
-        await new Promise(r => setTimeout(r, 10));
-
-        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('[Kernel]'));
+        expect(createKernel).toHaveBeenCalledWith([]);
+        expect(startSpy).toHaveBeenCalledTimes(1);
     });
 
-    it('boots in limited mode when no solace script found', async () => {
-        (window as any).solace = undefined;
+    it('logs a rejected kernel start instead of leaving an unhandled rejection', async () => {
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const failure = new Error('start blew up');
+        startSpy.mockRejectedValue(failure);
 
-        vi.doMock('../src/registry', () => ({ modules: [] }));
-
-        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         await import('../src/main');
 
-        await new Promise(r => setTimeout(r, 10));
-
-        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('limited mode'));
+        await vi.waitFor(() => expect(errSpy).toHaveBeenCalledWith(
+            expect.stringContaining('The kernel failed to start'), failure));
+        errSpy.mockRestore();
     });
-
-    it('boots when solclient script loads after main.ts imports', async () => {
-        (window as any).solace = undefined;
-
-        const script = document.createElement('script');
-        script.src = 'https://example.com/solclient.js';
-        document.body.appendChild(script);
-
-        vi.doMock('../src/registry', () => ({ modules: [] }));
-
-        const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
-        await import('../src/main');
-
-        // Simulate solclient.js finishing load
-        (window as any).solace = {
-            SolclientFactoryProperties: vi.fn(() => ({})),
-            SolclientFactoryProfiles: { version10: 'version10' },
-            LogLevel: { WARN: 'WARN' },
-            SolclientFactory: { init: vi.fn() }
-        };
-        script.dispatchEvent(new Event('load'));
-
-        await new Promise(r => setTimeout(r, 10));
-
-        expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('[Kernel]'));
-    });
-
 });

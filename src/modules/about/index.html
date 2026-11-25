@@ -1,0 +1,44 @@
+<!-- The About page: what the app is, its version and where the project lives.
+     The Help tab holds the manual: the build puts in the chapter of each module
+     of the bundle (src/modules/<id>/help.html) where the manual marker stands.
+     A demo build, and a bundle none of whose modules has a chapter, loses the
+     blocks marked for the manual and ships the About card alone. -->
+<div class="about-page">
+    <!-- @help:start -->
+    <div id="about-tabs" class="tabs" role="tablist" aria-label="About and Help">
+        <button id="about-tab-about" class="tab is-active" type="button" role="tab" aria-selected="true" aria-controls="about-panel-about">About</button>
+        <button id="about-tab-help" class="tab" type="button" role="tab" aria-selected="false" aria-controls="about-panel-help">Help</button>
+    </div>
+    <!-- @help:end -->
+    <div id="about-panel-about" class="about-panel">
+        <div class="card about-card">
+            <h2 class="about-title">Solace Message Utility</h2>
+            <p>Solace Message Utility is a browser-based tool for people who work with Solace PubSub+ event brokers: developers, testers and support teams who need to look at the messages on a queue, and the administrators who decide who may do that.</p>
+            <p>Browse a queue and read each message's properties and payload, forward or delete messages, copy messages from one queue to another, on the same broker or a different one, and search the topic subscriptions of your queues. The app is one self-contained page that runs in your browser: there is nothing to install on your machine.</p>
+            <dl class="about-facts">
+                <dt>Version</dt>
+                <dd id="about-version"></dd>
+                <dt>Project</dt>
+                <dd><a href="https://github.com/SolaceLabs/solace-msg-utility" target="_blank" rel="noopener noreferrer">github.com/SolaceLabs/solace-msg-utility</a></dd>
+            </dl>
+        </div>
+    </div>
+    <!-- @help:start -->
+    <div id="about-panel-help" class="about-panel hidden" role="tabpanel" aria-labelledby="about-tab-help">
+        <div class="manual">
+            <nav class="manual-contents" aria-label="Manual contents">
+                <div class="manual-contents-title">Contents</div>
+                <ol id="manual-contents-list" class="manual-contents-list"></ol>
+            </nav>
+            <div id="manual-sheet" class="manual-sheet">
+                <!-- @module-help -->
+                <div class="manual-pager">
+                    <button id="btn-manual-prev" class="btn btn-secondary" type="button">Previous chapter</button>
+                    <button id="btn-manual-next" class="btn btn-secondary" type="button">Next chapter</button>
+                </div>
+                <p class="manual-colophon">This manual is also on GitHub as the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/user-guide.md" target="_blank" rel="noopener noreferrer">User guide</a>. Installing and running the app is covered in the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/deployment.md" target="_blank" rel="noopener noreferrer">Deployment guide</a>, and sign-in and administration in the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md" target="_blank" rel="noopener noreferrer">Provisioned mode guide</a>.</p>
+            </div>
+        </div>
+    </div>
+    <!-- @help:end -->
+</div>

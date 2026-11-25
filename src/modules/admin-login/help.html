@@ -1,0 +1,273 @@
+<article class="manual-chapter">
+    <h2>Administration</h2>
+    <p class="manual-lead">The administration app is where an administrator looks after a Provisioned gateway: its users, the brokers they reach, the gateway's settings, its certificates and its backups. This chapter covers who may open it, how to sign in, how to find your way around, and what every administration page has in common.</p>
+    <p>The administration app needs an administrator's session on the gateway. The gateway gives it to administrators only, and it never connects to a broker. Without a session, each page shows a gate in place of its content, and the first page, <strong>Administration</strong>, shows <strong>Not signed in</strong>.</p>
+    <p>What an operator sets up outside these pages, such as the environment variables, the first administrator account and recovery, is in the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#administer">Provisioned mode guide</a>.</p>
+
+    <h3>Who may open it</h3>
+    <p>The administration app is a separate app from the one people use to browse queues. It lives at <code>/solAdmin</code> on the gateway, for example <code>https://your-gateway/solAdmin</code>.</p>
+    <ul>
+        <li>It exists only on a gateway that runs in Provisioned mode. On any other gateway, and at a wrong address, the gateway answers that the page is not found.</li>
+        <li>Only an account marked as an administrator may open it. Any other account that signs in sees the gateway's <strong>Administrator access required</strong> page, which says <code>You are signed in as bob, which is not an administrator.</code> and offers <strong>Back to the app</strong>.</li>
+        <li>The address with a trailing slash, <code>/solAdmin/</code>, takes you to <code>/solAdmin</code>.</li>
+        <li>The gateway checks the administrator flag again on every request, so a change to your account applies at once.</li>
+    </ul>
+
+    <h3>The page at a glance</h3>
+    <figure class="manual-figure">
+        <img src="help/signed-out.svg" width="760" height="290" alt="The Administration page of a visitor without a session: the sidebar lists the seven pages, and the page holds a Not signed in card with a message and a Sign in button.">
+        <figcaption>The Administration page while no one is signed in.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The sidebar. Without a session it lists every page, starting with <strong>Administration</strong>. Each page other than <strong>Administration</strong> and <strong>About</strong> shows a gate until an administrator signs in.</li>
+        <li>The heading, <strong>Not signed in</strong>.</li>
+        <li>The reason, when the gateway gave one. With no session at all there is no message.</li>
+        <li>The button that takes you to the gateway's sign-in page. It reads <strong>Sign in</strong>, or <strong>Change password</strong> when the gateway says the password must be changed first.</li>
+    </ol>
+    <p>This page is the signed-out screen and nothing more. While an administrator is signed in, it is hidden and the sidebar starts at <strong>User Mgmt.</strong>. It comes back when you sign out.</p>
+    <p>The message under the heading is one of these:</p>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>Meaning</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>You must change your password before you continue.</code></td><td>The account has to set a new password first. The button reads <strong>Change password</strong> and leads to the gateway's password page.</td></tr>
+            <tr><td><code>This account is not an administrator.</code></td><td>You hold a session, but the account is not an administrator. Ask an administrator to give it that role, or use an administrator's account.</td></tr>
+            <tr><td><code>The gateway could not be reached.</code></td><td>The browser could not contact the gateway. Check the address and your network, then reload the page.</td></tr>
+            <tr><td><code>The gateway did not answer in time. If this was a change, it may still have been applied: reload to see where it stands before you try again.</code></td><td>The gateway took too long to answer. Reload the page.</td></tr>
+            <tr><td><code>The gateway sent a response this page cannot read.</code></td><td>Something between you and the gateway, such as a proxy, answered in place of it. Ask whoever runs the gateway.</td></tr>
+            <tr><td><code>Too many requests. Wait a minute and try again.</code></td><td>The gateway limits how often one address may ask. Wait, then reload.</td></tr>
+        </tbody>
+    </table>
+    <p>Any other refusal shows the message under Other messages below, or <code>Unexpected answer from the gateway (HTTP 500).</code> with the status number it answered.</p>
+
+    <h3>Signing in</h3>
+    <p>Sign-in does not happen inside the administration app. It happens on the gateway's own sign-in page, the same page the main app uses, and the gateway brings you back to <code>/solAdmin</code> when you are done.</p>
+    <ol class="manual-steps">
+        <li>Open <code>/solAdmin</code> on your gateway. With no session, the gateway sends you to its sign-in page. You can also press <strong>Sign in</strong> on the <strong>Not signed in</strong> card.</li>
+        <li>Type your username and password.</li>
+        <li>Press <strong>Sign in</strong>.</li>
+        <li>The gateway returns you to the administration app, which opens on <strong>User Mgmt.</strong>. If your account asks for them, the next two sections come first.</li>
+    </ol>
+    <figure class="manual-figure">
+        <img src="help/sign-in.svg" width="640" height="330" alt="The gateway's sign-in page: a dark header with the product name, then a Username box, a Password box and a Sign in button.">
+        <figcaption>The gateway's sign-in page.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Username</strong>: up to 64 characters.</li>
+        <li><strong>Password</strong>: shown as dots, up to 128 characters.</li>
+        <li><strong>Sign in</strong> sends both to the gateway.</li>
+    </ol>
+    <p>A refused sign-in shows a red message above the fields, or a page of its own:</p>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>Meaning and what to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>Sign-in failed. Check the username and password.</code></td><td>One of the two is wrong. The gateway does not say which.</td></tr>
+            <tr><td><code>Too many attempts. Try again in 30 seconds.</code></td><td>Too many wrong answers in a row, for this account or from this address. The number of seconds is the wait that applies, and it grows with each further failure. Wait, then try again.</td></tr>
+            <tr><td><strong>Sign-in unavailable</strong>: <code>Sign-in could not be checked. Try again.</code></td><td>The gateway could not read its user list. Try again, and tell whoever runs the gateway if it persists.</td></tr>
+            <tr><td><strong>Too many requests</strong>: <code>Too many requests from this address. Wait a minute and try again.</code></td><td>The gateway limits how many sign-in requests one address may make. Wait a minute.</td></tr>
+            <tr><td><strong>Request refused</strong>: <code>This form was submitted from another site.</code> or <code>The form could not be read.</code></td><td>The sign-in form came from somewhere other than the gateway. Open <code>/solAdmin</code> again and sign in from the gateway's own page.</td></tr>
+        </tbody>
+    </table>
+    <aside class="manual-note" data-kind="tip">
+        <p>The pages that show a message instead of a form offer <strong>Back to the app</strong>. It leads to the main app, not to the administration app. Type <code>/solAdmin</code> again to return.</p>
+    </aside>
+
+    <h4>A password that must be changed first</h4>
+    <p>The gateway can require a new password before it lets an account do anything else. After a correct sign-in it then shows <strong>Change password</strong> with the line <code>You must set a new password before you continue.</code> and no way to skip it. Opening <code>/solAdmin</code> with such an account leads here too.</p>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What it is</th><th>What it accepts</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Current password</strong></td><td>The password you signed in with.</td><td>Up to 128 characters.</td></tr>
+            <tr><td><strong>New password</strong></td><td>The password to use at your next sign-in.</td><td>At least 12 characters unless the gateway's settings ask for more, and at most 128. The page prints the exact range under the fields, for example <code>12 to 128 characters.</code></td></tr>
+            <tr><td><strong>Confirm new password</strong></td><td>The same password again.</td><td>The same range, and it must match.</td></tr>
+        </tbody>
+    </table>
+    <p>Press <strong>Change password</strong>. The gateway then returns you to the administration app. A password you change on your own initiative, from the sidebar (see Finding your way around below), shows the same page with a <strong>Cancel</strong> link that takes you back unchanged.</p>
+    <p>A refused change shows one of these:</p>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>What to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>The current password is not correct.</code></td><td>Retype it. A wrong current password counts as a failed sign-in, with the same waits.</td></tr>
+            <tr><td><code>The new passwords do not match.</code></td><td>Type the same password in both boxes.</td></tr>
+            <tr><td><code>The new password must be 12 to 128 characters.</code></td><td>Choose a password inside the range the message names.</td></tr>
+            <tr><td><code>The new password must differ from the current one.</code></td><td>Choose a different password.</td></tr>
+            <tr><td><code>The password could not be saved.</code> or <code>The password could not be checked. Try again.</code></td><td>The gateway could not complete the change. Try again.</td></tr>
+            <tr><td><strong>Password not changed</strong>: <code>Your account was changed while this request ran. Sign in again.</code></td><td>Someone changed your account at the same moment. Sign in again and repeat the change.</td></tr>
+            <tr><td><strong>Password not changed</strong>: <code>The gateway cannot record changes right now, so it refused this one. Try again later or tell an administrator.</code></td><td>The gateway is set to refuse changes while its audit log cannot be written.</td></tr>
+            <tr><td><strong>Password not changed</strong>: <code>The gateway's user file was changed outside the gateway. An administrator must restart the gateway before passwords can be changed.</code></td><td>An administrator must restart the gateway from Gateway Settings or on its host.</td></tr>
+        </tbody>
+    </table>
+    <p>A password change ends your other sessions. The browser you changed it in stays signed in.</p>
+
+    <h4>Two-factor sign-in</h4>
+    <p>Two-factor sign-in asks for a six-digit code from an authenticator app after the password. Whether you must use it depends on a setting that an administrator chooses in Gateway Settings. The <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#two-factor-sign-in">Provisioned mode guide</a> explains the choices.</p>
+    <p>When your account has it, the gateway shows <strong>Two-factor sign-in</strong> after a correct password:</p>
+    <ol class="manual-steps">
+        <li>Read <code>Enter the 6-digit code from your authenticator app, or one of your recovery codes.</code></li>
+        <li>Type the code in the <strong>Code</strong> box. A recovery code goes in the same box. Spaces and hyphens in a six-digit code are ignored.</li>
+        <li>Press <strong>Continue</strong>. The sign-in is complete once the code passes.</li>
+    </ol>
+    <p>A wrong code shows <code>The code is not correct.</code> and counts as a failed sign-in. <strong>Start again</strong> returns to the password step. A sign-in that waits too long for its code is dropped, and you start again.</p>
+    <p>When the gateway requires two-factor and your account has none yet, the sign-in continues on <strong>Set up two-factor sign-in</strong>:</p>
+    <ol class="manual-steps">
+        <li>Scan the picture with an authenticator app, or type the key shown under it into the app.</li>
+        <li>Type the six digits the app shows in the <strong>Code</strong> box. Spaces and hyphens in a code are ignored.</li>
+        <li>Press <strong>Turn on two-factor sign-in</strong>.</li>
+        <li>The <strong>Recovery codes</strong> page lists the codes. Copy them somewhere safe, away from your phone: each works once, and they are shown only on this page. Press <strong>Continue</strong>.</li>
+    </ol>
+    <p>You can set it up, or set it up again, at any time from the sidebar (see below). The gateway first asks you to confirm it is you, with your <strong>Password</strong> and, when two-factor is already on, your <strong>Current code or a recovery code</strong>. The page then offers <strong>Continue</strong> and a <strong>Cancel</strong> link, and a wrong answer shows <code>The password or the code is not correct.</code> Setting it up again replaces the authenticator and its recovery codes, and signs you out everywhere else.</p>
+    <aside class="manual-note" data-kind="warning">
+        <p>A reset of two-factor sign-in is made from User Mgmt, and the account then sets it up again. If you lose both your phone and your recovery codes, you cannot sign in, so another administrator must reset it for you. The Provisioned mode guide covers <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#a-lost-phone">a lost phone</a>, including the case of a lone administrator.</p>
+    </aside>
+    <p>If the gateway is set to refuse changes while its audit log cannot be written, a recovery code cannot be used and the page says so. A code from the authenticator app still works.</p>
+
+    <h3>Finding your way around</h3>
+    <p>Once you are signed in, the gateway's pages are in the sidebar, under your account.</p>
+    <figure class="manual-figure">
+        <img src="help/signed-in.svg" width="760" height="380" alt="The administration app signed in as admin: the sidebar starts with three icons and the signed-in name, lists six pages, and User Mgmt. is open with Refresh, Add user, a search box and a table of users.">
+        <figcaption>The administration app signed in, on User Mgmt.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The key icon, <strong>Change password</strong>.</li>
+        <li>The lock icon, <strong>Two-factor sign-in</strong>.</li>
+        <li>The arrow leaving a frame, <strong>Sign out</strong>.</li>
+        <li>Who is signed in: your username, with a small <strong>admin</strong> tag. Hold the pointer over the name to read <code>Signed in as admin</code>.</li>
+        <li>The pages of the app. The open page is highlighted.</li>
+        <li>The search box above a list (see Searching a list below).</li>
+    </ol>
+    <h4>The account block</h4>
+    <p>The three icons and your name stay at the top of the sidebar on every page.</p>
+    <ul>
+        <li><strong>Change password</strong> opens the gateway's password page, described above, and returns you to the administration app.</li>
+        <li><strong>Two-factor sign-in</strong> opens the gateway's page for setting two-factor up, or setting it up again, and returns you here.</li>
+        <li><strong>Sign out</strong> ends your session on the gateway and returns you to <strong>Not signed in</strong>. It asks no question.</li>
+    </ul>
+    <p>When the sidebar is collapsed, the name is hidden and the icons stack one above the other.</p>
+    <h4>The pages</h4>
+    <table>
+        <thead>
+            <tr><th>Sidebar entry</th><th>What it is for</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>User Mgmt.</strong></td><td>The people who sign in: their passwords, roles, the modules they may open and the queues they may reach.</td></tr>
+            <tr><td><strong>Conn. Mgmt</strong></td><td>The brokers the gateway reaches for its users, with their Message VPNs and credentials.</td></tr>
+            <tr><td><strong>Gateway Settings</strong></td><td>The gateway's own settings, and the button that restarts it.</td></tr>
+            <tr><td><strong>Certificates</strong></td><td>The gateway's certificate and the broker certificate authorities it trusts.</td></tr>
+            <tr><td><strong>Backup &amp; Restore</strong></td><td>Saving the gateway's configuration to an encrypted backup, scheduling backups, and restoring one.</td></tr>
+            <tr><td><strong>About</strong></td><td>The app's version, and this manual in its Help tab.</td></tr>
+        </tbody>
+    </table>
+    <p>Each of these has its own chapter in this manual.</p>
+    <h4>The gates</h4>
+    <p>While no administrator is signed in, each page shows a gate with the heading <strong>Administrator Sign-in Required</strong> and a line that names the page's job. It means the same everywhere: sign in as an administrator.</p>
+    <table>
+        <thead>
+            <tr><th>Page</th><th>The line under the heading</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>User Mgmt.</strong></td><td><code>Sign in as an administrator to manage users.</code></td></tr>
+            <tr><td><strong>Conn. Mgmt</strong></td><td><code>Sign in as an administrator to manage connections.</code></td></tr>
+            <tr><td><strong>Gateway Settings</strong></td><td><code>Sign in as an administrator to change the gateway settings.</code></td></tr>
+            <tr><td><strong>Certificates</strong></td><td><code>Sign in as an administrator to see or change the gateway's certificates.</code></td></tr>
+            <tr><td><strong>Backup &amp; Restore</strong></td><td><code>Sign in as an administrator to back up or restore the gateway configuration.</code></td></tr>
+        </tbody>
+    </table>
+
+    <h3>When your session ends</h3>
+    <p>A session ends in these ways:</p>
+    <ul>
+        <li>You press <strong>Sign out</strong>.</li>
+        <li>The gateway ends it. A session ends after it has been idle for a set time, and after a set total time whatever you do. Idle means nobody typed, clicked or scrolled in the page: while you work, the page keeps the session in use. The defaults are 10 and 30 minutes, and Gateway Settings changes them. A gateway restart ends every session. See <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#sessions-and-sign-in">Sessions and sign-in</a> in the Provisioned mode guide.</li>
+        <li>Your account changes. Changing your password, setting two-factor up again, or an administrator's reset ends your other sessions.</li>
+    </ul>
+    <p>The page does not poll the gateway. It notices when you next do something that needs the gateway, such as pressing <strong>Refresh</strong> or saving. A toast then says <code>Your session has ended. Sign in again.</code>, stays up for five seconds, and the app returns to <strong>Not signed in</strong>. A password typed into the user form is cleared. Press <strong>Sign in</strong>, and the gateway brings you back to the administration app.</p>
+    <p>Some changes to your own account end your session on purpose. Each shows a toast that says so, and returns you to <strong>Not signed in</strong>:</p>
+    <ul>
+        <li>Saving your own account with a password, or with the administrator flag changed: <code>Password changed. Sign in again.</code> or <code>Administrator flag changed. Sign in again.</code></li>
+        <li>Deleting your own account, after the question <code>Delete your own account "admin"? You will be signed out.</code>: <code>Account deleted. You have been signed out.</code></li>
+        <li>Resetting your own two-factor sign-in: <code>Two-factor sign-in reset. You have been signed out.</code></li>
+    </ul>
+    <h4>When your administrator rights are taken away</h4>
+    <p>The gateway reads the administrator flag on every request. If another administrator takes it from your account, your next action in a page is refused with <code>This needs an administrator.</code>, shown where that page shows its errors. Reload the page in your browser: the gateway then answers <strong>Administrator access required</strong>, as for any account that is not an administrator. If your account is deleted instead, opening <code>/solAdmin</code> again ends the session and sends you to the gateway's sign-in page.</p>
+    <p>The gateway also refuses to remove the last administrator: <code>At least one administrator must remain.</code></p>
+
+    <h3>Things every page shares</h3>
+    <h4>Searching a list</h4>
+    <p>The lists on <strong>User Mgmt.</strong> (by username) and <strong>Conn. Mgmt</strong> (by broker name or hostname) have a search box above the table. Its hint reads <code>Search users (* = any)</code> or <code>Search connections (* = any)</code>.</p>
+    <ul>
+        <li>The list narrows as you type. Nothing is sent to the gateway.</li>
+        <li>Your text may match anywhere in the name, in any letter case.</li>
+        <li><code>*</code> stands for any run of characters. <code>ops*prod</code> finds <code>ops-eu-prod</code> but not <code>prod-ops</code>.</li>
+        <li>With no match the table says <code>No users match "zed".</code> or <code>No connections match "zed".</code> With nothing loaded it says <code>No users.</code> or <code>No connections.</code></li>
+        <li>The text stays in the box when you press <strong>Refresh</strong>, so you see the fresh list narrowed the same way.</li>
+    </ul>
+    <p>The search only narrows what you see. It is not the stricter matching of the rows that grant access to queues, which is anchored and respects letter case.</p>
+    <h4>Row buttons and rows of boxes</h4>
+    <p>Each row of a list ends in small buttons. Hold the pointer over one to read its name, for example <code>Edit user "alice"</code> or <code>Delete user "alice"</code>. A user whose two-factor sign-in is on also has a <code>Reset two-factor for user "alice"</code> button.</p>
+    <p>Where a form takes a list, such as the entitlements of a user or the Message VPNs of a connection, it shows a row of boxes for each entry, headed by the column names, with an add button below. A list with no rows shows a short note saying what that means. The cross at the end of a row, whose hint is <code>Remove row</code>, deletes that row from the form. A row whose boxes are all empty is ignored when you save. Nothing is saved until you save the form.</p>
+    <h4>Confirm dialogs</h4>
+    <p>Before something that is hard to undo, the app asks a question in a small window and waits. Its two buttons are <strong>Cancel</strong> and a button named for the action, such as <strong>Delete</strong>, <strong>Reset</strong> or <strong>Reload</strong>. Examples are <code>Delete user "bob"?</code> and <code>Reset two-factor sign-in for "bob"? They will have to set it up again.</code></p>
+    <ul>
+        <li><strong>Cancel</strong>, the <kbd>Esc</kbd> key and a click outside the window all answer no, and nothing happens.</li>
+        <li>The action button has the focus when the window opens, so pressing <kbd>Enter</kbd> answers yes. Read the question first.</li>
+    </ul>
+    <h4>Saving at the same time as another administrator</h4>
+    <p>Each user, each connection, the gateway settings and the backup schedule carry a version that the page reads with them and sends back with your save. The first save wins. If someone else saved the same thing after you opened it, your save is refused, not merged, and the page asks:</p>
+    <figure class="manual-figure">
+        <img src="help/conflict.svg" width="640" height="220" alt="A dialog saying that the user was changed by someone else since you opened it, with a Cancel button and a Reload button.">
+        <figcaption>The dialog shown when another administrator saved first.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The message. It begins <code>This user</code>, <code>This connection</code>, <code>This settings page</code> or <code>This schedule</code>, and continues <code>was changed by someone else since you opened it.</code></li>
+        <li><strong>Cancel</strong> keeps your form and what you typed, so you can copy it first.</li>
+        <li><strong>Reload</strong> loads the current values. For a user or a connection it returns to the list and closes the form. For the settings and the schedule it refills the form. Redo your edit on top of theirs.</li>
+    </ol>
+    <p>The same dialog appears when you press <strong>Delete</strong> on a row that changed after the list loaded. The unit is the whole record, so two administrators who edit different fields of one user still meet this dialog. Two administrators who edit different records never do.</p>
+    <p>If the other administrator deleted the record instead, a toast says <code>This user was deleted by someone else.</code> (or <code>This connection ...</code>) and the list reloads without it. Adding a name that exists already says <code>User "carol" already exists. Use Edit to change it.</code> or <code>Connection "east-prod" already exists. Use Edit to change it.</code>, whoever added it and when.</p>
+    <p>An import in <strong>Backup &amp; Restore</strong> is checked the same way. It refuses with <code>The gateway's data changed since the preview. Run the preview again.</code> when a section it would replace changed after the preview. The <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#two-administrators-at-once">Provisioned mode guide</a> has the details.</p>
+    <h4>Messages about the gateway's files</h4>
+    <p>The gateway keeps the users, the connections, the backup schedule and its settings in files on its host, and its certificate and trust files in another folder. These messages mean the gateway could not use one. An administrator cannot cure the cause from these pages: tell whoever runs the gateway. The gateway's log has the details in every case.</p>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>Meaning and what to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>A data file (users, connections or backup settings) was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.</code></td><td>A data file was changed outside the pages. Nothing for those files can be saved until the gateway restarts.</td></tr>
+            <tr><td><code>config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.</code></td><td>The same for the settings file. Gateway Settings shows it as a banner and blocks saving until the restart.</td></tr>
+            <tr><td><code>The gateway could not write its data files, so nothing was changed. Its log has the cause.</code></td><td>The write failed, for example on a full disk, and was rolled back. Try again once the cause is fixed.</td></tr>
+            <tr><td><code>The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.</code></td><td>The choice <strong>Refuse changes</strong> is set in Gateway Settings and the audit log is failing. Changes wait until it can be written.</td></tr>
+            <tr><td><code>The gateway cannot read its config.yaml. Its log has the cause.</code></td><td>The settings file cannot be read. Nothing can be saved to it.</td></tr>
+            <tr><td><code>The gateway's certificate or trust files are read-only on its host, so they cannot be changed here.</code></td><td>The host forbids writing them. Retrying does not help until whoever runs the gateway makes them writable.</td></tr>
+            <tr><td><code>The gateway could not write its certificate or trust files, so nothing was changed. Its log has the cause.</code></td><td>The write failed and was rolled back, so the old certificate and authorities still stand.</td></tr>
+            <tr><td><code>The gateway could not write the backup. Its log has the cause.</code></td><td>A backup could not be saved.</td></tr>
+            <tr><td><code>The gateway could not complete the request. Its log has the cause.</code></td><td>An error the gateway did not expect. Try again, then ask whoever runs the gateway.</td></tr>
+        </tbody>
+    </table>
+    <h4>Other messages</h4>
+    <p>These refusals can appear on any page, as a toast or under the form you were saving:</p>
+    <table>
+        <thead>
+            <tr><th>Message</th><th>Meaning and what to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>Your session has ended. Sign in again.</code></td><td>See When your session ends.</td></tr>
+            <tr><td><code>This needs an administrator.</code></td><td>Your account is not an administrator, or has lost the administrator flag. See above.</td></tr>
+            <tr><td><code>You must change your password before you continue.</code></td><td>Press <strong>Change password</strong> on <strong>Not signed in</strong>, and change it.</td></tr>
+            <tr><td><code>Not found. It may already have been removed.</code></td><td>The record is gone. Reload the page.</td></tr>
+            <tr><td><code>This was changed by someone else since you opened it. Reload to see the current version.</code></td><td>The record changed. Reload the page and repeat your edit.</td></tr>
+            <tr><td><code>That name already exists. Use Edit to change it.</code></td><td>Open the existing entry instead of adding it again.</td></tr>
+            <tr><td><code>This change would lock this browser out of the gateway.</code></td><td>The gateway refused a setting that would shut you out. It usually names the setting and the reason.</td></tr>
+            <tr><td><code>The gateway refused a cross-site request.</code></td><td>The request did not come from the gateway's own page. Reload the page from the gateway's address.</td></tr>
+            <tr><td><code>The request is too large.</code> or <code>The gateway rejected the request as malformed.</code></td><td>The gateway could not accept what the page sent. Reload and try again.</td></tr>
+            <tr><td><code>The page did not send the version it was working from, so the gateway refused the change. Reload the page and try again.</code></td><td>Reload the page.</td></tr>
+        </tbody>
+    </table>
+    <p>The <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#troubleshooting">Troubleshooting</a> section of the Provisioned mode guide covers the operator's side of these refusals.</p>
+</article>

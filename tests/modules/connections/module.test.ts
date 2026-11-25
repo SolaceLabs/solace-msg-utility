@@ -3,11 +3,20 @@ import { ConnectionsModule } from '../../../src/modules/connections/module';
 import { ui } from '../../../src/modules/connections/ui.js';
 import { config } from '../../../src/modules/connections/config.js';
 import { createEventBus } from '../../../src/core/event-bus';
+import { createManagedProfile } from '../../../src/core/services/managed-profile';
 import { INPUT_DEBOUNCE_MS } from '../../../src/core/timing';
-import { isHosted, setHosted } from '../../../src/core/hosted';
+import { DEFAULT_CONN_CONFIG } from '../../../src/core/connections/conn-modes';
+import { DEFAULT_CONNECT_TIMEOUT_MS, MAX_MESSAGES_PER_QUEUE } from '../../../src/core/connections/defaults';
+import { logger } from '../../../src/core/logger';
 import { createSolaceMock } from '../../setup';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import type { AppContext, AppState, EventBus } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
+import { answerConfirm } from '../../helpers/confirmDialog';
+import type { ConnectionConfig } from '../../../src/core/connections/types';
+
+/** A saved config with fields missing, which applyConfig tolerates. */
+const asConfig = (c: object) => c as ConnectionConfig;
 
 function createConnectionsDOM() {
     // Load the real connections template so the test DOM matches what ships.
@@ -20,17 +29,42 @@ function createTestContext(container: HTMLElement): { ctx: AppContext; eventBus:
         activeModuleId: null, isConnected: false, selectedVpn: null,
         solaceConnection: null, sempCredentials: null, isSempConnected: false
     };
-    const ctx: AppContext = {
+    const ctx: AppContext = completeContext({
         container,
         appState,
         eventBus,
         setState: vi.fn((key: keyof AppState, value: any) => { (appState as any)[key] = value; }),
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
+        managedProfile: createManagedProfile(),
         copyToClipboard: vi.fn(),
-        config: { useMocks: false }
-    };
+    });
     return { ctx, eventBus, appState };
+}
+
+/** The minimum valid Direct Solace form: host, port, VPN and username. */
+function fillSolaceForm(container: HTMLElement, vpn = 'default') {
+    (container.querySelector('#conn-host') as HTMLInputElement).value = 'broker.test';
+    (container.querySelector('#solace-port') as HTMLInputElement).value = '8080';
+    (container.querySelector('#solace-vpn') as HTMLInputElement).value = vpn;
+    (container.querySelector('#solace-username') as HTMLInputElement).value = 'admin';
+}
+
+/** A #toast-container, so a test can read the toasts shown. */
+function toastContainer(): HTMLElement {
+    const c = document.createElement('div');
+    c.id = 'toast-container';
+    document.body.appendChild(c);
+    return c;
+}
+
+/** Answer the open VPN-switch question (the core confirm dialog); returns the question asked. */
+const answerSwitch = answerConfirm;
+
+/** The typed handler solace-client registered on the n-th session for `event` (the first registration). */
+function sessionHandler(event: string, n = 0): (...args: any[]) => void {
+    const session = (window as any).solace.SolclientFactory.createSession.mock.results[n].value;
+    return session.on.mock.calls.find((c: any[]) => c[0] === event)[1];
 }
 
 describe('ConnectionsModule', () => {
@@ -43,20 +77,13 @@ describe('ConnectionsModule', () => {
         document.body.appendChild(container);
     });
 
-    it('has correct metadata', () => {
-        expect(ConnectionsModule.name).toBe('Connections');
-        expect(ConnectionsModule.id).toBe('connections');
-        expect(ConnectionsModule.icon).toContain('svg');
-        // Priority is set in src/registry.ts; tested in tests/registry.test.ts.
-    });
-
     it('loads saved config on install', async () => {
         const savedCfg = {
             host: 'saved.test',
             solace: { protocol: 'ws', port: '9090', vpn: 'saved-vpn', user: 'saved-user', authMode: 'basic' },
             semp: { protocol: 'https', port: '1234', user: 'semp-user' }
         };
-        vi.spyOn(config, 'load').mockReturnValue(savedCfg);
+        vi.spyOn(config, 'load').mockReturnValue(asConfig(savedCfg));
 
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
@@ -65,7 +92,7 @@ describe('ConnectionsModule', () => {
         expect(host.value).toBe('saved.test');
     });
 
-    // applyConfig (module.ts:42, 44, 62) guards each top-level field individually
+    // applyConfig guards each top-level field individually
     // so a corrupted/partial localStorage blob — manual user edit, browser-extension
     // write, future cross-version migration — doesn't crash install with a TypeError
     // on `cfg.solace.protocol` etc. The two tests below exercise the falsy branches.
@@ -118,7 +145,7 @@ describe('ConnectionsModule', () => {
         const btnSave = container.querySelector('#btn-save-config') as HTMLButtonElement;
         btnSave.click();
 
-        expect(localStorage.setItem).toHaveBeenCalled();
+        expect(localStorage.setItem).toHaveBeenCalledWith('solace_utility_config', expect.stringMatching(/^OBF1:/));
         const toast = document.querySelector('#toast-container .toast.toast--ok');
         expect(toast).not.toBeNull();
         expect(toast!.textContent).toMatch(/saved/i);
@@ -147,10 +174,9 @@ describe('ConnectionsModule', () => {
     });
 
     describe('client name identifier validation', () => {
-        // Closes COV-5: the >100-char branch and the save-button early-return
-        // on invalid clientNameId are otherwise unexercised. A regression that
-        // dropped either check would silently forward an over-length or
-        // invalid identifier to the SDK, where it would fail late at connect
+        // Covers the >100-char branch and the save-button early-return
+        // on invalid clientNameId. Without either check an over-length or
+        // invalid identifier would reach the SDK and fail late at connect
         // time with a generic broker error instead of the inline UI message.
         it('blocks save and shows inline error when clientNameId exceeds 100 characters', async () => {
             const { ctx } = createTestContext(container);
@@ -173,7 +199,7 @@ describe('ConnectionsModule', () => {
 
         it('clears the is-invalid class and error text eagerly on the first input event after a failure', async () => {
             // Covers the truthy branch of the `classList.contains('is-invalid')`
-            // guard at module.ts:275 — the user-facing "red border clears as
+            // guard in the field's input listener -- the user-facing "red border clears as
             // soon as I start correcting" behavior. The save-button >100-char
             // test above installs the invalid state; this test installs it
             // via blur (the second site that adds is-invalid) and then drives
@@ -198,14 +224,15 @@ describe('ConnectionsModule', () => {
             input.dispatchEvent(new Event('input'));
             expect(input.classList.contains('is-invalid')).toBe(false);
             expect(errEl.textContent).toBe('');
-
-            // Falsy-branch anchor: a second input event with no error
-            // present is a no-op (the `if` short-circuits without writing
-            // textContent — anything we put there stays).
-            errEl.textContent = 'sentinel';
-            input.dispatchEvent(new Event('input'));
-            expect(errEl.textContent).toBe('sentinel');
         });
+    });
+
+    // The provisioned and destination connections take the constant; the
+    // Direct form's box repeats it in the template.
+    it('starts the Connect Timeout box at the default connect timeout', async () => {
+        const { ctx } = createTestContext(container);
+        await ConnectionsModule.install(ctx);
+        expect((container.querySelector('#sol-connect-timeout') as HTMLInputElement).value).toBe(String(DEFAULT_CONNECT_TIMEOUT_MS));
     });
 
     describe('max-messages cap validation', () => {
@@ -228,7 +255,7 @@ describe('ConnectionsModule', () => {
             // Decode via config.load() rather than JSON.parse — storage is OBF1-encoded.
             const storedValue = (localStorage.setItem as any).mock.calls.at(-1)[1];
             (localStorage.getItem as any).mockReturnValue(storedValue);
-            const saved = config.load();
+            const saved = config.load()!;
             expect(saved.solace.maxMessagesPerQueue).toBe(250);
             vi.useRealTimers();
         });
@@ -311,14 +338,10 @@ describe('ConnectionsModule', () => {
         });
 
         it('a second input event before the debounce window cancels the prior timer', async () => {
-            // Covers the truthy branch of the input-listener's
-            // `if (validateTimer !== null) clearTimeout(validateTimer)` at
-            // module.ts:113. Without the cancel, every keystroke would queue
-            // its own timer — N keystrokes → N validations, with intermediate
-            // is-invalid flicker for stale values. The test types '10001' (invalid)
-            // then '500' (valid) in quick succession; after the debounce window
-            // only the second timer's validation must have run, leaving the
-            // input clean.
+            // The validation reads the field when its timer fires, so a timer
+            // that survived would validate the latest value early. Typing a valid
+            // value and then an invalid one shows it: no error may appear at the
+            // first timer's deadline, only one window after the second keystroke.
             vi.useFakeTimers();
             const { ctx } = createTestContext(container);
             await ConnectionsModule.install(ctx);
@@ -326,26 +349,20 @@ describe('ConnectionsModule', () => {
             const input = container.querySelector('#sol-max-messages') as HTMLInputElement;
             const errBox = container.querySelector('#sol-max-messages-error') as HTMLElement;
 
-            // First keystroke: schedules timer A for an invalid value.
+            input.value = '500';
+            input.dispatchEvent(new Event('input'));
+            vi.advanceTimersByTime(100);
             input.value = '10001';
             input.dispatchEvent(new Event('input'));
 
-            // Advance partway — not enough for timer A to fire.
-            vi.advanceTimersByTime(100);
-            expect(input.classList.contains('is-invalid')).toBe(false);
-
-            // Second keystroke before the debounce window expires: must clear
-            // timer A and schedule timer B for the valid value.
-            input.value = '500';
-            input.dispatchEvent(new Event('input'));
-
-            // Advance past the original debounce horizon. Only timer B's
-            // validation should have run.
-            vi.advanceTimersByTime(INPUT_DEBOUNCE_MS);
-            // If timer A had survived, the input would have been left invalid
-            // from validating '10001'. The clean state proves timer A was cancelled.
+            // Past the first timer's deadline, before the second's.
+            vi.advanceTimersByTime(INPUT_DEBOUNCE_MS - 50);
             expect(input.classList.contains('is-invalid')).toBe(false);
             expect(errBox.textContent).toBe('');
+
+            vi.advanceTimersByTime(50);
+            expect(input.classList.contains('is-invalid')).toBe(true);
+            expect(errBox.textContent).toBe(`Must not exceed ${MAX_MESSAGES_PER_QUEUE}.`);
 
             vi.useRealTimers();
         });
@@ -373,7 +390,7 @@ describe('ConnectionsModule', () => {
             expect(input.classList.contains('is-invalid')).toBe(false);
             expect(errBox.textContent).toBe('');
 
-            // Advance past the original debounce window — no double-fire side effect.
+            // The field stays valid once the debounce window has passed.
             vi.advanceTimersByTime(INPUT_DEBOUNCE_MS * 2);
             expect(input.classList.contains('is-invalid')).toBe(false);
 
@@ -384,7 +401,7 @@ describe('ConnectionsModule', () => {
             const savedCfg = {
                 host: 'x', solace: { maxMessagesPerQueue: 1500 }, semp: {}
             };
-            vi.spyOn(config, 'load').mockReturnValue(savedCfg);
+            vi.spyOn(config, 'load').mockReturnValue(asConfig(savedCfg));
             const { ctx } = createTestContext(container);
             await ConnectionsModule.install(ctx);
             const input = container.querySelector('#sol-max-messages') as HTMLInputElement;
@@ -434,7 +451,7 @@ describe('ConnectionsModule', () => {
     it('load button loads config from localStorage', async () => {
         vi.useFakeTimers();
         const savedCfg = { host: 'loaded.test', solace: { vpn: 'loaded-vpn' }, semp: {} };
-        vi.spyOn(config, 'load').mockReturnValue(savedCfg);
+        vi.spyOn(config, 'load').mockReturnValue(asConfig(savedCfg));
 
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
@@ -454,9 +471,12 @@ describe('ConnectionsModule', () => {
 
         // Pre-populate URL Paths so we can prove the reset reaches both —
         // the fields default to empty in the template, so a no-op reset would
-        // pass the assertion vacuously.
+        // pass the assertion vacuously. Opened as a user would, so the reset
+        // must also close them.
         const solUrlPath = container.querySelector('#solace-url-path') as HTMLInputElement;
         const sempUrlPath = container.querySelector('#semp-url-path') as HTMLInputElement;
+        (container.querySelector('#btn-solace-url-path-add') as HTMLButtonElement).click();
+        (container.querySelector('#btn-semp-url-path-add') as HTMLButtonElement).click();
         solUrlPath.value = '/solace';
         sempUrlPath.value = '/api';
 
@@ -469,7 +489,14 @@ describe('ConnectionsModule', () => {
         expect(vpn.value).toBe('');
         expect(solUrlPath.value).toBe('');
         expect(sempUrlPath.value).toBe('');
+        expect(urlPathOpen()).toEqual({ solace: false, semp: false });
         vi.useRealTimers();
+    });
+
+    /** Whether each card's URL Path field is open (core/optional-field.ts). */
+    const urlPathOpen = () => ({
+        solace: container.querySelector('#solace-url-path-field')!.classList.contains('is-open'),
+        semp: container.querySelector('#semp-url-path-field')!.classList.contains('is-open'),
     });
 
     // URL Path round-trip: save persists what the user typed, applyConfig
@@ -495,7 +522,7 @@ describe('ConnectionsModule', () => {
             // Decode via config.load() — storage is OBF1-encoded.
             const storedValue = (localStorage.setItem as any).mock.calls.at(-1)[1];
             (localStorage.getItem as any).mockReturnValue(storedValue);
-            const saved = config.load();
+            const saved = config.load()!;
             expect(saved.solace.urlPath).toBe('/solace');
             expect(saved.semp.urlPath).toBe('/api');
         });
@@ -506,7 +533,7 @@ describe('ConnectionsModule', () => {
                 solace: { urlPath: '/solace' },
                 semp: { urlPath: '/api' }
             };
-            vi.spyOn(config, 'load').mockReturnValue(savedCfg);
+            vi.spyOn(config, 'load').mockReturnValue(asConfig(savedCfg));
 
             const { ctx } = createTestContext(container);
             await ConnectionsModule.install(ctx);
@@ -515,28 +542,63 @@ describe('ConnectionsModule', () => {
             const sempUrlPath = container.querySelector('#semp-url-path') as HTMLInputElement;
             expect(solUrlPath.value).toBe('/solace');
             expect(sempUrlPath.value).toBe('/api');
+            // A path in use is never hidden behind "+ URL path".
+            expect(urlPathOpen()).toEqual({ solace: true, semp: true });
         });
 
-        it('applyConfig preserves an empty saved urlPath without overwriting an in-DOM value', async () => {
-            // Guards the `urlPath !== undefined` branch in module.ts:applyConfig:
-            // if a user previously had a path, then saved with the field cleared,
-            // load must restore the empty value (not skip the field).
+        it('a user who clears the URL Path saves an empty path and connects without one', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+
+            // The URL Path field is left empty.
+            (container.querySelector('#semp-url-path') as HTMLInputElement).value = '';
+            (container.querySelector('#conn-host') as HTMLInputElement).value = 'broker.test';
+            (container.querySelector('#semp-protocol') as HTMLSelectElement).value = 'https';
+            (container.querySelector('#semp-port') as HTMLInputElement).value = '943';
+            (container.querySelector('#semp-username') as HTMLInputElement).value = 'admin';
+            (container.querySelector('#semp-password') as HTMLInputElement).value = 'admin';
+
+            (container.querySelector('#btn-save-config') as HTMLButtonElement).click();
+            const storedValue = (localStorage.setItem as any).mock.calls.at(-1)[1];
+            (localStorage.getItem as any).mockReturnValue(storedValue);
+            expect(config.load()!.semp.urlPath).toBe('');
+
+            (container.querySelector('#btn-semp-connect') as HTMLButtonElement).click();
+            await vi.waitFor(() => {
+                expect(ctx.setState).toHaveBeenCalledWith('sempCredentials', expect.objectContaining({
+                    baseUrl: 'https://broker.test:943',
+                    urlPath: '',
+                }));
+            });
+        });
+
+        it('applyConfig leaves the field empty and closed when the saved config has no path', async () => {
             const savedCfg = {
                 host: 'broker.test',
                 solace: { urlPath: '' },
                 semp: {}
             };
-            vi.spyOn(config, 'load').mockReturnValue(savedCfg);
+            vi.spyOn(config, 'load').mockReturnValue(asConfig(savedCfg));
 
             const { ctx } = createTestContext(container);
             await ConnectionsModule.install(ctx);
 
-            const solUrlPath = container.querySelector('#solace-url-path') as HTMLInputElement;
-            // Note: the SEMP cfg has no urlPath key at all (undefined branch) —
-            // the field stays at its template default (empty).
-            const sempUrlPath = container.querySelector('#semp-url-path') as HTMLInputElement;
-            expect(solUrlPath.value).toBe('');
-            expect(sempUrlPath.value).toBe('');
+            expect((container.querySelector('#solace-url-path') as HTMLInputElement).value).toBe('');
+            expect((container.querySelector('#semp-url-path') as HTMLInputElement).value).toBe('');
+            expect(urlPathOpen()).toEqual({ solace: false, semp: false });
+        });
+
+        it('Load All Config closes a field the user opened when the saved config has no path', async () => {
+            const load = vi.spyOn(config, 'load').mockReturnValue(null as any);
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            (container.querySelector('#btn-semp-url-path-add') as HTMLButtonElement).click();
+            expect(urlPathOpen().semp).toBe(true);
+
+            load.mockReturnValue(asConfig({ host: 'broker.test', semp: { urlPath: '' } }));
+            (container.querySelector('#btn-load-config') as HTMLButtonElement).click();
+            expect(urlPathOpen()).toEqual({ solace: false, semp: false });
         });
     });
 
@@ -553,15 +615,19 @@ describe('ConnectionsModule', () => {
         const btnSolace = container.querySelector('#btn-solace-connect') as HTMLButtonElement;
         btnSolace.click();
 
-        expect((window as any).solace.SolclientFactory.createSession).toHaveBeenCalled();
+        expect((window as any).solace.SolclientFactory.createSession).toHaveBeenCalledWith(expect.objectContaining({
+            url: expect.stringContaining('broker.test:8080'),
+            vpnName: 'default',
+            userName: 'admin',
+        }));
     });
 
     it('solace connect button disconnects when connected', async () => {
         // Realistic flow: connect (UP_NOTICE fires bridging onConnected) → click
         // again to disconnect → SDK DISCONNECTED fires bridging onDisconnected.
-        // After the Stage B refactor the factory no longer reaches into AppState
-        // directly — state writes happen exclusively through bridging hooks fired
-        // from real SDK lifecycle events.
+        // The factory never reaches into AppState directly -- state writes
+        // happen exclusively through bridging hooks fired from real SDK
+        // lifecycle events.
         const { ctx, appState } = createTestContext(container);
         await ConnectionsModule.install(ctx);
 
@@ -586,9 +652,25 @@ describe('ConnectionsModule', () => {
         expect(ctx.setState).toHaveBeenCalledWith('isConnected', false);
     });
 
+    it('solace Connect stays disabled while the connect is in flight, and comes back when the attempt ends', async () => {
+        const { ctx } = createTestContext(container);
+        await ConnectionsModule.install(ctx);
+        fillSolaceForm(container);
+        const btnSolace = container.querySelector('#btn-solace-connect') as HTMLButtonElement;
+
+        btnSolace.click();
+        expect([btnSolace.disabled, btnSolace.textContent]).toEqual([true, 'Connecting...']);
+        btnSolace.click();   // a disabled button takes no click
+        expect((window as any).solace.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
+
+        sessionHandler('CONNECT_FAILED_ERROR')({ infoStr: 'refused' });
+        expect([btnSolace.disabled, btnSolace.textContent]).toEqual([false, 'Connect']);
+    });
+
     it('solace connect fails validation with empty host', async () => {
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
+        (window as any).solace.SolclientFactory.createSession.mockClear();
 
         const host = container.querySelector('#conn-host') as HTMLInputElement;
         host.value = '';
@@ -596,6 +678,7 @@ describe('ConnectionsModule', () => {
         btnSolace.click();
 
         expect(host.classList.contains('is-invalid')).toBe(true);
+        expect((window as any).solace.SolclientFactory.createSession).not.toHaveBeenCalled();
     });
 
     it('semp connect button validates and connects', async () => {
@@ -631,6 +714,7 @@ describe('ConnectionsModule', () => {
     it('semp validation fails with empty fields', async () => {
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
+        (globalThis.fetch as any).mockClear();
 
         const sempUser = container.querySelector('#semp-username') as HTMLInputElement;
         sempUser.value = '';
@@ -641,13 +725,14 @@ describe('ConnectionsModule', () => {
         btnSemp.click();
 
         expect(sempUser.classList.contains('is-invalid')).toBe(true);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
     it('listens for connection events and updates input state', async () => {
         const { ctx, eventBus } = createTestContext(container);
         await ConnectionsModule.install(ctx);
 
-        // install() calls ui.updateInputState once at module.ts:284 — clear that
+        // install() calls ui.updateInputState once -- clear that
         // baseline so the assertion sees only the four event-driven invocations.
         const updateSpy = vi.spyOn(ui, 'updateInputState');
 
@@ -663,28 +748,20 @@ describe('ConnectionsModule', () => {
     it('handles connection:check-connection when not connected', async () => {
         const { ctx, eventBus } = createTestContext(container);
         await ConnectionsModule.install(ctx);
-
-        eventBus.emit('connection:check-connection', { vpn: 'target-vpn', queue: 'target-queue' });
-        expect(ctx.loadSelf).toHaveBeenCalled();
-    });
-
-    it('handles connection:check-connection when connected same VPN', async () => {
-        const { ctx, eventBus, appState } = createTestContext(container);
-        await ConnectionsModule.install(ctx);
-
-        appState.isConnected = true;
-        const vpnInput = container.querySelector('#solace-vpn') as HTMLInputElement;
-        vpnInput.value = 'same-vpn';
-        (ctx.loadSelf as any).mockClear();
+        fillSolaceForm(container);
 
         const browseHandler = vi.fn();
         eventBus.on('browser:browse-queue', browseHandler);
 
-        eventBus.emit('connection:check-connection', { vpn: 'same-vpn', queue: 'test-queue' });
+        eventBus.emit('connection:check-connection', { vpn: 'target-vpn', queue: 'target-queue' });
+        expect(ctx.loadSelf).toHaveBeenCalled();
+        // The connect to the requested VPN started: the form carries it.
+        expect((container.querySelector('#solace-vpn') as HTMLInputElement).value).toBe('target-vpn');
+        expect((window as any).solace.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
 
-        expect(browseHandler).toHaveBeenCalledWith({ queue: 'test-queue' });
-        // Same-VPN path never navigates — connections has nothing to do.
-        expect(ctx.loadSelf).not.toHaveBeenCalled();
+        // The module's own session coming up finishes the switch.
+        eventBus.emit('client:connected', { session: {} });
+        expect(browseHandler).toHaveBeenCalledWith({ queue: 'target-queue' });
     });
 
     it('handles connection:check-connection when connected different VPN (user confirms)', async () => {
@@ -695,39 +772,13 @@ describe('ConnectionsModule', () => {
         const vpnInput = container.querySelector('#solace-vpn') as HTMLInputElement;
         vpnInput.value = 'old-vpn';
 
-        (globalThis.confirm as any).mockReturnValue(true);
-
         eventBus.emit('connection:check-connection', { vpn: 'new-vpn', queue: 'test-queue' });
 
-        expect(globalThis.confirm).toHaveBeenCalled();
+        expect(await answerSwitch(true)).toBe('Current VPN is "old-vpn". Switch to "new-vpn"?');
         // Event-driven handoff: simulate the SDK's teardown signal.
         eventBus.emit('client:disconnected');
-        // VPN input should now reflect the requested target.
+        // The VPN input reflects the requested target.
         expect(vpnInput.value).toBe('new-vpn');
-    });
-
-    it('handles connection:check-connection when connected different VPN (user cancels)', async () => {
-        // Regression: previously the navigateToConnections() call ran BEFORE
-        // confirm() for the queue-browser flow, so a Cancel left the user
-        // stranded on the connections page even though they declined the switch.
-        const { ctx, eventBus, appState } = createTestContext(container);
-        await ConnectionsModule.install(ctx);
-
-        appState.isConnected = true;
-        const vpnInput = container.querySelector('#solace-vpn') as HTMLInputElement;
-        vpnInput.value = 'old-vpn';
-        (ctx.loadSelf as any).mockClear();
-
-        (globalThis.confirm as any).mockReturnValue(false);
-
-        const browseHandler = vi.fn();
-        eventBus.on('browser:browse-queue', browseHandler);
-
-        eventBus.emit('connection:check-connection', { vpn: 'new-vpn', queue: 'test-queue' });
-
-        expect(browseHandler).not.toHaveBeenCalled();
-        // User stays on queue-browser — no navigation when confirm was cancelled.
-        expect(ctx.loadSelf).not.toHaveBeenCalled();
     });
 
     it('enter key on solace inputs triggers connect', async () => {
@@ -751,8 +802,17 @@ describe('ConnectionsModule', () => {
 
         await ConnectionsModule.install(ctx);
 
+        // validateSemp returns before any fetch unless the SEMP fields are filled.
+        (container.querySelector('#conn-host') as HTMLInputElement).value = 'broker.test';
+        (container.querySelector('#semp-port') as HTMLInputElement).value = '943';
+        (container.querySelector('#semp-username') as HTMLInputElement).value = 'admin';
         const sempPass = container.querySelector('#semp-password') as HTMLInputElement;
+        sempPass.value = 'admin';
+        (globalThis.fetch as any).mockClear();
         sempPass.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+
+        await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+            expect.stringContaining('/SEMP/v2/monitor/msgVpns'), expect.anything()));
     });
 
     it('non-Enter key does not trigger connect', async () => {
@@ -768,56 +828,105 @@ describe('ConnectionsModule', () => {
     it('solace validation fails with invalid port', async () => {
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
+        (window as any).solace.SolclientFactory.createSession.mockClear();
 
         const port = container.querySelector('#solace-port') as HTMLInputElement;
         port.value = 'abc';
         const btnSolace = container.querySelector('#btn-solace-connect') as HTMLButtonElement;
         btnSolace.click();
         expect(port.classList.contains('is-invalid')).toBe(true);
+        expect((window as any).solace.SolclientFactory.createSession).not.toHaveBeenCalled();
     });
 
     it('solace validation fails with empty vpn', async () => {
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
+        (window as any).solace.SolclientFactory.createSession.mockClear();
 
         const vpn = container.querySelector('#solace-vpn') as HTMLInputElement;
         vpn.value = '';
         const btnSolace = container.querySelector('#btn-solace-connect') as HTMLButtonElement;
         btnSolace.click();
         expect(vpn.classList.contains('is-invalid')).toBe(true);
+        expect((window as any).solace.SolclientFactory.createSession).not.toHaveBeenCalled();
     });
 
     it('solace validation fails with empty user', async () => {
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
+        (window as any).solace.SolclientFactory.createSession.mockClear();
 
         const user = container.querySelector('#solace-username') as HTMLInputElement;
         user.value = '';
         const btnSolace = container.querySelector('#btn-solace-connect') as HTMLButtonElement;
         btnSolace.click();
         expect(user.classList.contains('is-invalid')).toBe(true);
+        expect((window as any).solace.SolclientFactory.createSession).not.toHaveBeenCalled();
+    });
+
+    it('refuses a client username the broker refuses, with the reason, before any connect', async () => {
+        const { ctx } = createTestContext(container);
+        await ConnectionsModule.install(ctx);
+        fillSolaceForm(container);
+        const createSession = (window as any).solace.SolclientFactory.createSession;
+        createSession.mockClear();
+        const user = container.querySelector('#solace-username') as HTMLInputElement;
+        const btnSolace = container.querySelector('#btn-solace-connect') as HTMLButtonElement;
+        const errorText = () => (container.querySelector('#solace-connect-error') as HTMLElement).textContent;
+
+        user.value = 'app*';
+        btnSolace.click();
+        expect(user.classList.contains('is-invalid')).toBe(true);
+        expect(errorText()).toBe('Client username must not contain ? or *.');
+        expect(createSession).not.toHaveBeenCalled();
+
+        // Spaces and any other printable ASCII are a broker's to accept.
+        user.value = 'app user';
+        btnSolace.click();
+        expect(user.classList.contains('is-invalid')).toBe(false);
+        expect(errorText()).toBe('');
+        expect(createSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('holds an OAuth2 access token in the username field to no client username rule', async () => {
+        const { ctx } = createTestContext(container);
+        await ConnectionsModule.install(ctx);
+        fillSolaceForm(container);
+        const createSession = (window as any).solace.SolclientFactory.createSession;
+        createSession.mockClear();
+        (container.querySelector('#solace-auth-mode [data-auth-mode="oauth"]') as HTMLButtonElement).click();
+        const user = container.querySelector('#solace-username') as HTMLInputElement;
+        user.value = 'eyJ' + 'a'.repeat(300) + '*';
+
+        (container.querySelector('#btn-solace-connect') as HTMLButtonElement).click();
+        expect(user.classList.contains('is-invalid')).toBe(false);
+        expect(createSession).toHaveBeenCalledTimes(1);
     });
 
     it('semp validation fails with invalid port', async () => {
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
+        (globalThis.fetch as any).mockClear();
 
         const port = container.querySelector('#semp-port') as HTMLInputElement;
         port.value = '-1';
         const btnSemp = container.querySelector('#btn-semp-connect') as HTMLButtonElement;
         btnSemp.click();
         expect(port.classList.contains('is-invalid')).toBe(true);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
     it('semp validation fails with empty host', async () => {
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
+        (globalThis.fetch as any).mockClear();
 
         const host = container.querySelector('#conn-host') as HTMLInputElement;
         host.value = '';
         const btnSemp = container.querySelector('#btn-semp-connect') as HTMLButtonElement;
         btnSemp.click();
         expect(host.classList.contains('is-invalid')).toBe(true);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
     });
 
     it('applyConfig handles config with advanced settings', async () => {
@@ -831,7 +940,7 @@ describe('ConnectionsModule', () => {
             },
             semp: { protocol: 'https', port: '8080', user: 'semp-user' }
         };
-        vi.spyOn(config, 'load').mockReturnValue(savedCfg);
+        vi.spyOn(config, 'load').mockReturnValue(asConfig(savedCfg));
 
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
@@ -852,7 +961,7 @@ describe('ConnectionsModule', () => {
         const { ctx } = createTestContext(container);
         await ConnectionsModule.install(ctx);
 
-        // Proves the `if (cfg)` guard at module.ts:71 short-circuited — input
+        // Proves install's `if (cfg)` guard short-circuited — input
         // values were never overwritten by a missing-config applyConfig call.
         expect(host.value).toBe(hostBefore);
         expect(port.value).toBe(portBefore);
@@ -881,113 +990,61 @@ describe('ConnectionsModule', () => {
         expect(toastContainer.querySelector('.toast')).toBeNull();
     });
 
-    it('connection:check-connection auto-connect success triggers browse', async () => {
+    it('connection:check-connection auto-connect that fails ends the switch: the reason stays on the form, a warning toast, the user can retry', async () => {
+        const toasts = toastContainer();
         const { ctx, eventBus } = createTestContext(container);
         await ConnectionsModule.install(ctx);
-
+        fillSolaceForm(container);
         const browseHandler = vi.fn();
         eventBus.on('browser:browse-queue', browseHandler);
 
         eventBus.emit('connection:check-connection', { vpn: 'target-vpn', queue: 'q1' });
+        sessionHandler('CONNECT_FAILED_ERROR')({ infoStr: 'Connection error: refused' });
 
-        // Simulate successful auto-connection
+        // The hook's message, help link included, is not written over.
+        const errorEl = container.querySelector('#solace-connect-error') as HTMLElement;
+        expect(errorEl.textContent).toContain('Connection Failed: Connection error: refused');
+        expect(errorEl.querySelector('a')).toBeTruthy();
+        expect(toasts.querySelector('.toast--warn')!.textContent)
+            .toBe('Could not switch to VPN "target-vpn": Connection Failed: Connection error: refused');
+
+        // The abandoned switch never finishes, and the next request runs.
         eventBus.emit('client:connected', { session: {} });
-        expect(browseHandler).toHaveBeenCalledWith({ queue: 'q1' });
+        expect(browseHandler).not.toHaveBeenCalled();
+        eventBus.emit('connection:check-connection', { vpn: 'target-vpn', queue: 'q1' });
+        expect((window as any).solace.SolclientFactory.createSession).toHaveBeenCalledTimes(2);
     });
 
-    it('connection:check-connection auto-connect registers failure cleanup', async () => {
+    it('connection:check-connection fails at once, with the reason, when the Direct form does not validate', async () => {
+        const toasts = toastContainer();
         const { ctx, eventBus } = createTestContext(container);
         await ConnectionsModule.install(ctx);
+        // The template's default host is valid; an emptied one is not.
+        (container.querySelector('#conn-host') as HTMLInputElement).value = '';
 
-        // Emit check-connection while not connected
         eventBus.emit('connection:check-connection', { vpn: 'target-vpn', queue: 'q1' });
 
-        // Simulate failed connection
-        eventBus.emit('client:disconnected');
-
-        // Subsequent connect should not trigger stale handlers
-        const browseHandler = vi.fn();
-        eventBus.on('browser:browse-queue', browseHandler);
-        eventBus.emit('client:connected', { session: {} });
-        // Only the module's own client:connected handler fires, not the stale onSuccess
+        expect((container.querySelector('#conn-host') as HTMLInputElement).classList.contains('is-invalid')).toBe(true);
+        expect((container.querySelector('#solace-connect-error') as HTMLElement).textContent)
+            .toBe('Fix the highlighted fields in the connection form, then connect again.');
+        expect(toasts.querySelector('.toast--warn')!.textContent).toContain('Could not switch to VPN "target-vpn"');
+        expect((window as any).solace.SolclientFactory.createSession).not.toHaveBeenCalled();
     });
 
-    it('connection:check-connection VPN switch waits for client:disconnected then reconnects + browses', async () => {
-        const { ctx, eventBus, appState } = createTestContext(container);
+    it('connection:check-connection refuses a request while the user\'s own connect is in flight (the auto-connect race)', async () => {
+        const toasts = toastContainer();
+        const { ctx, eventBus } = createTestContext(container);
         await ConnectionsModule.install(ctx);
+        fillSolaceForm(container, 'mine');
+        (container.querySelector('#btn-solace-connect') as HTMLButtonElement).click();
+        (ctx.loadSelf as any).mockClear();
 
-        appState.isConnected = true;
-        const vpnInput = container.querySelector('#solace-vpn') as HTMLInputElement;
-        vpnInput.value = 'old-vpn';
+        eventBus.emit('connection:check-connection', { vpn: 'other-vpn', queue: 'q1' });
 
-        (globalThis.confirm as any).mockReturnValue(true);
-
-        const browseHandler = vi.fn();
-        eventBus.on('browser:browse-queue', browseHandler);
-
-        eventBus.emit('connection:check-connection', { vpn: 'new-vpn', queue: 'test-queue' });
-
-        // Before client:disconnected, we're still in the 'waiting for teardown' phase —
-        // client:connected should be a no-op (no listener for connect yet).
-        eventBus.emit('client:connected', { session: {} });
-        expect(browseHandler).not.toHaveBeenCalled();
-
-        // Teardown signal arrives → handler flips VPN input and registers waitForConnect
-        eventBus.emit('client:disconnected');
-        expect(vpnInput.value).toBe('new-vpn');
-
-        // Now the reconnect's UP_NOTICE triggers the browse.
-        eventBus.emit('client:connected', { session: {} });
-        expect(browseHandler).toHaveBeenCalledWith({ queue: 'test-queue' });
-    });
-
-    it('connection:check-connection VPN switch failure cleans up (reconnect fails after teardown)', async () => {
-        const { ctx, eventBus, appState } = createTestContext(container);
-        await ConnectionsModule.install(ctx);
-
-        appState.isConnected = true;
-        const vpnInput = container.querySelector('#solace-vpn') as HTMLInputElement;
-        vpnInput.value = 'old-vpn';
-
-        (globalThis.confirm as any).mockReturnValue(true);
-
-        eventBus.emit('connection:check-connection', { vpn: 'new-vpn', queue: 'test-queue' });
-        eventBus.emit('client:disconnected'); // teardown completes → reconnect phase begins
-
-        // Reconnect fails — no stale browse should fire later.
-        eventBus.emit('client:disconnected');
-
-        const browseHandler = vi.fn();
-        eventBus.on('browser:browse-queue', browseHandler);
-        eventBus.emit('client:connected', { session: {} });
-        expect(browseHandler).not.toHaveBeenCalled();
-    });
-
-    it('connection:check-connection VPN switch disconnect timeout clears opInProgress (10s)', async () => {
-        vi.useFakeTimers();
-        const { ctx, eventBus, appState } = createTestContext(container);
-        await ConnectionsModule.install(ctx);
-
-        appState.isConnected = true;
-        (container.querySelector('#solace-vpn') as HTMLInputElement).value = 'old-vpn';
-        (globalThis.confirm as any).mockReturnValue(true);
-
-        // First request starts the VPN switch and sets opInProgress=true.
-        eventBus.emit('connection:check-connection', { vpn: 'new-vpn', queue: 'q1' });
-        expect(ctx.loadSelf).toHaveBeenCalledTimes(1);
-
-        // Disconnect never arrives — timeout should eventually free the flag so a
-        // follow-up request is accepted. Use `loadSelf` call count as the "accepted"
-        // signal (it runs on every non-guarded entry, regardless of branch). Asserting
-        // on `confirm` would be flaky because the first emit's disconnect() synchronously
-        // flips isConnected→false in the test (no real session), so the second request
-        // naturally takes the auto-connect branch rather than the confirm branch.
-        vi.advanceTimersByTime(10_000);
-
-        eventBus.emit('connection:check-connection', { vpn: 'another-vpn', queue: 'q2' });
-        expect(ctx.loadSelf).toHaveBeenCalledTimes(2);
-
-        vi.useRealTimers();
+        expect(toasts.querySelector('.toast--warn')!.textContent).toBe('A connection attempt is in progress. Try again once it has finished.');
+        expect((container.querySelector('#solace-vpn') as HTMLInputElement).value).toBe('mine');
+        expect((window as any).solace.SolclientFactory.createSession).toHaveBeenCalledTimes(1);
+        expect(ctx.loadSelf).not.toHaveBeenCalled();
     });
 
     it('connection:edit-requested navigates the user to the connections form', async () => {
@@ -999,135 +1056,9 @@ describe('ConnectionsModule', () => {
         expect(ctx.loadSelf).toHaveBeenCalledTimes(1);
     });
 
-    it('connection:edit-requested with loadSelf undefined is a no-op AND leaves the bus functional for downstream emits', async () => {
-        const { ctx, eventBus } = createTestContext(container);
-        (ctx as any).loadSelf = undefined;
-        await ConnectionsModule.install(ctx);
-
-        // Probe listener registered BEFORE the suspect emit. If the listener
-        // body throws and pollutes the bus's dispatch loop, the probe won't
-        // fire on the follow-up emit.
-        const probe = vi.fn();
-        eventBus.on('client:disconnected', probe);
-
-        eventBus.emit('connection:edit-requested');
-
-        // The event bus is still capable of dispatching — proves the prior
-        // emit didn't poison its internal listener registry. A bare
-        // .not.toThrow() would also pass even if the bus had silently
-        // captured the throw and corrupted state for subsequent emits.
-        eventBus.emit('client:disconnected');
-        expect(probe).toHaveBeenCalledTimes(1);
-    });
-
-    it('check-connection returnTo=queue-copy: already-on-right-VPN path emits copy:vpn-switched WITHOUT navigating', async () => {
-        const { ctx, eventBus, appState } = createTestContext(container);
-        await ConnectionsModule.install(ctx);
-
-        appState.isConnected = true;
-        (container.querySelector('#solace-vpn') as HTMLInputElement).value = 'match-vpn';
-        (ctx.loadSelf as any).mockClear();
-
-        const copyHandler = vi.fn();
-        const browseHandler = vi.fn();
-        eventBus.on('copy:vpn-switched', copyHandler);
-        eventBus.on('browser:browse-queue', browseHandler);
-
-        eventBus.emit('connection:check-connection', { vpn: 'match-vpn', queue: 'q', returnTo: 'queue-copy' });
-
-        // No navigation when queue-copy flow is already on the right VPN —
-        // user stays put, gets the write-back event directly.
-        expect(ctx.loadSelf).not.toHaveBeenCalled();
-        expect(copyHandler).toHaveBeenCalledWith({ vpn: 'match-vpn', queue: 'q' });
-        expect(browseHandler).not.toHaveBeenCalled();
-    });
-
-    it('check-connection returnTo=queue-copy: auto-connect path navigates then emits copy:vpn-switched on success', async () => {
-        const { ctx, eventBus, appState } = createTestContext(container);
-        await ConnectionsModule.install(ctx);
-
-        appState.isConnected = false;
-        (ctx.loadSelf as any).mockClear();
-
-        const copyHandler = vi.fn();
-        eventBus.on('copy:vpn-switched', copyHandler);
-
-        eventBus.emit('connection:check-connection', { vpn: 'target-vpn', queue: 'q-target', returnTo: 'queue-copy' });
-        expect(ctx.loadSelf).toHaveBeenCalled();
-
-        eventBus.emit('client:connected', { session: {} });
-        expect(copyHandler).toHaveBeenCalledWith({ vpn: 'target-vpn', queue: 'q-target' });
-    });
-
-    it('check-connection returnTo=queue-copy: VPN switch with user-cancel does NOT navigate (stays on queue-copy)', async () => {
-        // Regression: previously the navigateToConnections() call ran BEFORE
-        // confirm(), so a Cancel left the user stranded on the connections
-        // page even though they declined the switch.
-        const { ctx, eventBus, appState } = createTestContext(container);
-        await ConnectionsModule.install(ctx);
-
-        appState.isConnected = true;
-        (container.querySelector('#solace-vpn') as HTMLInputElement).value = 'old-vpn';
-        (globalThis.confirm as any).mockReturnValue(false);
-        (ctx.loadSelf as any).mockClear();
-
-        const copyHandler = vi.fn();
-        eventBus.on('copy:vpn-switched', copyHandler);
-
-        eventBus.emit('connection:check-connection', { vpn: 'new-vpn', queue: 'q', returnTo: 'queue-copy' });
-
-        // No navigation, no copy-vpn-switched event — user stayed on queue-copy.
-        expect(ctx.loadSelf).not.toHaveBeenCalled();
-        expect(copyHandler).not.toHaveBeenCalled();
-    });
-
-    it('check-connection returnTo=queue-copy: VPN switch navigates then emits copy:vpn-switched after reconnect', async () => {
-        const { ctx, eventBus, appState } = createTestContext(container);
-        await ConnectionsModule.install(ctx);
-
-        appState.isConnected = true;
-        (container.querySelector('#solace-vpn') as HTMLInputElement).value = 'old-vpn';
-        (globalThis.confirm as any).mockReturnValue(true);
-        (ctx.loadSelf as any).mockClear();
-
-        const copyHandler = vi.fn();
-        const browseHandler = vi.fn();
-        eventBus.on('copy:vpn-switched', copyHandler);
-        eventBus.on('browser:browse-queue', browseHandler);
-
-        eventBus.emit('connection:check-connection', { vpn: 'new-vpn', queue: 'q', returnTo: 'queue-copy' });
-        expect(ctx.loadSelf).toHaveBeenCalled();
-
-        eventBus.emit('client:disconnected');  // teardown
-        eventBus.emit('client:connected', { session: {} });  // reconnect UP
-
-        expect(copyHandler).toHaveBeenCalledWith({ vpn: 'new-vpn', queue: 'q' });
-        expect(browseHandler).not.toHaveBeenCalled();
-    });
-
-    it('connection:check-connection ignores duplicate requests while operation in progress', async () => {
-        const { ctx, eventBus, appState } = createTestContext(container);
-        await ConnectionsModule.install(ctx);
-
-        appState.isConnected = false;
-        const browseHandler = vi.fn();
-        eventBus.on('browser:browse-queue', browseHandler);
-
-        // First request kicks off auto-connect; opInProgress is set.
-        eventBus.emit('connection:check-connection', { vpn: 'vpn-a', queue: 'q1' });
-
-        // Second, overlapping request should be ignored — only one waitForConnect
-        // listener pair exists, so client:connected fires once → browse once.
-        eventBus.emit('connection:check-connection', { vpn: 'vpn-b', queue: 'q2' });
-
-        eventBus.emit('client:connected', { session: {} });
-        expect(browseHandler).toHaveBeenCalledTimes(1);
-        expect(browseHandler).toHaveBeenCalledWith({ queue: 'q1' });
-    });
-
     // ====================================================================
     // Bridging: factory hooks → UI updates + AppState writes + bus emits.
-    // After the Stage B refactor, the broker-side factories live in
+    // The broker-side factories live in
     // src/core/services/ and are pure (no AppContext, no UI). The connections
     // module wires lifecycle hooks that route factory events into global
     // state, the event bus, and the connections form's UI. These tests
@@ -1170,6 +1101,8 @@ describe('ConnectionsModule', () => {
                 vpn: 'default',
                 pass: expect.any(String),
             }));
+            // A software or cloud broker: nothing marks the session as an appliance's.
+            expect(appState.solaceConnection).not.toHaveProperty('appliance');
             expect(appState.isConnected).toBe(true);
             expect(connectedHandler).toHaveBeenCalledWith(expect.objectContaining({ session: expect.any(Object) }));
             expect(btnSolace.textContent).toBe('Disconnect');
@@ -1369,22 +1302,6 @@ describe('ConnectionsModule', () => {
             });
         });
 
-        it('onError synthetic Certificate (untrust.com) → error text mentioning Certificate', async () => {
-            const { ctx } = createTestContext(container);
-            await ConnectionsModule.install(ctx);
-            (container.querySelector('#conn-host') as HTMLInputElement).value = 'foo.untrust.com';
-            (container.querySelector('#semp-port') as HTMLInputElement).value = '943';
-            (container.querySelector('#semp-username') as HTMLInputElement).value = 'admin';
-            (container.querySelector('#semp-password') as HTMLInputElement).value = 'admin';
-
-            (container.querySelector('#btn-semp-connect') as HTMLButtonElement).click();
-
-            await vi.waitFor(() => {
-                const errorEl = container.querySelector('#semp-connect-error') as HTMLElement;
-                expect(errorEl.textContent).toMatch(/^SEMP Network Error: Certificate/);
-            });
-        });
-
         it('onDisconnected → setState false, emit semp:disconnected, button → Connect', async () => {
             (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
             const { ctx, appState, eventBus } = await setupSempInstall();
@@ -1433,6 +1350,68 @@ describe('ConnectionsModule', () => {
         });
     });
 
+    // The SEMP account must meet the broker's account rules before any
+    // request: the Basic header is plain ASCII, built one way for the probe and
+    // for every later request (core/utils.ts basicAuthHeader).
+    describe('SEMP account rules', () => {
+        async function fillSemp(user: string, pass: string) {
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            (globalThis.fetch as any).mockClear();   // the /hosted probe at install
+            (container.querySelector('#conn-host') as HTMLInputElement).value = 'broker.test';
+            (container.querySelector('#semp-port') as HTMLInputElement).value = '943';
+            (container.querySelector('#semp-username') as HTMLInputElement).value = user;
+            (container.querySelector('#semp-password') as HTMLInputElement).value = pass;
+            (container.querySelector('#btn-semp-connect') as HTMLButtonElement).click();
+            return ctx;
+        }
+        const invalid = (sel: string) => (container.querySelector(sel) as HTMLElement).classList.contains('is-invalid');
+        const sempError = () => (container.querySelector('#semp-connect-error') as HTMLElement).textContent;
+
+        it('rejects a non-ASCII SEMP password inline before any request', async () => {
+            await fillSemp('admin', 'p\u00e4sswort\u20ac');
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+            expect(sempError()).toBe('SEMP password may contain only printable ASCII characters: no spaces or accented letters.');
+            expect([invalid('#semp-password'), invalid('#semp-username')]).toEqual([true, false]);
+        });
+
+        it('rejects a SEMP username outside the rules inline before any request', async () => {
+            await fillSemp('ops.admin', 'secret');
+            expect(globalThis.fetch).not.toHaveBeenCalled();
+            expect(sempError()).toBe('SEMP username may contain only letters, digits, - and _ (A-Z, a-z, 0-9, -, _).');
+            expect([invalid('#semp-username'), invalid('#semp-password')]).toEqual([true, false]);
+        });
+
+        it('takes a SEMP username with - and _', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            await fillSemp('ops-admin_2', 'secret');
+            expect(invalid('#semp-username')).toBe(false);
+            const btnSemp = container.querySelector('#btn-semp-connect') as HTMLButtonElement;
+            await vi.waitFor(() => expect(btnSemp.innerHTML).toBe('Disconnect'));
+        });
+
+        it('resets the SEMP button when the kernel tears SEMP down on a 401', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            const ctx = await fillSemp('admin', 'admin');
+            const btnSemp = container.querySelector('#btn-semp-connect') as HTMLButtonElement;
+            await vi.waitFor(() => expect(btnSemp.innerHTML).toBe('Disconnect'));
+
+            // What kernel.ts sempFetch does on a 401: state cleared, then the event.
+            ctx.setState('isSempConnected', false);
+            ctx.setState('sempCredentials', null);
+            ctx.eventBus.emit('semp:disconnected');
+
+            expect(btnSemp.textContent).toBe('Connect');
+            expect(btnSemp.classList.contains('btn-primary')).toBe(true);
+            expect(btnSemp.classList.contains('btn-danger')).toBe(false);
+            // A click connects again (it is not taken as a disconnect).
+            (globalThis.fetch as any).mockClear();
+            btnSemp.click();
+            await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+                'https://broker.test:943/SEMP/v2/monitor/msgVpns?count=1', expect.anything()));
+        });
+    });
+
     // Client Name Identifier — autofill on install, validation, persistence,
     // and connect-time composition into the SDK `clientName` session property
     // as `SolMsgUtil/YYYYMMDDHHMMSS/{identifier}`.
@@ -1476,7 +1455,7 @@ describe('ConnectionsModule', () => {
             expect((window as any).solace.SolclientFactory.createSession).not.toHaveBeenCalled();
         });
 
-        it('rejects disallowed characters (e.g. spaces) and blocks the SDK call', async () => {
+        it('rejects disallowed characters (e.g. spaces) and blocks the SDK call; typing a correction clears the error', async () => {
             const { ctx } = createTestContext(container);
             await ConnectionsModule.install(ctx);
 
@@ -1493,8 +1472,15 @@ describe('ConnectionsModule', () => {
 
             const errBox = container.querySelector('#solace-client-name-id-error') as HTMLElement;
             expect(input.classList.contains('is-invalid')).toBe(true);
-            expect(errBox.textContent).toMatch(/allowed/i);
+            expect(errBox.textContent).toBe('Allowed: letters, digits, and !@#$%^&*-=_+/.,');
             expect((window as any).solace.SolclientFactory.createSession).not.toHaveBeenCalled();
+
+            // The first keystroke of a correction clears the error; full
+            // validation waits for the next blur.
+            input.value = 'has';
+            input.dispatchEvent(new Event('input'));
+            expect(input.classList.contains('is-invalid')).toBe(false);
+            expect(errBox.textContent).toBe('');
         });
 
         it('accepts the full allowed symbol set without flagging an error', async () => {
@@ -1637,52 +1623,15 @@ describe('ConnectionsModule', () => {
 
             vi.useRealTimers();
         });
-
-        it('clears a stale invalid state eagerly while the user types a correction', async () => {
-            const { ctx } = createTestContext(container);
-            await ConnectionsModule.install(ctx);
-
-            const input = container.querySelector('#solace-client-name-id') as HTMLInputElement;
-            const errBox = container.querySelector('#solace-client-name-id-error') as HTMLElement;
-
-            // Force invalid state via blur on disallowed value.
-            input.value = 'has space';
-            input.dispatchEvent(new Event('blur'));
-            expect(input.classList.contains('is-invalid')).toBe(true);
-            expect(errBox.textContent).not.toBe('');
-
-            // First input event with a non-empty corrective value clears the
-            // red flag eagerly so the user isn't stared at while editing.
-            input.value = 'fixed';
-            input.dispatchEvent(new Event('input'));
-            expect(input.classList.contains('is-invalid')).toBe(false);
-            expect(errBox.textContent).toBe('');
-        });
     });
 
-    it('connection:check-connection with null loadSelf does not throw', async () => {
-        // Auto-connect path navigates — exercises the `if (loadSelf)` falsy branch
-        // in navigateToConnections without throwing.
-        const { ctx, eventBus, appState } = createTestContext(container);
-        ctx.loadSelf = null as any;
-        await ConnectionsModule.install(ctx);
-
-        appState.isConnected = false;
-
-        expect(() => {
-            eventBus.emit('connection:check-connection', { vpn: 'target-vpn', queue: 'q1' });
-        }).not.toThrow();
-    });
-
-    // The connections module probes `/hosted` once at install. A 200 response
-    // with body "true" flips the hosted singleton on; anything else leaves it
-    // off (direct-connection mode).
+    // The connections module probes `/hosted` once at install and publishes the
+    // verdict as AppState.connConfig.hosted, its one home. A 200 response with
+    // body "true" is hosted; anything else is direct-connection mode.
     describe('/hosted probe at install', () => {
-        afterEach(() => setHosted(false));
-
-        // Branches `fetch('/hosted', …)` to a custom response and forwards
-        // every other URL to the default `{ok: true, status: 200}` so existing
-        // SEMP / Solace fetches in this suite are unaffected.
+        // Answers `fetch('/hosted', ...)` with a custom response and every other
+        // URL with `{ok: true, status: 200}`. tests/setup.ts resets fetch to a
+        // bare vi.fn() before each test, so each stub sets its own implementation.
         function stubHostedFetch(hostedResponse: any) {
             (globalThis.fetch as any).mockImplementation((url: string, _init?: RequestInit) => {
                 if (url === '/hosted') return Promise.resolve(hostedResponse);
@@ -1692,39 +1641,116 @@ describe('ConnectionsModule', () => {
 
         it('enables hosted mode when /hosted returns 200 with body "true"', async () => {
             stubHostedFetch({ ok: true, status: 200, text: () => Promise.resolve('true') });
-            const { ctx } = createTestContext(container);
+            const { ctx, appState } = createTestContext(container);
             await ConnectionsModule.install(ctx);
-            expect(isHosted()).toBe(true);
+            expect(appState.connConfig?.hosted).toBe(true);
         });
 
         it('keeps direct mode when /hosted returns 200 with body "false"', async () => {
             stubHostedFetch({ ok: true, status: 200, text: () => Promise.resolve('false') });
-            const { ctx } = createTestContext(container);
+            const { ctx, appState } = createTestContext(container);
             await ConnectionsModule.install(ctx);
-            expect(isHosted()).toBe(false);
+            expect(appState.connConfig?.hosted).toBe(false);
         });
 
         it('keeps direct mode when /hosted returns 404 (standalone deployment)', async () => {
             stubHostedFetch({ ok: false, status: 404, text: () => Promise.resolve('Not Found') });
+            const { ctx, appState } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            expect(appState.connConfig?.hosted).toBe(false);
+        });
+    });
+
+    describe('inconclusive /hosted probe', () => {
+        const noticeHidden = () => (container.querySelector('#conn-probe-notice') as HTMLElement).classList.contains('hidden');
+
+        it('a conclusive no-gateway (404) shows no notice', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 404, text: () => Promise.resolve('') });
             const { ctx } = createTestContext(container);
             await ConnectionsModule.install(ctx);
-            expect(isHosted()).toBe(false);
+            expect(noticeHidden()).toBe(true);
+        });
+
+        it('a 5xx keeps the app standalone (not hosted, Direct form wired) and shows the notice; Retry reloads the page', async () => {
+            vi.spyOn(console, 'warn').mockImplementation(() => { });
+            (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 502, text: () => Promise.resolve('') });
+            const { ctx, appState } = createTestContext(container);
+            const reload = vi.fn();
+            await ConnectionsModule.install(ctx, { reload });
+
+            expect(appState.connConfig).toEqual({ ...DEFAULT_CONN_CONFIG, hosted: false });
+            expect(noticeHidden()).toBe(false);
+            expect(container.querySelector('#conn-probe-notice')!.textContent).toContain('Could not check whether this page is served by the gateway.');
+            expect(reload).not.toHaveBeenCalled();
+            (container.querySelector('#btn-conn-probe-retry') as HTMLButtonElement).click();
+            expect(reload).toHaveBeenCalledTimes(1);
+        });
+
+        it('a network error shows the notice, and Retry without an injected reload calls window.location.reload', async () => {
+            vi.spyOn(console, 'warn').mockImplementation(() => { });
+            (globalThis.fetch as any).mockRejectedValue(new TypeError('Failed to fetch'));
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            expect(noticeHidden()).toBe(false);
+
+            const original = window.location;
+            const reload = vi.fn();
+            Object.defineProperty(window, 'location', { value: { reload }, writable: true, configurable: true });
+            try {
+                (container.querySelector('#btn-conn-probe-retry') as HTMLButtonElement).click();
+            } finally {
+                Object.defineProperty(window, 'location', { value: original, writable: true, configurable: true });
+            }
+            expect(reload).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    // This is the Release entry: Direct only, whatever the gateway advertises.
+    // The Managed tab ships only in provisioned.html (module.managed.ts), covered by
+    // tests/modules/connections/module.managed.test.ts.
+    describe('Direct-only entry', () => {
+        function stubHosted(json: any) {
+            (globalThis.fetch as any).mockImplementation((url: string) => {
+                if (url === '/hosted') return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(json)) });
+                return Promise.resolve({ ok: true, status: 200 });
+            });
+        }
+
+        it('publishes a Direct-only connConfig and warns when the gateway offers Provisioned sign-in', async () => {
+            // The Direct bundle served by a Provisioned gateway (a build mounted over the app's files):
+            // queue-copy derives its destination choices from connConfig, so it
+            // must not offer a provisioned mode no session in this bundle can back.
+            stubHosted({ hosted: true, connModes: 'provisioned', defaultConn: 'provisioned' });
+            const warn = vi.spyOn(logger, 'warn');
+            const { ctx, appState } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+
+            expect(appState.connConfig).toEqual({ connModes: 'direct', defaultConn: 'direct', hosted: true });
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('Serve provisioned.html'));
+        });
+
+        it('publishes the same Direct-only connConfig, without a warning, for a Direct gateway', async () => {
+            stubHosted({ hosted: true, connModes: 'direct', defaultConn: 'direct' });
+            const warn = vi.spyOn(logger, 'warn');
+            const { ctx, appState } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+
+            expect(appState.connConfig).toEqual({ connModes: 'direct', defaultConn: 'direct', hosted: true });
+            expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Serve provisioned.html'));
         });
     });
 
     // In hosted mode, the helpUrl link in connection-error toasts is
     // suppressed because the broker is internal and the user can't reach
-    // its TLS endpoint to accept a self-signed cert. The hooks read
-    // isHosted() at failure time (not install time), so we flip the
-    // singleton AFTER install — the install-time probe would otherwise
-    // reset the flag based on the default fetch mock's behavior.
+    // its TLS endpoint to accept a self-signed cert. The verdict comes from
+    // the install-time /hosted probe (AppState.connConfig.hosted).
     describe('helpUrl suppression in hosted mode', () => {
-        afterEach(() => setHosted(false));
-
         it('omits the helpUrl link on Solace onConnectFailed when hosted', async () => {
+            (globalThis.fetch as any).mockImplementation((url: string) => Promise.resolve(url === '/hosted'
+                ? { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ hosted: true, connModes: 'direct', defaultConn: 'direct' })) }
+                : { ok: true, status: 200 }));
             const { ctx } = createTestContext(container);
             await ConnectionsModule.install(ctx);
-            setHosted(true);
 
             (container.querySelector('#conn-host') as HTMLInputElement).value = 'broker.test';
             (container.querySelector('#solace-port') as HTMLInputElement).value = '8080';
@@ -1781,6 +1807,230 @@ describe('ConnectionsModule', () => {
                     protocol: 'https', host: 'broker.test', port: '943', urlPath: '/api',
                 }));
             });
+        });
+    });
+
+    // Without the gateway an https page cannot open ws:// or http:// (mixed
+    // content): the plain options are hidden, and a saved plain scheme moves to
+    // TLS with a warning, as its port is most likely the plain one. Behind the
+    // gateway every scheme stays.
+    describe('plain schemes on an https page', () => {
+        let originalLocation: Location;
+        const saved = {
+            host: 'broker.test',
+            solace: { protocol: 'ws', port: '8008' },
+            semp: { protocol: 'http', port: '8080' },
+        };
+
+        beforeEach(() => {
+            originalLocation = window.location;
+            Object.defineProperty(window, 'location', {
+                value: { protocol: 'https:', host: 'app.example', origin: 'https://app.example' },
+                writable: true,
+                configurable: true,
+            });
+            const toasts = document.createElement('div');
+            toasts.id = 'toast-container';
+            document.body.appendChild(toasts);
+            vi.spyOn(config, 'load').mockReturnValue(asConfig(saved));
+        });
+        afterEach(() => {
+            Object.defineProperty(window, 'location', { value: originalLocation, writable: true, configurable: true });
+        });
+
+        const select = (id: string) => container.querySelector<HTMLSelectElement>(id)!;
+        const option = (id: string, value: string) => select(id).querySelector<HTMLOptionElement>(`option[value="${value}"]`)!;
+
+        it('hides ws:// and http:// and moves the saved ones to TLS, with a warning, without the gateway', async () => {
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+
+            expect([select('#solace-protocol').value, select('#semp-protocol').value]).toEqual(['wss', 'https']);
+            const port = (id: string) => container.querySelector<HTMLInputElement>(id)!.value;
+            expect([port('#solace-port'), port('#semp-port')]).toEqual(['8008', '8080']); // left for the user to check
+            expect(option('#solace-protocol', 'ws').hidden).toBe(true);
+            expect(option('#semp-protocol', 'http').hidden).toBe(true);
+            const toast = document.querySelector('#toast-container .toast.toast--warn');
+            expect(toast?.textContent).toContain('ws:// is now wss:// and http:// is now https://');
+            expect(toast?.textContent).toContain('Check the port');
+        });
+
+        it('keeps the saved ws:// and http://, without a warning, behind the gateway', async () => {
+            (globalThis.fetch as any).mockImplementation((url: string) => Promise.resolve(url === '/hosted'
+                ? { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ hosted: true, connModes: 'direct', defaultConn: 'direct' })) }
+                : { ok: true, status: 200 }));
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+
+            expect([select('#solace-protocol').value, select('#semp-protocol').value]).toEqual(['ws', 'http']);
+            expect(option('#solace-protocol', 'ws').hidden).toBe(false);
+            expect(option('#semp-protocol', 'http').hidden).toBe(false);
+            expect(document.querySelector('#toast-container .toast.toast--warn')).toBeNull();
+        });
+    });
+
+    // One host for a software or cloud broker. An appliance has a management
+    // host (the SEMP card's box) and a messaging host (the Messaging card's);
+    // tests/core/connections/broker-hosts.test.ts covers the control itself.
+    describe('broker type and hosts', () => {
+        const input = (sel: string) => container.querySelector(sel) as HTMLInputElement;
+        const button = (sel: string) => container.querySelector(sel) as HTMLButtonElement;
+        const typeButton = (type: 'software' | 'appliance') => button(`#conn-broker-type [data-broker-type="${type}"]`);
+        const invalid = (sel: string) => input(sel).classList.contains('is-invalid');
+        const createSession = () => (window as any).solace.SolclientFactory.createSession;
+        /** Where the Certificate Trust Helper would send the user, read by pressing the link under the failed connect. */
+        function trustUrl(): string | null {
+            (container.querySelector('#solace-connect-error a') as HTMLAnchorElement).click();
+            return container.querySelector('#ssl-trust-url-text')!.textContent;
+        }
+
+        /** A valid appliance form: its management host in the SEMP card, its messaging host in the Messaging card. */
+        function fillAppliance(): void {
+            typeButton('appliance').click();
+            input('#conn-host').value = 'mgmt.test';
+            input('#solace-host').value = 'msg.test';
+            input('#solace-port').value = '8080';
+            input('#solace-vpn').value = 'default';
+            input('#solace-username').value = 'admin';
+            input('#semp-port').value = '943';
+            input('#semp-username').value = 'admin';
+            input('#semp-password').value = 'admin';
+        }
+
+        it('connects an appliance\'s messaging to its messaging host and its SEMP to its management host', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            const { ctx, appState } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+
+            button('#btn-solace-connect').click();
+            expect(createSession().mock.calls[0][0].url).toBe('wss://msg.test:8080');
+            sessionHandler('UP_NOTICE')();
+            expect(appState.solaceConnection!.host).toBe('msg.test');
+            // Other modules learn the type from the session: the two hosts may be the same.
+            expect(appState.solaceConnection!.appliance).toBe(true);
+
+            button('#btn-semp-connect').click();
+            await vi.waitFor(() => expect(appState.sempCredentials?.host).toBe('mgmt.test'));
+            expect(appState.sempCredentials!.baseUrl).toBe('https://mgmt.test:943');
+        });
+
+        it('checks the host of the card that connects: an appliance\'s messaging host for messaging, its management host for SEMP', async () => {
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+            input('#solace-host').value = 'not a host';
+            input('#conn-host').value = '';
+
+            button('#btn-solace-connect').click();
+            expect([invalid('#solace-host'), invalid('#conn-host')]).toEqual([true, false]);
+            expect(createSession()).not.toHaveBeenCalled();
+
+            // The management host is SEMP's to check, not messaging's.
+            input('#solace-host').value = 'msg.test';
+            button('#btn-solace-connect').click();
+            expect([invalid('#solace-host'), invalid('#conn-host')]).toEqual([false, false]);
+            expect(createSession()).toHaveBeenCalledTimes(1);
+
+            button('#btn-semp-connect').click();
+            expect(invalid('#conn-host')).toBe(true);
+        });
+
+        it('drops the marks of a failed check when the broker type changes', async () => {
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            input('#conn-host').value = '';
+            button('#btn-solace-connect').click();
+            expect(invalid('#conn-host')).toBe(true);
+
+            typeButton('appliance').click();
+            expect([invalid('#conn-host'), invalid('#solace-host')]).toEqual([false, false]);
+        });
+
+        it('locks the broker type with either connection, the one host with either, and each host of an appliance with its own', async () => {
+            const { ctx, eventBus, appState } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            const locks = () => [typeButton('appliance').disabled, input('#conn-host').disabled, input('#solace-host').disabled];
+            // One host: the Messaging card's box only shows it.
+            expect(locks()).toEqual([false, false, true]);
+
+            appState.isSempConnected = true;
+            eventBus.emit('semp:connected');
+            expect(locks()).toEqual([true, true, true]);
+
+            appState.isSempConnected = false;
+            eventBus.emit('semp:disconnected');
+            typeButton('appliance').click();
+            expect(locks()).toEqual([false, false, false]);
+
+            appState.isConnected = true;
+            eventBus.emit('client:connected', { session: {} });
+            expect(locks()).toEqual([true, false, true]);
+        });
+
+        it('saves an appliance\'s two hosts and loads them back as an appliance; a config with one host loads as Software / Cloud', async () => {
+            toastContainer();
+            const save = vi.spyOn(config, 'save').mockReturnValue(true);
+            const load = vi.spyOn(config, 'load').mockReturnValue(null);
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+            const shown = () => [
+                typeButton('appliance').getAttribute('aria-pressed'),
+                input('#conn-host').value, input('#solace-host').value, input('#solace-host').disabled,
+            ];
+
+            button('#btn-save-config').click();
+            const saved = save.mock.calls[0][0] as ConnectionConfig;
+            expect([saved.host, saved.messagingHost]).toEqual(['mgmt.test', 'msg.test']);
+
+            load.mockReturnValue(asConfig({ host: 'one.test' }));
+            button('#btn-load-config').click();
+            expect(shown()).toEqual(['false', 'one.test', 'one.test', true]);
+
+            load.mockReturnValue(saved);
+            button('#btn-load-config').click();
+            expect(shown()).toEqual(['true', 'mgmt.test', 'msg.test', false]);
+        });
+
+        it('Reset Form returns to Software / Cloud with no host', async () => {
+            toastContainer();
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+            input('#solace-host').classList.add('is-invalid');
+
+            button('#btn-reset-form').click();
+            expect(typeButton('software').getAttribute('aria-pressed')).toBe('true');
+            expect([input('#conn-host').value, input('#solace-host').value, invalid('#solace-host')]).toEqual(['', '', false]);
+        });
+
+        it('connects SEMP on Enter in the SEMP card\'s host, and messaging on Enter in an appliance\'s messaging host', async () => {
+            (globalThis.fetch as any).mockResolvedValue({ ok: true, status: 200 });
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+            (globalThis.fetch as any).mockClear();
+
+            input('#conn-host').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+            await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith(
+                expect.stringContaining('https://mgmt.test:943/SEMP/v2/monitor/msgVpns'), expect.anything()));
+            expect(createSession()).not.toHaveBeenCalled();
+
+            input('#solace-host').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+            expect(createSession().mock.calls[0][0].url).toBe('wss://msg.test:8080');
+        });
+
+        // The link opens the SEMP address whatever the broker type, as
+        // "onConnectFailed with \"Connection error\" surfaces a helpUrl link to the SEMP base" above holds for one host.
+        it('sends an appliance\'s Trust Certificate link to its management address, not its messaging one', async () => {
+            const { ctx } = createTestContext(container);
+            await ConnectionsModule.install(ctx);
+            fillAppliance();
+
+            button('#btn-solace-connect').click();
+            sessionHandler('CONNECT_FAILED_ERROR')({ infoStr: 'Connection error to host' });
+            expect(trustUrl()).toBe('https://mgmt.test:943');
         });
     });
 

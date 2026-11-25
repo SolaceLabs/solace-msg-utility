@@ -1,0 +1,294 @@
+/**
+ * The in-memory broker: VPNs, queues, and the messages they spool.
+ *
+ * This is what makes the demo compose. Deleting a message removes it and the
+ * depth drops; a copy run publishes into the destination queue, so browsing it
+ * afterwards shows the same messages with the same IDs. The SEMP layer reports
+ * depth and spool usage by reading this store, so verify's numbers always agree
+ * with what browsing shows.
+ *
+ * Messages are held in spool-ID order, because the copy engine's drift
+ * detection and max-consumed logic assume the broker delivers them that way.
+ *
+ * Every broker in `fixtures.BROKERS` lives here. VPN names are unique across
+ * them, so a queue is keyed `vpn/queue`; the broker argument scopes what a
+ * listing, a by-name lookup or a publish can see, defaulting to the Direct
+ * broker.
+ *
+ * Mock-only. demo.html reseeds on every page load; the managed demo carries
+ * the store across its sign-in reloads with `dumpStore` / `loadStore`.
+ */
+import { bytesToLatin1, createDestination, createMessage, payloadByteLength, type MessageFields, type MockDestination, type MockMessage } from '../sdk/message';
+import { DestinationType } from '../sdk/enums';
+import { PAYLOAD_SAMPLES } from './samples';
+import { BROKERS, DIRECT_BROKER, brokerVpns, scenario, queueStateOf, QUEUE_STATE } from '../fixtures';
+
+export interface SpooledMessage {
+    /** Monotonic spool id; also the guaranteed message id. */
+    id: number;
+    msg: MockMessage;
+    sizeBytes: number;
+}
+
+export interface MockQueue {
+    vpn: string;
+    name: string;
+    messages: SpooledMessage[];
+    /** Bytes the broker reports as spool usage. */
+    quotaBytes: number;
+    maxMessageSize: number;
+    subscriptions: string[];
+    owner: string;
+}
+
+const PAYLOAD_TEMPLATES = [
+    (n: number) => JSON.stringify({ orderId: `ORD-${1000 + n}`, status: 'NEW', amount: 40 + n * 3, currency: 'GBP' }),
+    (n: number) => JSON.stringify({ event: 'audit', actor: `user-${n % 7}`, action: 'LOGIN', ok: n % 5 !== 0 }),
+    (n: number) => `plain-text payload #${n} — the quick brown fox jumps over the lazy dog`,
+    (n: number) => JSON.stringify({ telemetry: { cpu: (n % 100) / 100, mem: (n % 64) * 16 }, host: `node-${n % 4}` }),
+];
+
+const CONTENT_TYPES = ['application/json', 'application/json', 'text/plain', 'application/json'];
+
+/**
+ * Queues whose 5th and 6th messages showcase payload fidelity: UTF-8 text with
+ * non-ASCII characters (must display decoded) and bytes that are not valid
+ * UTF-8 (the details pane shows the size-only placeholder). Keyed `vpn/queue`;
+ * one in the default VPN to browse, one that the copy/move flows exercise.
+ */
+const SHOWCASE_QUEUES = new Set(['default/test-queue-1', 'vpn-prod/Q/ORDER/PROCESS']);
+const SHOWCASE_UTF8 = 4;
+const SHOWCASE_BINARY = 5;
+const BINARY_SAMPLE = Uint8Array.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0xFE, 0x80]);
+
+let nextId = 1;
+const queues = new Map<string, MockQueue>();
+
+function key(vpn: string, queue: string): string {
+    return `${vpn}/${queue}`;
+}
+
+/** A message of the payload samples queue: the sample's body, named by its correlation id and `sample` property. */
+function buildSample(vpn: string, queueName: string, n: number): SpooledMessage {
+    const id = nextId++;
+    const sample = PAYLOAD_SAMPLES[n];
+    const msg = createMessage({
+        ...sample.fields,
+        guaranteedMessageId: String(id),
+        destination: createDestination(queueName, DestinationType.QUEUE),
+        applicationMessageId: `sample-${sample.name}`,
+        correlationId: sample.name,
+        senderId: 'demo-publisher-0',
+        senderTimestamp: Date.parse('2026-08-01T09:00:00Z') + n * 60_000,
+        sequenceNumber: n + 1,
+        deliveryCount: 1,
+        userProperties: { source: `demo/${vpn}`, sample: sample.name },
+    });
+    return { id, msg, sizeBytes: payloadByteLength(msg._fields) + 120 };
+}
+
+function buildMessage(vpn: string, queueName: string, n: number): SpooledMessage {
+    const id = nextId++;
+    const variant = n % PAYLOAD_TEMPLATES.length;
+    const utf8 = SHOWCASE_QUEUES.has(key(vpn, queueName)) && n === SHOWCASE_UTF8;
+    const binary = SHOWCASE_QUEUES.has(key(vpn, queueName)) && n === SHOWCASE_BINARY;
+    const payload = utf8 ? `Gr\u00FC\u00DFe aus Z\u00FCrich \u2014 \u6771\u4EAC \u2713 order #${n}` : PAYLOAD_TEMPLATES[variant](n);
+    const msg = createMessage({
+        ...(binary ? { payloadBytes: bytesToLatin1(BINARY_SAMPLE) } : { payload }),
+        guaranteedMessageId: String(id),
+        destination: createDestination(queueName, DestinationType.QUEUE),
+        applicationMessageId: `app-msg-${id}`,
+        applicationMessageType: binary ? 'binary' : (utf8 || variant === 2) ? 'text' : 'json',
+        correlationId: `corr-${id}`,
+        senderId: `demo-publisher-${n % 3}`,
+        senderTimestamp: Date.parse('2026-08-01T09:00:00Z') + n * 60_000,
+        sequenceNumber: n + 1,
+        priority: n % 10,
+        deliveryCount: 1,
+        httpContentType: binary ? 'application/octet-stream' : utf8 ? 'text/plain; charset=utf-8' : CONTENT_TYPES[variant],
+        redelivered: n % 11 === 0,
+        dmqEligible: n % 3 === 0,
+        userProperties: {
+            source: `demo/${vpn}`,
+            partition: String(n % 4),
+            trace: `trace-${id}`,
+        },
+    });
+    return { id, msg, sizeBytes: payloadByteLength(msg._fields) + 120 };
+}
+
+/**
+ * Rebuild every queue from the fixtures at the current volume setting.
+ * Called at boot and by the panel's Reset control.
+ */
+export function seed(): void {
+    queues.clear();
+    nextId = 1;
+    for (const vpn of Array.from(BROKERS.values()).flat()) {
+        for (const q of vpn.queues) {
+            const state = queueStateOf(vpn.name, q.name);
+            // A samples queue is fixed: the volume lever does not scale it.
+            const count = state === QUEUE_STATE.EMPTY ? 0 : q.samples ? PAYLOAD_SAMPLES.length : Math.round(q.seed * scenario.volume);
+            const messages: SpooledMessage[] = [];
+            for (let n = 0; n < count; n++) messages.push(q.samples ? buildSample(vpn.name, q.name, n) : buildMessage(vpn.name, q.name, n));
+            queues.set(key(vpn.name, q.name), {
+                vpn: vpn.name,
+                name: q.name,
+                messages,
+                quotaBytes: 5000 * 1024 * 1024,
+                maxMessageSize: 10_000_000,
+                subscriptions: q.subscriptions.slice(),
+                owner: 'demo',
+            });
+        }
+    }
+}
+
+export function listVpns(broker: string = DIRECT_BROKER): string[] {
+    return brokerVpns(broker).map(v => v.name);
+}
+
+export function listQueues(vpn: string, broker: string = DIRECT_BROKER): string[] {
+    return brokerVpns(broker).find(v => v.name === vpn)?.queues.map(q => q.name) ?? [];
+}
+
+/** Whether the VPN is one of the broker's. */
+export function vpnOn(broker: string, vpn: string): boolean {
+    return brokerVpns(broker).some(v => v.name === vpn);
+}
+
+export function getQueue(vpn: string, queue: string): MockQueue | undefined {
+    return queues.get(key(vpn, queue));
+}
+
+/**
+ * Find a queue by name across every VPN — the SEMP v1 detail RPC is called with
+ * `vpn-name` of `*` when the caller does not know which VPN owns the queue.
+ */
+export function findQueueAnyVpn(queue: string, broker: string = DIRECT_BROKER): MockQueue | undefined {
+    return allQueues(broker).find(q => q.name === queue);
+}
+
+/** The broker's queues. */
+export function allQueues(broker: string = DIRECT_BROKER): MockQueue[] {
+    return Array.from(queues.values()).filter(q => vpnOn(broker, q.vpn));
+}
+
+export function spoolUsage(q: MockQueue): number {
+    return q.messages.reduce((sum, m) => sum + m.sizeBytes, 0);
+}
+
+/** Remove one message by guaranteed id. Returns true when something went. */
+export function removeMessage(vpn: string, queue: string, id: string): boolean {
+    const q = queues.get(key(vpn, queue));
+    if (!q) return false;
+    const i = q.messages.findIndex(m => String(m.id) === String(id));
+    if (i < 0) return false;
+    q.messages.splice(i, 1);
+    return true;
+}
+
+/**
+ * The queues a publish to `destName` from a session on `vpn` reaches: the named
+ * queue, or every queue subscribed to the topic, in that Message VPN only.
+ */
+function publishTargets(destName: string, destType: number, vpn: string, broker: string): MockQueue[] {
+    const inVpn = allQueues(broker).filter(q => q.vpn === vpn);
+    return destType === DestinationType.QUEUE
+        ? inVpn.filter(q => q.name === destName)
+        : inVpn.filter(q => q.subscriptions.some(sub => topicMatches(sub, destName)));
+}
+
+/**
+ * Why the broker refuses a publish to `destName`, or null when it accepts it:
+ * the first reached queue set to PUBLISH_REJECTED. All or nothing, as a real
+ * broker rejects the message rather than spooling it to some queues only.
+ */
+export function publishRejection(destName: string, destType: number, vpn: string, broker: string = DIRECT_BROKER): string | null {
+    const refusing = publishTargets(destName, destType, vpn, broker)
+        .find(q => queueStateOf(q.vpn, q.name) === QUEUE_STATE.PUBLISH_REJECTED);
+    return refusing ? `Message rejected: ingress of queue ${refusing.name} is shut down (demo fault)` : null;
+}
+
+/**
+ * Publish into a queue (direct enqueue) or to a topic (fan out to every queue
+ * in the session's Message VPN whose subscriptions match). Returns the number of
+ * queues that accepted it, so the publisher can report a topic with no
+ * subscribers honestly.
+ */
+export function publish(destName: string, destType: number, msg: MockMessage, vpn: string, broker: string = DIRECT_BROKER): number {
+    const targets = publishTargets(destName, destType, vpn, broker);
+
+    for (const q of targets) {
+        const id = nextId++;
+        // Each queue spools its own copy, stamped with its own id: the broker
+        // owns spool ids, not the publisher, and a topic reaches many queues.
+        const stored = createMessage(msg._fields);
+        stored.setGuaranteedMessageId(String(id));
+        q.messages.push({ id, msg: stored, sizeBytes: payloadByteLength(stored._fields) + 120 });
+    }
+    return targets.length;
+}
+
+/** The store as plain data: a message's destinations become `{ name, type }`. */
+export interface StoreSnapshot {
+    nextId: number;
+    queues: (Omit<MockQueue, 'messages'> & { messages: { id: number; sizeBytes: number; fields: Record<string, unknown> }[] })[];
+}
+
+const DESTINATION_FIELDS = ['destination', 'replyTo'] as const;
+
+export function dumpStore(): StoreSnapshot {
+    return {
+        nextId,
+        queues: Array.from(queues.values(), q => ({
+            ...q,
+            subscriptions: [...q.subscriptions],
+            messages: q.messages.map(m => {
+                const fields: Record<string, unknown> = { ...m.msg._fields };
+                for (const k of DESTINATION_FIELDS) {
+                    const d = m.msg._fields[k];
+                    if (d) fields[k] = { name: d.getName(), type: d.getType() };
+                }
+                return { id: m.id, sizeBytes: m.sizeBytes, fields };
+            }),
+        })),
+    };
+}
+
+/** Replace the store with a snapshot `dumpStore` made. */
+export function loadStore(s: StoreSnapshot): void {
+    queues.clear();
+    nextId = s.nextId;
+    for (const q of s.queues) {
+        queues.set(key(q.vpn, q.name), {
+            ...q,
+            subscriptions: [...q.subscriptions],
+            messages: q.messages.map(m => {
+                const fields = { ...m.fields } as MessageFields;
+                for (const k of DESTINATION_FIELDS) {
+                    const d = m.fields[k] as { name: string; type: number } | undefined;
+                    if (d) fields[k] = createDestination(d.name, d.type) as MockDestination;
+                }
+                return { id: m.id, sizeBytes: m.sizeBytes, msg: createMessage(fields) };
+            }),
+        });
+    }
+}
+
+/**
+ * Solace topic matching: `*` covers one level, `>` covers the rest. Used to fan
+ * a topic publish out to subscribed queues, so a forward-to-topic in the demo
+ * genuinely lands somewhere browsable.
+ */
+export function topicMatches(subscription: string, topic: string): boolean {
+    const subParts = subscription.split('/');
+    const topicParts = topic.split('/');
+    for (let i = 0; i < subParts.length; i++) {
+        if (subParts[i] === '>') return true;
+        if (i >= topicParts.length) return false;
+        if (subParts[i] === '*') continue;
+        if (subParts[i] !== topicParts[i]) return false;
+    }
+    return subParts.length === topicParts.length;
+}

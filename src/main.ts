@@ -6,34 +6,23 @@
  */
 
 import './css/main.css';
-import { Kernel } from './core/kernel';
-import { modules } from './registry';
+import { boot as preBoot } from './core/boot';
+import { createKernel } from './core/kernel';
 import { logger } from './core/logger';
+import { modules } from './registry';
 
-const kernel = new Kernel(modules);
+// Pre-kernel seam. A no-op in shipped builds; the demo build redirects it to
+// the in-browser broker so the SDK global and HTTP interceptor are in place
+// before any module installs.
+preBoot();
 
-// Boot after DOM is ready
-/* v8 ignore start -- jsdom readyState is always 'complete', can't test this branch */
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-} else {
-/* v8 ignore stop */
-    boot();
-}
+const kernel = createKernel(modules);
 
-function boot(): void {
-    // solclient.js loads asynchronously — wait for it if not yet loaded
-    if ((window as any).solace) {
-        kernel.start();
-    } else {
-        // The solclient.js script fires this event when loaded
-        const script = document.querySelector('script[src*="solclient"]');
-        if (script) {
-            script.addEventListener('load', () => kernel.start());
-        } else {
-            // No solclient.js found — boot without Solace (mock mode)
-            logger.warn('[Main] solclient.js not found, booting in limited mode');
-            kernel.start();
-        }
-    }
-}
+// Start at once. This module script runs after the document is parsed, and
+// nothing at install needs the Solace SDK: it is used only once a session is
+// live, and Connect waits for the shell loader (src/index.html) if the SDK is
+// still downloading. A missing or outdated SDK is reported at Connect, not
+// by a blank page.
+kernel.start().catch((err: unknown) => {
+    logger.error('[main] The kernel failed to start; the page may be incomplete. Reload to retry.', err);
+});

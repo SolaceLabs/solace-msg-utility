@@ -1,0 +1,269 @@
+<article class="manual-chapter">
+    <h2>Gateway Settings</h2>
+    <p class="manual-lead">Change how the gateway behaves: which connection tabs the app offers, who may reach it, how long sessions last, how sign-in is protected, which modules users may be given, and what is logged and audited. A saved setting applies at once.</p>
+    <p>Gateway Settings needs an <strong>administrator's session</strong>. Without one, the page shows <strong>Administrator Sign-in Required</strong> and the message <code>Sign in as an administrator to change the gateway settings.</code> in place of the settings. It is a page of the administration app, which the gateway serves at <code>/solAdmin</code> to administrators only.</p>
+    <p>What an operator sets up outside these pages, such as the environment variables the gateway starts with, is in the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#configure">Provisioned mode guide</a>.</p>
+
+    <h3>The page at a glance</h3>
+    <p>The page is a stack of cards, one for each group of settings, with <strong>Save</strong> under them and a <strong>Gateway</strong> card at the foot. You change as many settings as you like, then press <strong>Save</strong> once.</p>
+    <figure class="manual-figure">
+        <img src="help/page.svg" width="760" height="640" alt="The Gateway Settings page: an intro card with Reload, a warning banner, the Connections and Access cards, a stack of further cards, and the Save button.">
+        <figcaption>Gateway Settings, with the warning banner showing.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The intro card and <strong>Reload</strong>. Reload fetches the settings from the gateway again and drops any change you have not saved.</li>
+        <li>The warning banner, shown only when the gateway's settings file was changed on the gateway host. See "When the settings file was changed on the host" below.</li>
+        <li>The <strong>Connections</strong> card.</li>
+        <li>The <strong>Access</strong> card.</li>
+        <li>The cards that follow, in this order: <strong>Sessions</strong>, <strong>Sign-in throttle</strong>, <strong>Passwords and two-factor sign-in</strong>, <strong>Modules</strong>, <strong>Logging</strong>, <strong>Audit trail</strong> and <strong>Broker trust</strong>.</li>
+        <li><strong>Save</strong>. A refusal appears in red under it.</li>
+    </ol>
+    <aside class="manual-note">
+        <p>Every setting on this page applies at once, on Save. None of them waits for a restart. The gateway's certificate and the trusted broker CAs are not here: they are on the Certificates page.</p>
+    </aside>
+
+    <h3>Reload and Save</h3>
+    <p>When the page opens, it shows the settings the gateway holds at that moment. <strong>Reload</strong> shows them again.</p>
+    <ol class="manual-steps">
+        <li>Change the settings you need, in any cards.</li>
+        <li>Press <strong>Save</strong>. The button is off while the gateway checks and writes the settings.</li>
+        <li>The page says <code>Settings saved</code> and shows the values the gateway keeps, which can differ in small ways from what you typed. For example, the gateway drops blank lines from a list and orders the modules as the app does.</li>
+    </ol>
+    <p>The gateway checks every value as it does at start. If any one is refused, none of the settings is saved, and the reason appears in red under <strong>Save</strong>. What the gateway refuses is listed under "What Save refuses" below.</p>
+
+    <h3>Connections</h3>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What it does</th><th>Choices</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Connection modes the app offers</strong></td><td>Which connection tabs people see in the app.</td><td>A button with two parts. <strong>Provisioned only</strong>: everyone signs in, and uses the brokers they were given. <strong>Direct and Provisioned</strong>: users may also type a broker's details into the Direct form.</td></tr>
+            <tr><td><strong>Tab shown first when both are offered</strong></td><td>The tab the app opens on when both are offered.</td><td>A switch between <strong>Direct</strong> (the default) and <strong>Provisioned</strong>.</td></tr>
+        </tbody>
+    </table>
+    <p>The page offers only these two modes, because this app is served only while the gateway runs in Provisioned mode. The gateway also refuses to save a setting that would turn Provisioned mode off, because that would turn this app off with it.</p>
+    <aside class="manual-note" data-kind="important">
+        <p>With <strong>Direct and Provisioned</strong>, anyone who knows a broker's credentials can connect through the Direct form, outside the grants you give people. Offer it only where that is acceptable. The operator's side of this choice is in <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#connection-modes">Connection modes</a>.</p>
+    </aside>
+
+    <h3>Access</h3>
+    <p>The Access card decides which computers may reach the gateway at all. It opens with one line that says which address the gateway takes your browser for. Read it before you change either list.</p>
+    <figure class="manual-figure">
+        <img src="help/cards.svg" width="760" height="582" alt="Three cards of Gateway Settings: Access with the client address line and two address lists side by side, Modules with three toggle tiles and a two-part button, and Audit trail with two switches and a switch between two answers.">
+        <figcaption>The Access, Modules and Audit trail cards.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The line that names your address and how the gateway worked it out.</li>
+        <li><strong>Allowed clients</strong>, one range on each line, on the left.</li>
+        <li><strong>Trusted reverse proxies</strong>, one range on each line, on the right.</li>
+        <li>The <strong>Modules signed-in users may be given</strong> tiles. A tile with a tick is offered.</li>
+        <li><strong>A user without a list of their own gets</strong>, a button with two parts.</li>
+        <li><strong>Copy audit lines to the gateway log (stdout)</strong>.</li>
+        <li><strong>Also audit broker access</strong>.</li>
+        <li><strong>If the audit log cannot be written</strong>, a switch between two answers with a line of help under it.</li>
+    </ol>
+    <h4>Your address as the gateway sees it</h4>
+    <p>The line begins <code>Your address as the gateway sees it:</code> and then says one of these things.</p>
+    <table>
+        <thead>
+            <tr><th>The line ends</th><th>It means</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>(the TCP peer).</code>, followed by advice</td><td>The gateway took the address of the connection itself. If that is a proxy's or Docker's address and not yours, every user looks like it. For a reverse proxy, list it under <strong>Trusted reverse proxies</strong> and have it pass <code>X-Forwarded-For</code>.</td></tr>
+            <tr><td><code>(from X-Forwarded-For, sent by the trusted proxy ...).</code></td><td>The connection came from a proxy you listed, and the gateway believed the address that proxy passed on.</td></tr>
+            <tr><td><code>unknown.</code> and where the connection comes from</td><td>The gateway could not read the <code>X-Forwarded-For</code> header. While the address is unknown, a non-empty <strong>Allowed clients</strong> list cannot be saved.</td></tr>
+            <tr><td><code>unavailable.</code></td><td>The page could not ask the gateway for your address.</td></tr>
+        </tbody>
+    </table>
+    <h4>The two lists</h4>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What it does</th><th>What it accepts</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Allowed clients: CIDR ranges, one per line (empty admits every client)</strong></td><td>Only clients whose address lies in one of these ranges may reach the gateway. Empty (the default) admits every client.</td><td>One range on each line, such as <code>10.0.0.0/8</code> or <code>192.0.2.7/32</code>. The slash and the prefix length are required, so a bare address is refused. Use the IPv4 form for an IPv4 address: an IPv6-mapped one such as <code>::ffff:10.0.0.1/128</code> is refused. Blank lines and spaces around a line are dropped.</td></tr>
+            <tr><td><strong>Trusted reverse proxies: CIDR ranges, one per line</strong></td><td>The proxies whose <code>X-Forwarded-For</code> header the gateway believes. Without one, it takes the connection's own address as the client. Empty by default.</td><td>The same form as above.</td></tr>
+        </tbody>
+    </table>
+    <aside class="manual-note" data-kind="warning">
+        <p>An allow list shuts out every client outside it. The gateway refuses a list that would shut out the browser you are using, but it cannot know about anyone else. Check the ranges before you press <strong>Save</strong>.</p>
+    </aside>
+
+    <h3>Sessions</h3>
+    <p>A session is a signed-in browser. These limits apply to every user, administrators included.</p>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What it does</th><th>Accepts</th><th>Default</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Idle limit (minutes)</strong></td><td>A session ends after this long without a request. The app sends one while its user types, clicks or scrolls, so this is time away from the page.</td><td>A whole number from 1 up to the absolute limit.</td><td>10</td></tr>
+            <tr><td><strong>Absolute limit (minutes)</strong></td><td>A session ends this long after sign-in, however busy it is.</td><td>A whole number from 1 to 1440 (a day).</td><td>30</td></tr>
+            <tr><td><strong>Broker connects per user per minute</strong></td><td>How many broker credential requests and messaging sockets one user may open in a minute.</td><td>A whole number from 1 to 1000.</td><td>20</td></tr>
+        </tbody>
+    </table>
+    <p>The gateway also caps how many messaging sockets stay open at once: 20 for one user and 1000 for the whole gateway. Both are fixed and have no setting. A socket beyond either cap is refused until one closes. The connects per minute limit above bounds how fast sockets open, and these caps bound how many stay open.</p>
+
+    <h3>Sign-in throttle</h3>
+    <p>The throttle slows down anyone who keeps getting a password or a code wrong. After a number of failures, the gateway makes the account, and the client address, wait before it checks another attempt. The wait starts at the first back-off and doubles with each further failure, up to the longest back-off. A successful sign-in clears the account's failures, but never the client's: those fade by themselves after the time you set.</p>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What it does</th><th>Accepts</th><th>Default</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Count failures per client address</strong></td><td>A switch. On, the gateway counts failures for each client address as well as for each account, which catches guesses spread over many usernames. Off, it counts per account only. Turn it off only where every user reaches the gateway from one address: with it on, one person's typos would slow everyone down.</td><td>On or off.</td><td>On</td></tr>
+            <tr><td><strong>Failed sign-ins per account before a back-off</strong></td><td>How many failures one account may have before it must wait.</td><td>1 to 1000.</td><td>5</td></tr>
+            <tr><td><strong>Failed sign-ins per client before a back-off</strong></td><td>How many failures one client address may have, across all accounts, before it must wait. Not used while the switch is off.</td><td>1 to 1000.</td><td>10</td></tr>
+            <tr><td><strong>Forget failures after (minutes)</strong></td><td>A count is forgotten after this long without another failure.</td><td>1 to 1440.</td><td>15</td></tr>
+            <tr><td><strong>First back-off (seconds)</strong></td><td>The first wait.</td><td>1 up to the longest back-off.</td><td>30</td></tr>
+            <tr><td><strong>Longest back-off (seconds)</strong></td><td>The longest the wait can grow to.</td><td>1 to 86400.</td><td>900</td></tr>
+            <tr><td><strong>Requests and sign-in attempts per minute per client</strong></td><td>How many requests without a session, and sign-in attempts, one client address may make in a minute. A script cannot try passwords faster than this, however failures are counted. Raise it if many users share one address.</td><td>1 to 10000.</td><td>60</td></tr>
+        </tbody>
+    </table>
+    <p>The gateway counts an IPv6 client by its <code>/64</code> block, because one host usually owns a whole block.</p>
+
+    <h3>Passwords and two-factor sign-in</h3>
+    <p>The card says: <code>A raised minimum length applies at the next password change; passwords already set keep working.</code></p>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What it does</th><th>Accepts</th><th>Default</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Minimum password length</strong></td><td>The shortest password a user may set. It can only tighten the gateway's own rule, which is 12.</td><td>12 to 128.</td><td>12</td></tr>
+            <tr><td><strong>Two-factor sign-in (code from an authenticator app)</strong></td><td>Who must give a code from an authenticator app as well as the password. It applies at the next sign-in, and it cannot be switched off.</td><td>See the next table.</td><td>Optional</td></tr>
+            <tr><td><strong>Time to finish two-factor after the password (minutes)</strong></td><td>How long a sign-in that has passed the password waits for its code. A shorter time also ends sign-ins that are already waiting.</td><td>1 to 60.</td><td>10</td></tr>
+        </tbody>
+    </table>
+    <table>
+        <thead>
+            <tr><th>Two-factor choice</th><th>Who signs in with a code</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Optional</strong></td><td>Those who have set it up.</td></tr>
+            <tr><td><strong>Administrators must use it</strong></td><td>Those who have set it up, and every administrator, who must set it up if they have not.</td></tr>
+            <tr><td><strong>Everyone must use it</strong></td><td>Everyone.</td></tr>
+        </tbody>
+    </table>
+    <p>A wrong code counts as a wrong password and brings the same waits. How people set two-factor sign-in up, and what to do when someone loses their phone, is in the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#two-factor-sign-in">Two-factor sign-in</a> section of the Provisioned mode guide.</p>
+
+    <h3>Modules</h3>
+    <p>This card decides which pages of the user app a signed-in user may open. The pages for signing in and the administration pages are not on offer here: the first is always shown, and the others belong to administrators.</p>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What it does</th><th>Choices</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Modules signed-in users may be given</strong></td><td>A row of toggle tiles, one for each module, each with its name and a line saying what it does. A tile with a tick is offered. Click a tile, or press <kbd>Space</kbd> or <kbd>Enter</kbd> on it, to switch it. A module that is not offered is out of reach for every user, whatever their own list says.</td><td><strong>Queue Browser</strong>: Browse, inspect and delete queued messages. <strong>Queue Copy</strong>: Copy or move messages between queues. <strong>Queue Subscriptions</strong>: See which topics each queue subscribes to. All three are offered by default.</td></tr>
+            <tr><td><strong>A user without a list of their own gets</strong></td><td>What a user receives when no list has been set on their account. A user who has a list gets what it names, among the modules on offer.</td><td><strong>Every offered module</strong> (the default) or <strong>No modules</strong>.</td></tr>
+        </tbody>
+    </table>
+    <p>A user's own list is set on the User Management page.</p>
+
+    <h3>Logging</h3>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What it does</th><th>Choices</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Log level</strong></td><td>How much the gateway writes to its own log: <strong>debug</strong> writes the most and <strong>error</strong> the least.</td><td><strong>debug</strong>, <strong>info</strong>, <strong>warn</strong> (the default) and <strong>error</strong>.</td></tr>
+        </tbody>
+    </table>
+
+    <h3>Audit trail</h3>
+    <p>The gateway always writes an audit trail of what administrators and users do, to <code>/data/audit.log</code> on the gateway. The settings on this card only add to it, and they apply from the next recorded event.</p>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What it does</th><th>Default</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Copy audit lines to the gateway log (stdout)</strong></td><td>Also writes each audit line to the gateway's own log, for a log shipper that reads it.</td><td>Off</td></tr>
+            <tr><td><strong>Also audit broker access: dials, SMF sockets and SEMP relay requests</strong></td><td>Adds a line each time a user is given broker credentials, opens a messaging socket or sends a request through the gateway to a broker.</td><td>Off</td></tr>
+            <tr><td><strong>If the audit log cannot be written</strong></td><td>What the gateway does when a line cannot be written, for example because the disk is full. <strong>Carry on</strong> logs the loss and carries on. <strong>Refuse changes</strong> also refuses every change until a line can be written again.</td><td>Carry on</td></tr>
+        </tbody>
+    </table>
+    <aside class="manual-note" data-kind="warning">
+        <p>With <strong>Refuse changes</strong>, a full disk stops you changing users, connections, settings, certificates and backups. Reading, signing in as usual and <strong>Restart gateway</strong> still work. Choose it only if something watches the gateway's log and its disk. More is in the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#audit-trail">Audit trail</a> section of the Provisioned mode guide.</p>
+    </aside>
+
+    <h3>Broker trust</h3>
+    <p>This card decides how the gateway checks the certificate of a broker it connects to. Both settings apply on Save, with no restart.</p>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What it does</th><th>Default</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Trust the standard root CAs</strong></td><td>The gateway trusts the public root CAs its image carries (Mozilla's list), as well as the CA files you add on the Certificates page. With the switch off, only the CA files are trusted.</td><td>On</td></tr>
+            <tr><td><strong>Skip broker certificate checks (insecure)</strong></td><td>The gateway connects to a broker without checking its certificate at all, so it cannot tell the broker from an impostor.</td><td>Off</td></tr>
+        </tbody>
+    </table>
+    <aside class="manual-note" data-kind="warning">
+        <p>Leave <strong>Skip broker certificate checks (insecure)</strong> off outside a test. With it on, the gateway cannot tell a real broker from an impostor.</p>
+    </aside>
+
+    <h3>What Save refuses</h3>
+    <p>A refusal changes nothing: no setting is saved. The text appears in red under <strong>Save</strong>.</p>
+    <h4>A number the page cannot read</h4>
+    <p>A whole-number field that is empty, or holds anything but a whole number, stops the save before it is sent. The page says <code>&lt;setting&gt; must be a whole number.</code>, naming the setting by its key, for example <code>session.idleMinutes must be a whole number.</code></p>
+    <h4>A value the gateway refuses</h4>
+    <p>The gateway checks every value as it does at start and answers with the setting and the allowed range, in this form: <code>key "session.absoluteMinutes" has invalid value "2000": must be 1 to 1440</code>. The ranges are those in the tables above. Two refusals carry a second figure:</p>
+    <ul>
+        <li>An idle limit above the absolute limit: <code>key "session.idleMinutes" has invalid value "40": must be 1 to 30 (session.absoluteMinutes is 30)</code>.</li>
+        <li>A first back-off above the longest back-off: <code>key "login.backoffSeconds" has invalid value "60": must be 1 to 30 (login.maxBackoffSeconds is 30)</code>.</li>
+    </ul>
+    <p>A bad line in an address list is named by its position, counting from 0: <code>key "access.allow[0]" has invalid value "10.0.0.1": want CIDR such as 10.0.0.0/8 or 192.0.2.7/32 (...)</code>, or <code>use the IPv4 form</code> for an IPv6-mapped address.</p>
+    <h4>An allow list that would lock you out</h4>
+    <ul>
+        <li><code>This allow list would deny your own address (10.0.4.17). Add it, or a range that contains it.</code></li>
+        <li><code>The gateway cannot tell your address, so this allow list would deny this browser.</code></li>
+    </ul>
+    <h4>Other refusals</h4>
+    <table>
+        <thead>
+            <tr><th>The page says</th><th>Why, and what to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>A dialog: <code>This settings page was changed by someone else since you opened it.</code> with <strong>Reload</strong></td><td>Another administrator saved first. <strong>Reload</strong> shows their settings and drops your changes. Cancel, <kbd>Esc</kbd> or a click outside leaves the dialog and keeps your edits on the page, but they cannot be saved until you reload.</td></tr>
+            <tr><td><code>config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit, then make your change here.</code></td><td>See the next section.</td></tr>
+            <tr><td><code>The gateway cannot write its audit log and is set to refuse changes until it can. Its log has the cause.</code></td><td>The audit setting above is on <strong>Refuse changes</strong>, and the audit log is failing. Fix the disk on the gateway host.</td></tr>
+            <tr><td><code>The gateway could not write its data files, so nothing was changed. Its log has the cause.</code></td><td>The settings file could not be written. Check the gateway's data volume on its host.</td></tr>
+            <tr><td><code>The gateway cannot read config.yaml (&lt;cause&gt;). The cause is on the gateway host; once the gateway can read the file again, reload this page.</code></td><td>The page shows this when it loads the settings, instead of the settings, with the cause the gateway found in place of <code>&lt;cause&gt;</code>. Reload once the gateway can read the file.</td></tr>
+            <tr><td><code>The page did not send the version it was working from, so the gateway refused the change. Reload the page and try again.</code></td><td>Press <strong>Reload</strong>, make your change again and save.</td></tr>
+            <tr><td><code>Your session has ended. Sign in again.</code></td><td>Your session ended. The page signs you out; sign in again.</td></tr>
+            <tr><td><code>This needs an administrator.</code></td><td>Your account is not an administrator.</td></tr>
+            <tr><td><code>Too many requests. Wait a minute and try again.</code></td><td>The gateway is limiting requests. Wait, then save again.</td></tr>
+            <tr><td><code>The gateway could not be reached.</code> or <code>The gateway did not answer in time. If this was a change, it may still have been applied: reload to see where it stands before you try again.</code></td><td>The request may or may not have arrived. Press <strong>Reload</strong> to see what the gateway holds.</td></tr>
+        </tbody>
+    </table>
+
+    <h3>When the settings file was changed on the host</h3>
+    <p>The gateway writes its settings to a file, <code>config.yaml</code>, in its data volume. It never expects anyone to change that file. If it is changed on the gateway host while the gateway runs, the page shows a banner:</p>
+    <aside class="manual-note" data-kind="important">
+        <p><code>config.yaml was edited on the gateway host since the gateway loaded it. Restart the gateway to load that edit; saving here is blocked until then.</code></p>
+    </aside>
+    <p><strong>Save</strong> is off while the banner shows. The gateway holds to the settings it loaded, and it will not save over a change it has not read. Press <strong>Restart gateway</strong> to make it read the file, then make your changes. A refused save also brings the banner up.</p>
+    <p>The users store, the connections store and the store key have no setting: they always live in the gateway's <code>/data</code> folder. <strong>Backup &amp; Restore</strong> is how you move them to another gateway.</p>
+
+    <h3>Restarting the gateway</h3>
+    <p>The <strong>Gateway</strong> card at the foot of the page holds one button, <strong>Restart gateway</strong>. It makes the gateway start its program again, in place, with the same arguments and environment. You rarely need it: settings apply when you save them. Use it to make the gateway read a settings file that was changed on its host.</p>
+    <figure class="manual-figure">
+        <img src="help/restart.svg" width="640" height="400" alt="The Gateway card with the Restart gateway button and its progress line, above the confirmation dialog with Cancel and Restart gateway.">
+        <figcaption>The Gateway card, and the question the button asks.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Restart gateway</strong>.</li>
+        <li>The progress line, which appears once the gateway has accepted the request.</li>
+        <li>The question the dialog asks.</li>
+        <li><strong>Cancel</strong>. Nothing happens.</li>
+        <li><strong>Restart gateway</strong> in the dialog. It starts the restart.</li>
+    </ol>
+    <ol class="manual-steps">
+        <li>Press <strong>Restart gateway</strong>. The page asks <code>Restart the gateway? Everyone is signed out and open broker connections close. It is back in a few seconds.</code></li>
+        <li>Press <strong>Restart gateway</strong> in the dialog. <strong>Cancel</strong>, <kbd>Esc</kbd> or a click outside restarts nothing.</li>
+        <li>The button goes off and the page says <code>Restarting the gateway. This page goes to the sign-in when the gateway answers again.</code></li>
+        <li>When the gateway answers again, the page reloads and takes you to the sign-in.</li>
+    </ol>
+    <aside class="manual-note" data-kind="warning">
+        <p>A restart signs out everyone, you included, and closes every open broker connection. Warn people first.</p>
+    </aside>
+    <p>The page looks for the gateway once a second, for a minute. If it has not answered by then, the progress line goes and the page says <code>The gateway has not answered after a minute. Check it on its host, then reload this page.</code> The button comes back on. If the gateway does not accept the request, the page shows the reason in red under the button.</p>
+    <p>A restart uses the environment the gateway already has. A change to a variable the operator sets, such as where the gateway finds its certificate, needs the container made again: see the <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/provisioned-mode.md#restart-gateway">Restart gateway</a> section of the Provisioned mode guide.</p>
+</article>

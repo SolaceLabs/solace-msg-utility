@@ -1,0 +1,313 @@
+<article class="manual-chapter">
+    <h2>Connections</h2>
+    <p class="manual-lead">Connect the app to your Solace broker. The Connections page holds the two connections every other page relies on: the Solace client connection, which carries messages, and the SEMP connection, which reads the broker's management data.</p>
+    <p>Nothing else needs to be set up first. You need the address of a broker, a Message VPN on it, and an account for each connection. The other pages show <strong>Connection Required</strong> until the connection they need is up. A gateway in Provisioned mode adds a <strong>Provisioned</strong> tab to this page. The manual of that gateway's app describes it in its Provisioned connections chapter.</p>
+
+    <h3>Finding your way around</h3>
+    <p>Every page of the app sits inside the same frame. Learn the frame once and it looks the same everywhere.</p>
+    <figure class="manual-figure">
+        <img src="help/shell.svg" width="760" height="400" alt="The app's frame: the library banner above the app, a sidebar with the page list, its collapse button and the Client and SEMP indicators, and a top bar with the page title and the notification bell.">
+        <figcaption>The frame of the app, with the Client indicator green and the SEMP indicator red.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The Solace library banner. It shows only while the library loads or when it cannot be used. See Startup messages below.</li>
+        <li>The collapse button on the edge of the sidebar. It shrinks the sidebar to its icons and opens it again.</li>
+        <li>The page list. Each page has an icon and a name, in a fixed order, with Connections first. Click a name to open that page. The page you are on is highlighted.</li>
+        <li>The Client and SEMP indicators.</li>
+        <li>The page title. It repeats the name of the page you are on.</li>
+        <li>The notification bell.</li>
+    </ol>
+    <aside class="manual-note">
+        <p>The app is made for a desktop browser window at least 800 pixels wide. In a narrower window a <strong>Desktop Only</strong> message covers the app and shows the size of your window. Widen the window and the message goes.</p>
+    </aside>
+
+    <h4>The Client and SEMP indicators</h4>
+    <p>The two icons at the foot of the sidebar show at a glance which connections are up. They stay visible when the sidebar is collapsed, without their labels.</p>
+    <table>
+        <thead>
+            <tr><th>Indicator</th><th>Red</th><th>Green</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Client</strong></td><td>The Solace client connection is not up.</td><td>The Solace client is connected.</td></tr>
+            <tr><td><strong>SEMP</strong></td><td>The SEMP connection is not up.</td><td>The SEMP connection is made.</td></tr>
+        </tbody>
+    </table>
+
+    <h4>The notification bell</h4>
+    <p>A message that appears as a toast is gone within a moment. The bell keeps what the app told you, so you can read it again. A red badge on the bell counts what you have not read yet; it reads <strong>99+</strong> above 99.</p>
+    <figure class="manual-figure">
+        <img src="help/notifications.svg" width="640" height="330" alt="The notification bell with an unread badge above the open Notifications drawer, which lists three entries, each with a time, a level, a page name and a text.">
+        <figcaption>The Notifications drawer after a connect, a SEMP connect and a save.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The bell, with the number of unread notifications. Click it to open the drawer. Opening it marks everything as read.</li>
+        <li><strong>Clear all</strong> empties the list. <strong>Close</strong> closes the drawer, as do the <kbd>Esc</kbd> key and a click outside it.</li>
+        <li>One notification: the time, the level (<code>info</code>, <code>ok</code>, <code>warn</code> or <code>error</code>), the page it concerns, and the text.</li>
+    </ol>
+    <ul>
+        <li>The drawer records every toast that is a success, a warning or an error. It also records each connection event: <code>Connected to broker "&lt;host&gt;", VPN "&lt;vpn&gt;".</code>, <code>Disconnected from broker "&lt;host&gt;", VPN "&lt;vpn&gt;".</code>, <code>SEMP connected to "&lt;host&gt;".</code> and <code>SEMP disconnected.</code></li>
+        <li>An empty drawer reads <code>No notifications yet.</code> The drawer keeps the latest 200.</li>
+        <li>The list belongs to the browser tab. It survives a reload and goes when you close the tab. Connecting to a different broker host than the last connection clears it.</li>
+    </ul>
+
+    <h3>The page at a glance</h3>
+    <figure class="manual-figure">
+        <img src="help/page.svg" width="760" height="560" alt="The Connections page: the Solace Event Broker Type card with its two choices, the Solace SEMP card with its protocol, Broker Host and port on one row, the Solace Messaging card with its settings button, sign-in choice and address row, and the three buttons at the foot.">
+        <figcaption>The Connections page, filled in for a broker with a Message VPN called default.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The broker type: <strong>Software / Cloud</strong> or <strong>Appliance</strong>.</li>
+        <li>The SEMP address on one row, read as a URL: <strong>Protocol</strong>, <strong>Broker Host (IP or Hostname)</strong> and <strong>Port</strong>. For a software or cloud broker, the Broker Host is the one host of both connections.</li>
+        <li><strong>+ URL path</strong>, which adds the optional <strong>URL Path</strong> box to the row. The Messaging card has one too.</li>
+        <li>The SEMP <strong>Username</strong> and <strong>Password</strong>.</li>
+        <li>The SEMP <strong>Connect</strong> button.</li>
+        <li>The settings button beside the card's title, which opens Advanced Connection Settings.</li>
+        <li>The sign-in scheme: <strong>Basic</strong> or <strong>OAuth2</strong>.</li>
+        <li>The Messaging address on one row: <strong>Protocol</strong>, <strong>Messaging Host (IP or Hostname)</strong> and <strong>Port</strong>. The Messaging Host is locked for a software or cloud broker, where it shows the Broker Host.</li>
+        <li>The <strong>Message VPN</strong>, and the Messaging <strong>Username</strong> and <strong>Password</strong>.</li>
+        <li>The Messaging <strong>Connect</strong> button.</li>
+        <li><strong>Reset Form</strong>, <strong>Load All Config</strong> and <strong>Save All Config</strong>.</li>
+    </ol>
+    <p>The two connections are independent. You can make either one, or both, in either order. Press the <kbd>Enter</kbd> key in a text box of a card to press that card's <strong>Connect</strong> button. The Broker Host belongs to the SEMP card, and the Messaging Host to the Messaging card.</p>
+
+    <h3>One host or two: the broker type</h3>
+    <p>A software or cloud broker answers SEMP and messaging on one host. A Solace appliance answers SEMP on its management address and messaging on another. The <strong>Solace Event Broker Type</strong> card at the top of the page says which of the two you have.</p>
+    <table>
+        <thead>
+            <tr><th>Type</th><th>The host boxes</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Software / Cloud</strong></td><td>One host. Type it into <strong>Broker Host (IP or Hostname)</strong>, in the SEMP card. The <strong>Messaging Host (IP or Hostname)</strong> box of the Messaging card is locked and shows the same host. The page opens with this choice, and the card reads <code>One host serves both management and messaging.</code></td></tr>
+            <tr><td><strong>Appliance</strong></td><td>Two hosts. The box of the SEMP card is labelled <strong>Management Host (IP or Hostname)</strong>. The box of the Messaging card is free: it starts with the host already typed, for you to replace with the appliance's messaging address. The card reads <code>Management and messaging each take their own host.</code></td></tr>
+        </tbody>
+    </table>
+    <ul>
+        <li>The type cannot be changed while either connection is up.</li>
+        <li>Changing back to <strong>Software / Cloud</strong> drops the messaging host you typed.</li>
+        <li><strong>Appliance</strong> with the same host in both boxes stays an appliance: it is saved, and loads again, as <strong>Appliance</strong>.</li>
+    </ul>
+
+    <h3>Connecting the Solace client</h3>
+    <p>The Solace client connection opens a Web Messaging session (a WebSocket) to your broker. The Queue Browser chapter describes what it does with that session: read, forward and delete messages.</p>
+    <ol class="manual-steps">
+        <li>Give the host. For a software or cloud broker, fill in <strong>Broker Host (IP or Hostname)</strong> in the SEMP card. For an appliance, fill in <strong>Messaging Host (IP or Hostname)</strong> in the Messaging card.</li>
+        <li>In the <strong>Solace Messaging (Client)</strong> card, choose the sign-in scheme and fill in the address, the <strong>Message VPN</strong>, and the account.</li>
+        <li>Press <strong>Connect</strong>. The button reads <code>Connecting...</code> and stays off until the broker answers.</li>
+        <li>When the session is up the button turns red and reads <strong>Disconnect</strong>, and the Client indicator turns green. Press <strong>Disconnect</strong> to end the session.</li>
+    </ol>
+    <p>While the Solace client is connected, every field of the card is locked, and so is the host it uses: the Broker Host of a software or cloud broker, the Messaging Host of an appliance. Disconnect to change them.</p>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What to enter</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Broker Host (IP or Hostname)</strong>, or <strong>Messaging Host (IP or Hostname)</strong> for an appliance</td><td>A host name such as <code>broker.example.com</code>, or an IPv4 address. An IPv6 address is not accepted. A bad value turns the box red with <code>Invalid hostname or IP address.</code> The Broker Host starts as <code>localhost</code> when nothing has been saved.</td></tr>
+            <tr><td><strong>Protocol</strong></td><td><code>wss://</code> (encrypted, the default) or <code>ws://</code>. The list also shows <code>http://</code> and <code>https://</code>, but they are greyed out and cannot be chosen. A page opened over <code>https://</code> without a gateway offers only <code>wss://</code>, because the browser blocks an unencrypted connection from it.</td></tr>
+            <tr><td><strong>Port</strong></td><td>The broker's WebSocket port, a whole number from 1 to 65535. A bad value turns the box red with <code>Invalid port.</code></td></tr>
+            <tr><td><strong>URL Path</strong></td><td>Optional. A path placed after the port, for a broker behind a reverse proxy. The row shows only a small <strong>+ URL path</strong> button, above the end of the row, until you press it. The box then joins the row after the port; the cross in the box empties it and hides it again. A leading <code>/</code> is added and a trailing one dropped. A path that is saved, loaded or typed always shows its box.</td></tr>
+            <tr><td><strong>Message VPN</strong></td><td>The Message VPN to join, for example <code>default</code>. It cannot be blank: <code>Message VPN is required.</code></td></tr>
+            <tr><td><strong>Username</strong></td><td>The client username: up to 189 printable ASCII characters, without <code>?</code> or <code>*</code>. Letter case counts. A blank value turns the box red with <code>Field is required.</code> A refused value turns it red too, and an error line under the card says why.</td></tr>
+            <tr><td><strong>Password</strong></td><td>The client password. The page does not check it, and it is never saved.</td></tr>
+        </tbody>
+    </table>
+
+    <h4>Basic and OAuth2</h4>
+    <p>The two joined buttons at the top right of the card pick how you sign in to the broker. The pressed one is the choice.</p>
+    <ul>
+        <li><strong>Basic</strong> signs in with a username and a password. This is the default.</li>
+        <li><strong>OAuth2</strong> signs in with tokens. The first box is then labelled <strong>Access Token</strong> and the second <strong>ID Token</strong>. The rule for client usernames does not apply to a token.</li>
+    </ul>
+
+    <h4>When Connect fails</h4>
+    <p>A red line under the Connect button says what went wrong. Look for these.</p>
+    <table>
+        <thead>
+            <tr><th>The line says</th><th>What to do</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>A highlighted box and a short reason, with nothing sent</td><td>The form did not pass its checks. Correct the box that is red.</td></tr>
+            <tr><td><code>Connection Failed:</code> followed by the broker library's own text</td><td>The broker or the network refused the session. When the text includes <code>Connection error</code> and no gateway serves the page, a <strong>Trust Certificate?</strong> link appears. See the helper for a certificate below.</td></tr>
+            <tr><td><code>Solace API not loaded.</code></td><td>The page could not find <code>solclient.js</code>. See Startup messages below.</td></tr>
+            <tr><td>A line that begins <code>Solace Web Messaging SDK is below the required version (10.18.3)</code></td><td>The <code>solclient.js</code> beside the page is too old. Use version 10.18.3 or newer.</td></tr>
+        </tbody>
+    </table>
+
+    <h3>Connecting SEMP</h3>
+    <p>SEMP is the broker's management interface. The page connects to its SEMP v2 REST API and uses it to read facts about the broker, such as which queues exist. The pages that list a broker's queues and subscriptions need it. A SEMP connection is not a standing session: the page checks your account with one request, and then sends each later request with the same account.</p>
+    <ol class="manual-steps">
+        <li>Fill in <strong>Broker Host (IP or Hostname)</strong>, in the first row of the card. For an appliance the box is labelled <strong>Management Host (IP or Hostname)</strong> and takes its management address.</li>
+        <li>In the <strong>Solace SEMP (Management)</strong> card, fill in the address and the account.</li>
+        <li>Press <strong>Connect</strong>. The button reads <code>Connecting...</code> while the page waits.</li>
+        <li>When the broker accepts the account the button turns red and reads <strong>Disconnect</strong>, and the SEMP indicator turns green.</li>
+    </ol>
+    <p>The fields lock while SEMP is connected. The Broker Host of a software or cloud broker stays locked while either connection is up. An appliance's Management Host is locked by the SEMP connection alone.</p>
+    <table>
+        <thead>
+            <tr><th>Field</th><th>What to enter</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Protocol</strong></td><td><code>https://</code> (the default) or <code>http://</code>. A page opened over <code>https://</code> without a gateway offers only <code>https://</code>.</td></tr>
+            <tr><td><strong>Port</strong></td><td>The broker's SEMP port, a whole number from 1 to 65535.</td></tr>
+            <tr><td><strong>URL Path</strong></td><td>Optional, and hidden until you press the small <strong>+ URL path</strong> button, as in the Messaging card. The path goes after the port and before the SEMP address, for a broker behind a reverse proxy.</td></tr>
+            <tr><td><strong>Username</strong></td><td>The SEMP account name: 1 to 32 characters from A-Z, a-z, 0-9, underscore and hyphen. Without one the page says <code>SEMP username is required.</code> (the box says <code>Username is required.</code>).</td></tr>
+            <tr><td><strong>Password</strong></td><td>The account's password: 1 to 128 printable ASCII characters, no spaces, and none of these: colon, parentheses, double quote, semicolon, apostrophe, less-than and greater-than signs, comma, backtick, backslash, asterisk, ampersand, vertical bar. The page refuses anything else before it sends a request, and says why under the card.</td></tr>
+        </tbody>
+    </table>
+
+    <h4>When SEMP Connect fails</h4>
+    <table>
+        <thead>
+            <tr><th>The line says</th><th>What it means</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>Authentication Failed (401). Check username/password.</code></td><td>The broker refused the account.</td></tr>
+            <tr><td><code>SEMP Network Error:</code> followed by a reason</td><td>The request failed, or the broker answered with an error such as <code>403 Forbidden</code>. When the browser could not reach the broker at all, a <strong>Trust Certificate?</strong> link appears.</td></tr>
+            <tr><td><code>SEMP Network Error: Connection timed out (15s). Check host and port.</code></td><td>The broker did not answer within 15 seconds.</td></tr>
+        </tbody>
+    </table>
+    <p>If the broker later refuses your SEMP account in the middle of your work, the page drops the SEMP connection: the button returns to <strong>Connect</strong> and the SEMP indicator turns red. Connect again with the right account.</p>
+    <aside class="manual-note" data-kind="important">
+        <p>From a browser, SEMP is a web request to your broker. The broker must allow it through CORS. When a gateway serves the app, the gateway makes the request and CORS does not come into it.</p>
+    </aside>
+
+    <h3>Advanced Settings</h3>
+    <p>Press the settings button beside the title of the Messaging card to open <strong>Advanced Connection Settings</strong>. The settings control the Solace client connection only. Close the dialog with <strong>Close</strong>, the <kbd>Esc</kbd> key or a click outside it.</p>
+    <figure class="manual-figure">
+        <img src="help/advanced.svg" width="640" height="560" alt="The Advanced Connection Settings dialog: five number boxes, the Client Name Identifier box and a Close button.">
+        <figcaption>Advanced Connection Settings with every value at its default.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li><strong>Connect Retries</strong></li>
+        <li><strong>Connect Timeout (ms)</strong></li>
+        <li><strong>Reconnect Retries</strong>, with its hint <code>-1 for infinite</code></li>
+        <li><strong>Reconnect Wait (ms)</strong></li>
+        <li><strong>Max Messages per Queue</strong></li>
+        <li><strong>Client Name Identifier</strong></li>
+        <li><strong>Close</strong></li>
+    </ol>
+    <table>
+        <thead>
+            <tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Connect Retries</strong></td><td><code>0</code></td><td>How many times to try again when the first connect fails. The box marks 0 as its lowest value.</td></tr>
+            <tr><td><strong>Connect Timeout (ms)</strong></td><td><code>10000</code></td><td>How long one connect attempt may take, in milliseconds: the broker has that long to accept the connection and answer the login. The box marks 100 as its lowest value.</td></tr>
+            <tr><td><strong>Reconnect Retries</strong></td><td><code>1</code></td><td>How many times to try again when an open session drops. <code>-1</code> never gives up. The box marks -1 as its lowest value.</td></tr>
+            <tr><td><strong>Reconnect Wait (ms)</strong></td><td><code>3000</code></td><td>The pause between those attempts, in milliseconds. The box marks 100 as its lowest value.</td></tr>
+            <tr><td><strong>Max Messages per Queue</strong></td><td><code>100</code></td><td>How many messages the Queue Browser keeps for each queue. A whole number from 1 to 10000.</td></tr>
+            <tr><td><strong>Client Name Identifier</strong></td><td>A generated identifier</td><td>The part of the session's client name that you choose. 1 to 100 characters, from letters, digits and <code>!@#$%^&amp;*-=_+/.,</code>.</td></tr>
+        </tbody>
+    </table>
+    <p>The page does not check the first four numbers itself. Keep to the lowest values the boxes mark.</p>
+    <h4>Max Messages per Queue</h4>
+    <p>When a queue holds more messages than the limit, the oldest are dropped from the page as newer ones arrive. A higher limit keeps more history and uses more of the browser's memory. The Queue Browser chapter explains the second limit, a size limit of 32 MiB for each queue.</p>
+    <p>The value is checked as you type, and a message appears under the box: <code>Must be a whole number.</code>, <code>Must be at least 1.</code> or <code>Must not exceed 10000.</code> The value you see when you press <strong>Connect</strong> is the one the session uses. You do not need to save it first. If the box holds an invalid value at that moment, the connect goes ahead with 100.</p>
+    <h4>Client Name Identifier</h4>
+    <p>The broker lists each session by a client name. The page builds it as <code>SolMsgUtil/YYYYMMDDHHMMSS/&lt;identifier&gt;</code>, with the time you pressed <strong>Connect</strong> in the middle, so every session can be told apart in the broker's tools. The box fills itself with a generated identifier when you have none saved.</p>
+    <ul>
+        <li>When you leave the box, spaces at either end are removed. A blank box is filled with a fresh generated identifier.</li>
+        <li>A value with other characters is refused with <code>Allowed: letters, digits, and !@#$%^&amp;*-=_+/.,</code>. A value that is too long is refused with <code>Must not exceed 100 characters.</code></li>
+        <li>An invalid identifier stops <strong>Connect</strong> and <strong>Save All Config</strong>. The message shows inside this dialog, so open it to read the reason.</li>
+    </ul>
+    <p>While the Solace client is connected, you can still open the dialog to see the values the session uses, but you cannot change them.</p>
+
+    <h3>Saving and loading your settings</h3>
+    <p>The three buttons at the foot of the page keep your connection details between visits. The page keeps one saved set of settings in your browser. It has no list of named profiles.</p>
+    <table>
+        <thead>
+            <tr><th>Button</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Save All Config</strong></td><td>Saves what the form shows, replacing the earlier set. A toast reads <code>Configuration saved</code>. If the browser cannot store it, an error toast says that storage is unavailable. An invalid Max Messages per Queue or Client Name Identifier stops the save without a toast; open Advanced Settings to read the message.</td></tr>
+            <tr><td><strong>Load All Config</strong></td><td>Puts the saved set into the form and shows <code>Configuration loaded</code>. With nothing saved, nothing happens. The saved set is also loaded by itself each time you open the page.</td></tr>
+            <tr><td><strong>Reset Form</strong></td><td>Empties the form: the host, ports, paths, Message VPN, usernames and passwords. It sets the broker type to <strong>Software / Cloud</strong>, both protocols to <code>wss://</code> and <code>https://</code>, sign-in to <strong>Basic</strong>, and the Client Name Identifier to a fresh one. The five numbers in Advanced Settings stay as they are, and so do the saved set and any live connection. A toast reads <code>Form reset</code>.</td></tr>
+        </tbody>
+    </table>
+    <h4>What is stored, and what is not</h4>
+    <ul>
+        <li>Stored: the Broker Host, and an appliance's Messaging Host, which also tells the page the broker type; for each connection the protocol, port, URL path and username; the Message VPN; the sign-in scheme; the five numbers of Advanced Settings; and the Client Name Identifier.</li>
+        <li>Not stored: both passwords. Type them again after a load.</li>
+        <li>In OAuth2 mode the first box holds the access token. It is stored like the Messaging username, so an access token is saved with the rest.</li>
+    </ul>
+    <aside class="manual-note" data-kind="warning">
+        <p>The saved set is disguised, not encrypted. Anyone who can use your browser profile can read it. There is no button that deletes the saved set: to remove it, clear the site data of this page in your browser. Do not save an access token on a shared computer.</p>
+    </aside>
+    <p>The saved set belongs to the address the page is opened from. The same page opened from another address starts with no saved set.</p>
+    <p>A saved <code>ws://</code> or <code>http://</code> cannot be used by a page opened over <code>https://</code> without a gateway. It loads as <code>wss://</code> or <code>https://</code>, and a warning toast tells you so, for example <code>ws:// is now wss://</code>. The port may still be the unencrypted one, so check it.</p>
+
+    <h3>The helper for a certificate the browser does not trust</h3>
+    <p>A browser refuses a connection to a broker whose certificate it does not trust, for example one the broker signed itself. The page cannot tell you that in so many words, so a red error line offers a <strong>Trust Certificate?</strong> link, followed by <code>(or CORS)</code>. Press it to open the <strong>Certificate Trust Helper</strong>. Close it with the cross at its top right, the <kbd>Esc</kbd> key or a click outside it.</p>
+    <figure class="manual-figure">
+        <img src="help/trust.svg" width="640" height="540" alt="A red connection error line with a Trust Certificate link, above the Certificate Trust Helper dialog with its three steps, the CORS note and the Open Broker URL button.">
+        <figcaption>The Certificate Trust Helper, opened from the error line.</figcaption>
+    </figure>
+    <ol class="manual-callouts">
+        <li>The error line and its <strong>Trust Certificate?</strong> link.</li>
+        <li>The three steps to trust the certificate.</li>
+        <li>The note on CORS, with the origin of this page.</li>
+        <li><strong>Open Broker URL</strong>.</li>
+        <li>The address that button opens.</li>
+    </ol>
+    <ol class="manual-steps">
+        <li>Press <strong>Open Broker URL</strong>. The address opens in another tab. It is built from the Broker Host and the Protocol and Port of the SEMP card (with its URL Path, if you set one), so fill those in first. For an appliance that is its Management Host, after a failed Messaging connect too.</li>
+        <li>If the browser shows a privacy warning, press <strong>Advanced</strong>, then <strong>Proceed</strong> (or Accept).</li>
+        <li>Close that tab, come back and press <strong>Connect</strong> again.</li>
+    </ol>
+    <p>The same failure can come from CORS: the broker did not send an <code>Access-Control-Allow-Origin</code> header that allows this page. If trusting the certificate does not help, ask your broker's administrator to allow the origin the dialog shows under <strong>Or it could be CORS</strong>.</p>
+    <p>When a gateway serves the app, a Messaging connect error does not offer the link, because your browser does not open the connection to the broker itself. A SEMP connect error that is a network failure still offers it.</p>
+
+    <h3>Startup messages</h3>
+    <h4>The Solace library banner</h4>
+    <p>The app needs the Solace library, <code>solclient.js</code>, to open the client connection. The banner above the app tells you how the library is doing.</p>
+    <table>
+        <thead>
+            <tr><th>The banner says</th><th>What it means</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>Loading the Solace library...</code></td><td>The library is being fetched. The banner goes when it has loaded. A <strong>Connect</strong> pressed meanwhile waits for it, for up to 30 seconds.</td></tr>
+            <tr><td><strong>solclient.js</strong> not found. Please place it in the same directory.</td><td>The file is missing, or it loaded but did not define the library. Put <code>solclient.js</code> next to the page, or in a <code>js</code> folder beside it.</td></tr>
+            <tr><td><strong>Outdated Library</strong>: Found Solclient and a version, required 10.18.3+. Connecting is disabled.</td><td>The library is older than the app accepts. Replace it with version 10.18.3 or newer.</td></tr>
+            <tr><td>The Solace library did not finish loading. Check that solclient.js is next to this page.</td><td>Nothing settled within 30 seconds. A late result still replaces this message.</td></tr>
+        </tbody>
+    </table>
+    <p>Where to get the file is in <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/deployment.md#vendor-libraries">the deployment guide</a>.</p>
+
+    <h4>Other messages when the app starts</h4>
+    <ul>
+        <li><code>Loading...</code> fills the page area until the first page is ready. If no page can start it reads <code>No modules are available. Check the browser console.</code></li>
+        <li>If one page fails to start, an error toast reads <code>Module "&lt;name&gt;" failed to install. See the browser console for details.</code> The other pages still work.</li>
+        <li>The page asks once whether a gateway serves it. If the answer does not arrive, a box at the top of the Connections page reads <code>Could not check whether this page is served by the gateway.</code> and has a <strong>Retry</strong> button, which reloads the page. The form stays usable meanwhile, as for a page with no gateway. A plain "no gateway" answer shows no box.</li>
+    </ul>
+
+    <h3>When a gateway serves the app</h3>
+    <p>A gateway is a server that hosts this app and makes the connections to your broker for you. You use the form in the same way. What changes is who reaches the broker.</p>
+    <table>
+        <thead>
+            <tr><th>Topic</th><th>Without a gateway</th><th>With a gateway</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Who connects to the broker</td><td>Your browser.</td><td>The gateway. The broker need not be reachable from your browser.</td></tr>
+            <tr><td>What you type</td><td>The broker's protocol, host, port and path.</td><td>The same values. The page shows the same fields.</td></tr>
+            <tr><td>Plain <code>ws://</code> and <code>http://</code></td><td>Offered only when the page itself is not opened over <code>https://</code>.</td><td>Always offered.</td></tr>
+            <tr><td>CORS</td><td>The broker must allow this page's origin for SEMP.</td><td>Not needed.</td></tr>
+            <tr><td>Certificate Trust Helper, for a Messaging error</td><td>Offered by the <strong>Trust Certificate?</strong> link.</td><td>Not offered.</td></tr>
+        </tbody>
+    </table>
+    <p>Everything else on this page is the same: the fields and their checks, Advanced Settings, and saving and loading. The deployment guide describes <a href="https://github.com/SolaceLabs/solace-msg-utility/blob/main/docs/deployment.md#gateway-mode">Gateway mode</a>.</p>
+
+    <h3>Showing more detail in the browser console</h3>
+    <p>When something goes wrong, the app writes what it did to the browser's developer tools console. Add <code>logLevel</code> to the address of the page to choose how much it writes, for example <code>index.html?logLevel=DEBUG</code>.</p>
+    <table>
+        <thead>
+            <tr><th>Value</th><th>What you see</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>DEBUG</code></td><td>Everything, with fine-grained detail of each step.</td></tr>
+            <tr><td><code>INFO</code></td><td>The default: the main events, warnings and errors.</td></tr>
+            <tr><td><code>WARN</code></td><td>Warnings and errors.</td></tr>
+            <tr><td><code>ERROR</code></td><td>Errors only.</td></tr>
+            <tr><td><code>SILENT</code></td><td>Nothing.</td></tr>
+        </tbody>
+    </table>
+    <p>The value can be in any letter case. A value the app does not know is ignored, and the default applies.</p>
+</article>

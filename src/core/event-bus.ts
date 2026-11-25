@@ -14,9 +14,9 @@ import { logger } from './logger';
 export function createEventBus(): EventBus {
     const listeners = new Map<string, Set<Function>>();
     let held = false;
-    const pending: Array<[string, any[]]> = [];
+    const pending: Array<[string, unknown[]]> = [];
 
-    function deliver(event: string, args: any[]): void {
+    function deliver(event: string, args: unknown[]): void {
         const set = listeners.get(event);
         if (!set) return;
         // Snapshot before iterating. `Set.forEach` would otherwise visit handlers

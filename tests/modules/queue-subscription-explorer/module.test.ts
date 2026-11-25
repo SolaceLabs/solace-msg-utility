@@ -7,6 +7,25 @@ import {
 import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import type { AppContext, AppState } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
+import type { SubFetchPage } from '../../../src/modules/queue-subscription-explorer/service';
+
+/**
+ * The real service, unless a test scripts the page stream itself: a scripted
+ * generator can run code at a point no SEMP answer can reach, such as after
+ * the last page is taken and before the stream ends.
+ */
+const scripted = vi.hoisted(() => ({ pages: null as null | (() => AsyncGenerator<SubFetchPage>) }));
+vi.mock('../../../src/modules/queue-subscription-explorer/service', async (importOriginal) => {
+    const real = await importOriginal<typeof import('../../../src/modules/queue-subscription-explorer/service')>();
+    return {
+        ...real,
+        createService: (ctx: AppContext) => {
+            const service = real.createService(ctx);
+            return { fetchAllSubscriptions: () => (scripted.pages ? scripted.pages() : service.fetchAllSubscriptions()) };
+        },
+    };
+});
 
 function createDOM() {
     return loadModuleDOM('queue-subscription-explorer');
@@ -28,7 +47,7 @@ function createTestContext(container: HTMLElement, overrides: Partial<AppState> 
         isSempConnected: true,
         ...overrides,
     };
-    const ctx: AppContext = {
+    const ctx: AppContext = completeContext({
         container,
         appState,
         eventBus,
@@ -36,8 +55,7 @@ function createTestContext(container: HTMLElement, overrides: Partial<AppState> 
         loadSelf: vi.fn(),
         sempFetch: vi.fn(),
         copyToClipboard: vi.fn(),
-        config: {},
-    };
+    });
     return { ctx, eventBus, appState };
 }
 
@@ -54,13 +72,6 @@ const PAGE_OK = `<rpc-reply>
 </rpc-reply>`;
 
 describe('QueueSubscriptionExplorerModule', () => {
-    it('has correct metadata', () => {
-        expect(QueueSubscriptionExplorerModule.id).toBe('queue-subscription-explorer');
-        expect(QueueSubscriptionExplorerModule.name).toBe('Queue Subscriptions');
-        expect(QueueSubscriptionExplorerModule.icon).toContain('svg');
-        // Priority is set in src/registry.ts; tested in tests/registry.test.ts.
-    });
-
     it('installs and shows the SEMP warning when disconnected', async () => {
         const container = createDOM();
         const { ctx } = createTestContext(container, { isSempConnected: false });
@@ -161,8 +172,7 @@ describe('QueueSubscriptionExplorerModule', () => {
     });
 
     it('subscription filter supports within-level wildcards (B*/* matches BULKQ/TEST)', async () => {
-        // Regression for the user-reported bug where `B*/*` was being treated
-        // as a literal level name ("B*") instead of a prefix wildcard.
+        // `B*/*` must be a prefix wildcard, not a literal level name ("B*").
         const container = createDOM();
         const { ctx } = createTestContext(container);
         (ctx.sempFetch as any).mockResolvedValueOnce(textRes(PAGE_OK));
@@ -397,24 +407,17 @@ describe('QueueSubscriptionExplorerModule', () => {
 
     it('ignores non-isSempConnected state changes', async () => {
         const container = createDOM();
-        const { ctx, eventBus } = createTestContext(container);
+        const { ctx, eventBus } = createTestContext(container, { isSempConnected: false });
         await QueueSubscriptionExplorerModule.install(ctx);
-        // Not isSempConnected — handler must early-return.
+        expect(container.querySelector('#subexp-warning')!.classList.contains('hidden')).toBe(false);
+        // Not isSempConnected: a handler that reacted to it would reveal the content.
         eventBus.emit('app:state-change', { key: 'isConnected', value: true });
-        // No effect on the DOM.
-        expect(container.querySelector('#subexp-warning')!.classList.contains('hidden')).toBe(true);
-    });
-
-    it('throws at install when a required element is missing', async () => {
-        const container = document.createElement('div');
-        container.innerHTML = '<div id="subexp-warning"></div>';
-        document.body.appendChild(container);
-        const { ctx } = createTestContext(container);
-        await expect(QueueSubscriptionExplorerModule.install(ctx)).rejects.toThrow(/Required element missing/);
+        expect(container.querySelector('#subexp-warning')!.classList.contains('hidden')).toBe(false);
+        expect(container.querySelector('#subexp-about')!.classList.contains('hidden')).toBe(true);
     });
 
     it('toast uses singular "subscription" when exactly one row loaded', async () => {
-        // The `${allRows.length === 1 ? '' : 's'}` ternary at module.ts:143
+        // The `${allRows.length === 1 ? '' : 's'}` ternary in the loaded toast
         // — the truthy (singular) branch — is otherwise unexercised because
         // every fixture in this file loads 2+ rows.
         const container = createDOM();
@@ -445,55 +448,93 @@ describe('QueueSubscriptionExplorerModule', () => {
     });
 
     it('SEMP disconnect mid-load supersedes the in-flight load (no clobber + no toast)', async () => {
-        // Closes the supersession branch at module.ts:122. Bug discovered
-        // alongside this test: the disconnect handler used to NOT bump
-        // `loadGen`, so a slow load could yield a page AFTER the disconnect
-        // reset and then write `allRows = accumulated` + show "Loaded N"
-        // toast, clobbering the cleared state. Fix: the disconnect handler
-        // now bumps loadGen too.
+        // Covers the supersession branch in module.ts. The disconnect handler
+        // bumps `loadGen`, so a slow load cannot yield a page AFTER the
+        // disconnect reset and then write `allRows = accumulated` + show a
+        // "Loaded N" toast, clobbering the cleared state.
         //
         // Mechanics: hang the SEMP fetch on the first call. While it's
-        // hanging, emit `isSempConnected=false`, which now bumps loadGen.
+        // hanging, emit `isSempConnected=false`, which bumps loadGen.
         // Then resolve the fetch with a successful page; the generator
         // yields, and the for-await body's `if (myGen !== loadGen) return;`
-        // check at line 122 fires, discarding the page.
+        // check fires, discarding the page.
         const container = createDOM();
-        const { ctx, eventBus } = createTestContext(container);
+        const toasts = document.createElement('div');
+        toasts.id = 'toast-container';
+        document.body.appendChild(toasts);
+        try {
+            const { ctx, eventBus } = createTestContext(container);
 
-        let resolveFetch: (v: any) => void = () => {};
-        (ctx.sempFetch as any).mockReturnValueOnce(new Promise((r) => { resolveFetch = r; }));
+            let resolveFetch: (v: any) => void = () => {};
+            (ctx.sempFetch as any).mockReturnValueOnce(new Promise((r) => { resolveFetch = r; }));
 
-        await QueueSubscriptionExplorerModule.install(ctx);
-        const btn = container.querySelector('#btn-subexp-load') as HTMLButtonElement;
-        btn.click();
+            await QueueSubscriptionExplorerModule.install(ctx);
+            const btn = container.querySelector('#btn-subexp-load') as HTMLButtonElement;
+            btn.click();
 
-        // Drain microtasks so load() reaches the awaited sempFetch.
-        for (let i = 0; i < 5; i++) await Promise.resolve();
+            // Drain microtasks so load() reaches the awaited sempFetch.
+            for (let i = 0; i < 5; i++) await Promise.resolve();
 
-        // Disconnect mid-fetch — per the fix, this bumps loadGen, resets
-        // allRows to null, re-enables the button, clears the filters.
-        eventBus.emit('app:state-change', { key: 'isSempConnected', value: false });
-        expect(btn.textContent).toBe('Load');
-        const tbody = container.querySelector('#subexp-tbody')!;
-        expect(tbody.textContent).toMatch(/Click/);
-
-        // Resolve the fetch with a valid page. The generator yields it;
-        // for-await body line 122 sees myGen=1 !== loadGen=2 and returns
-        // BEFORE the `accumulated.push(page.data)` would have run.
-        resolveFetch(textRes(PAGE_OK));
-        await vi.waitFor(() => {
-            // Wait until the load chain has had a chance to either render
-            // the rows (regression) or be discarded (current). We assert
-            // the discard outcome below.
+            // Disconnect mid-fetch -- this bumps loadGen, resets
+            // allRows to null, re-enables the button, clears the filters.
+            eventBus.emit('app:state-change', { key: 'isSempConnected', value: false });
             expect(btn.textContent).toBe('Load');
-        });
+            const tbody = container.querySelector('#subexp-tbody')!;
+            expect(tbody.textContent).toMatch(/Click/);
 
-        // Stayed cleared: button is 'Load' (NOT 'Refresh'), table is empty,
-        // and the bad rows from PAGE_OK never made it into the DOM.
-        expect(btn.textContent).toBe('Load');
-        expect(tbody.textContent).not.toContain('BULKQ-001');
-        expect(tbody.textContent).not.toContain('orders-new');
-        expect(tbody.textContent).toMatch(/Click/);
+            // Resolve the fetch with a valid page. The generator yields it;
+            // for-await body sees myGen=1 !== loadGen=2 and returns
+            // BEFORE the `accumulated.push(page.data)` would have run.
+            const late = { ...textRes(PAGE_OK), text: vi.fn(async () => PAGE_OK) };
+            resolveFetch(late);
+
+            // Gate on the late page: its body was read (the chain is past the
+            // fetch), then a macrotask lets the parse -> yield -> loadGen check
+            // -> post-loop work finish before anything is asserted.
+            await vi.waitFor(() => expect(late.text).toHaveBeenCalledTimes(1));
+            await new Promise(r => setTimeout(r, 0));
+
+            // Stayed cleared: button is 'Load' (NOT 'Refresh'), table is empty,
+            // the rows from PAGE_OK never made it into the DOM, and no
+            // "Loaded N" toast was shown.
+            expect(btn.textContent).toBe('Load');
+            expect(tbody.textContent).not.toContain('BULKQ-001');
+            expect(tbody.textContent).not.toContain('orders-new');
+            expect(tbody.textContent).toMatch(/Click/);
+            expect(toasts.querySelector('.toast')).toBeNull();
+        } finally {
+            toasts.remove();
+        }
+    });
+
+    it('a SEMP disconnect after the last page is taken, before the stream ends, still supersedes the load', async () => {
+        // The post-loop supersession check: the in-loop one has already passed
+        // for the last page, so only the check after the loop stops the
+        // superseded load from writing its rows and toasting.
+        const container = createDOM();
+        const toasts = document.createElement('div');
+        toasts.id = 'toast-container';
+        document.body.appendChild(toasts);
+        try {
+            const { ctx, eventBus } = createTestContext(container);
+            scripted.pages = async function* () {
+                yield { ok: true, data: [{ vpn: 'default', queue: 'late-queue', topic: 'late/topic' }] };
+                eventBus.emit('app:state-change', { key: 'isSempConnected', value: false });
+            };
+            await QueueSubscriptionExplorerModule.install(ctx);
+            const btn = container.querySelector('#btn-subexp-load') as HTMLButtonElement;
+            btn.click();
+            await new Promise(r => setTimeout(r, 0));
+
+            expect(btn.textContent).toBe('Load');
+            const tbody = container.querySelector('#subexp-tbody')!;
+            expect(tbody.textContent).not.toContain('late-queue');
+            expect(tbody.textContent).toMatch(/Click/);
+            expect(toasts.querySelector('.toast')).toBeNull();
+        } finally {
+            scripted.pages = null;
+            toasts.remove();
+        }
     });
 
     it('debounced filter handler coalesces rapid keystrokes into one rerender', async () => {

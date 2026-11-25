@@ -1,4 +1,5 @@
 import type { SempContext } from '../connections/types';
+import { sempErrorText, sempFailureText } from './semp-errors';
 
 /**
  * Yielded page from a paginated SEMP fetch.
@@ -9,6 +10,15 @@ export type FetchPage = { ok: true; data: string[] } | { ok: false; error: strin
 
 /** Delay between page requests to avoid overwhelming the broker. */
 export const PAGE_DELAY_MS = 370;
+
+/** A SEMP v2 list body, as far as discovery reads it. */
+interface SempListBody {
+    data?: unknown;
+    meta?: { paging?: { nextPageUri?: string } };
+}
+
+/** One row of a SEMP v2 list (`{ msgVpnName: ... }`, `{ queueName: ... }`). */
+type SempRow = Record<string, unknown>;
 
 /**
  * Pure SEMP Discovery factory.
@@ -24,7 +34,7 @@ export const PAGE_DELAY_MS = 370;
  * self-view points outside the gateway).
  *
  * Scoped to a specific broker via the supplied SempContext. Drives the
- * primary connection by passing `primarySempContextFrom(ctx)`; queue-copy
+ * primary connection by passing `unfilteredPrimarySempContext(ctx)`; queue-copy
  * will pass its destination SempContext for secondary discovery.
  *
  * Presumes the SempContext is valid — does NOT check connection state.
@@ -35,7 +45,7 @@ export function createSempDiscovery(sempCtx: SempContext) {
 
     async function* fetchPaged(
         startPath: string,
-        mapper: (item: any) => string,
+        mapper: (item: SempRow) => string,
         defaultError: string
     ): AsyncGenerator<FetchPage> {
         let path: string | null = startPath;
@@ -46,22 +56,25 @@ export function createSempDiscovery(sempCtx: SempContext) {
                 await new Promise(r => setTimeout(r, PAGE_DELAY_MS));
             }
             try {
+                // Each request carries its own deadline (REQUEST_TIMEOUT_MS):
+                // the kernel's sempFetch for the primary, the SEMP client's
+                // for a secondary.
                 const res = await sempCtx.fetch(path);
                 if (res.ok) {
-                    const json = await res.json();
-                    if (json.data) {
-                        yield { ok: true, data: json.data.map(mapper) };
+                    const json: SempListBody = await res.json();
+                    if (Array.isArray(json.data)) {
+                        yield { ok: true, data: (json.data as SempRow[]).map(mapper) };
                     } else {
                         yield { ok: false, error: defaultError };
                         return;
                     }
                     path = extractNextPath(json.meta?.paging?.nextPageUri);
                 } else {
-                    yield { ok: false, error: res.statusText || defaultError };
+                    yield { ok: false, error: await sempErrorText(res, defaultError) };
                     return;
                 }
-            } catch (e: any) {
-                yield { ok: false, error: e.message || defaultError };
+            } catch (e: unknown) {
+                yield { ok: false, error: sempFailureText(e, defaultError) };
                 return;
             }
             pageNum++;
@@ -71,15 +84,17 @@ export function createSempDiscovery(sempCtx: SempContext) {
     async function* fetchVpns(maxCount = 100): AsyncGenerator<FetchPage> {
         yield* fetchPaged(
             `/SEMP/v2/monitor/msgVpns?count=${maxCount}`,
-            (v: any) => v.msgVpnName,
+            (v) => v.msgVpnName as string,
             'Error fetching VPNs'
         );
     }
 
+    // A Message VPN name may hold spaces and other characters a path does not
+    // carry as they are, so it is encoded as one path segment.
     async function* fetchQueues(vpnName: string, maxCount = 100): AsyncGenerator<FetchPage> {
         yield* fetchPaged(
-            `/SEMP/v2/monitor/msgVpns/${vpnName}/queues?count=${maxCount}`,
-            (q: any) => q.queueName,
+            `/SEMP/v2/monitor/msgVpns/${encodeURIComponent(vpnName)}/queues?count=${maxCount}`,
+            (q) => q.queueName as string,
             'Error fetching Queues'
         );
     }

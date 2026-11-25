@@ -11,13 +11,46 @@ import type { SolacePublisher } from '../../core/services/solace-publisher';
 export type CopyMode = 'copy' | 'move';
 export type DestType = 'queue' | 'topic';
 
+/**
+ * Where the destination's credentials come from when a secondary connection is
+ * needed. It follows the primary connection's mode, never a user choice:
+ * `'provisioned'` while the primary is a Provisioned connection (a signed-in
+ * managed profile; the destination is one provisioned connection card and the
+ * core managed profile dials the credential, so nothing is typed), `'manual'`
+ * with a Direct primary (the typed Broker, SEMP and Client cards).
+ */
+export type DestCredMode = 'manual' | 'provisioned';
+
+/**
+ * Where the destination is, seen from the source: the three answers of the
+ * Copy to button. They are the three pairs `sameBroker` / `sameVpn` can make,
+ * since the same VPN means nothing on another broker.
+ */
+export const DEST_SCOPES = ['this-vpn', 'another-vpn', 'another-broker'] as const;
+export type DestScope = typeof DEST_SCOPES[number];
+
+/** The Copy to answer a `sameBroker` / `sameVpn` pair amounts to. */
+export function destScopeOf(sameBroker: boolean, sameVpn: boolean): DestScope {
+    if (!sameBroker) return 'another-broker';
+    return sameVpn ? 'this-vpn' : 'another-vpn';
+}
+
 export interface DestForm {
     /** When true, dest reuses primary host + SEMP creds. */
     sameBroker: boolean;
     /** When true, dest reuses primary VPN + Solace creds. Forced false when sameBroker is false. */
     sameVpn: boolean;
-    /** Visible only when !sameBroker. */
+    /**
+     * Credential source for the secondary connection: pinned by ui-events from
+     * the primary connection's mode (`deriveDestMode` in ui-events.ts).
+     */
+    credMode: DestCredMode;
+    /** The provisioned destination last connected (or connecting) -- names only, set when the card's Connect is clicked. */
+    provisioned: { broker: string; vpn: string };
+    /** Editable only when !sameBroker: the one host, or the SEMP (management) host of an appliance. */
     host: string;
+    /** An appliance's messaging host, when it is not `host`; see `destMessagingHost`. */
+    messagingHost?: string;
     /** Visible when !sameBroker || !sameVpn (Solace client side). */
     solace: { protocol: string; port: string; urlPath: string; vpn: string; user: string };
     /** Visible only when !sameBroker (SEMP REST side). */
@@ -120,20 +153,34 @@ export interface QueueCopyState {
     destSempCtx: SempContext | null;
 
     /**
+     * The destination a live `destSession` was connected for (`destTargetKey` of
+     * the form when its connect started); null while none is live. The engine
+     * publishes through `destPublisher` only while the form still names this
+     * destination (`selectPublisher` in service-copy).
+     */
+    destSessionTarget: string | null;
+    /**
+     * `destTargetKey` of a destination Client connect still in flight, or null.
+     * Its late UP is installed only if the form still names that destination,
+     * and the controls that choose the destination stay locked meanwhile.
+     */
+    destSolPending: string | null;
+
+    /**
      * Publisher tied to the destination session. Created when destSolHooks.onConnected
-     * fires; disposed on destSolHooks.onDisconnected. Null when the destination is
-     * the primary session (sameVpn path) — the engine falls back to `primaryPublisher`.
+     * installs a session; disposed on destSolHooks.onDisconnected. Used only while
+     * `destSessionTarget` matches the form.
      */
     destPublisher: SolacePublisher | null;
     /**
      * Publisher tied to the primary session. Created on `client:connected`; disposed
-     * on `client:disconnected`. Used as the publish endpoint when destSession is
-     * null (sameVpn path).
+     * on `client:disconnected`. The publish endpoint whenever the form says This
+     * VPN.
      */
     primaryPublisher: SolacePublisher | null;
 
     /** Active verification phase, or null when idle. */
-    verify: { inProgress: boolean; abort: AbortController | null; result: VerifyResult | null } | null;
+    verify: { inProgress: boolean; abort: AbortController; result: VerifyResult | null } | null;
     /** Active copy run, or null when idle. */
     job: CopyJob | null;
 }
@@ -145,6 +192,10 @@ export function createInitialState(): QueueCopyState {
         destForm: {
             sameBroker: true,
             sameVpn: true,
+            // Manual is the only universally-available source; a managed
+            // deployment re-pins this when the destination panel initialises.
+            credMode: 'manual',
+            provisioned: { broker: '', vpn: '' },
             host: '',
             solace: { protocol: 'wss', port: '', urlPath: '', vpn: '', user: '' },
             semp: { protocol: 'https', port: '', urlPath: '', user: '' },
@@ -154,6 +205,8 @@ export function createInitialState(): QueueCopyState {
         mode: 'copy',
         destSession: null,
         destSempCtx: null,
+        destSessionTarget: null,
+        destSolPending: null,
         destPublisher: null,
         primaryPublisher: null,
         verify: null,
@@ -161,10 +214,34 @@ export function createInitialState(): QueueCopyState {
     };
 }
 
+/** Which of the destination's own connections are up: its SEMP context and its messaging session. */
+export interface DestLive { semp: boolean; messaging: boolean }
+
+export function destLive(state: Pick<QueueCopyState, 'destSempCtx' | 'destSession'>): DestLive {
+    return { semp: state.destSempCtx !== null, messaging: state.destSession !== null };
+}
+
+/** The host a typed destination's messaging connects to: its own for an appliance, else the one host. */
+export function destMessagingHost(f: Pick<DestForm, 'host' | 'messagingHost'>): string {
+    return f.messagingHost || f.host;
+}
+
 /**
- * Reset state to its initial shape. Called on module install and on a fresh
- * "Start Copy" click after a previous run completed/aborted. Preserves the
- * form values the user last typed so they don't have to re-enter on retry.
+ * Identity of the destination a secondary Client connection reaches: the broker
+ * (provisioned name, or the typed messaging host) and the Message VPN. Two
+ * forms with the same key address the same place.
+ */
+export function destTargetKey(f: DestForm): string {
+    return f.credMode === 'provisioned'
+        ? `provisioned|${f.provisioned.broker}|${f.provisioned.vpn}`
+        : `manual|${destMessagingHost(f)}|${f.solace.vpn}`;
+}
+
+/**
+ * Drop the verify result and the run. Called when the Confirm modal opens for
+ * a new run and when a run finishes, so a finished job never reads as active.
+ * Preserves the form values the user last typed so they don't have to re-enter
+ * on retry.
  */
 export function resetTransientState(s: QueueCopyState): void {
     s.verify = null;
@@ -181,24 +258,26 @@ export function resetTransientState(s: QueueCopyState): void {
  */
 export interface DestPrefillSnapshot {
     host: string;
+    messagingHost?: string;
     solace: { protocol: string; port: string; urlPath: string; vpn: string; user: string };
     semp: { protocol: string; port: string; urlPath: string; user: string };
 }
 
 /**
- * Mirror primary-connection values into `state.destForm` whenever the toggles
- * say the destination is reusing the primary. Called from three places:
+ * Mirror primary-connection values into `state.destForm` whenever the Copy to
+ * choice says the destination is reusing the primary. Called from three places:
  *   1. ui-events install — initial sync on module load
- *   2. ui-events sameBroker / sameVpn change handlers
+ *   2. ui-events, when the Copy to choice changes
  *   3. module.ts refreshFromPrimary — primary connect / disconnect / SEMP up/down
  *
  * Without (3), the DOM stays in sync via `applyDestPrefill` but `state.destForm`
- * doesn't, so a later "uncheck Same broker → click Connect without retyping"
+ * doesn't, so a later "choose Another broker → click Connect without retyping"
  * would send empty host/creds to the dest factories.
  */
 export function syncDestFormFromSnapshot(state: QueueCopyState, snap: DestPrefillSnapshot | null): void {
     if (state.destForm.sameBroker && snap) {
         state.destForm.host = snap.host;
+        state.destForm.messagingHost = snap.messagingHost;
         state.destForm.semp = {
             protocol: snap.semp.protocol,
             port: snap.semp.port,

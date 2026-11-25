@@ -7,10 +7,25 @@ import { state, setBrowser } from '../../../src/modules/queue-browser/state.js';
 import { createEventBus } from '../../../src/core/event-bus';
 import { loadModuleDOM } from '../../helpers/loadModuleDOM';
 import { resetQueueBrowserState } from '../../helpers/resetQueueBrowserState';
-import type { EventBus, AppContext } from '../../../src/core/types';
+import type { EventBus, AppContext, AppState } from '../../../src/core/types';
+import { completeContext } from '../../helpers/appContext';
+import { stubSavePicker, blobBytes } from '../../helpers/savePicker';
 
 function createBrowserDOM() {
     return loadModuleDOM('queue-browser');
+}
+
+// The toast container is declared once in src/index.html; the module test DOM
+// lacks it. Returns it emptied so a test reads only its own toasts.
+function freshToasts(): HTMLElement {
+    let c = document.getElementById('toast-container');
+    if (!c) {
+        c = document.createElement('div');
+        c.id = 'toast-container';
+        document.body.appendChild(c);
+    }
+    c.innerHTML = '';
+    return c;
 }
 
 describe('queue-browser/ui-table', () => {
@@ -23,7 +38,7 @@ describe('queue-browser/ui-table', () => {
 
         eventBus = createEventBus();
 
-        const ctx: AppContext = {
+        const ctx: AppContext = completeContext({
             container,
             appState: { activeModuleId: null, isConnected: false, selectedVpn: null, solaceConnection: null, sempCredentials: null, isSempConnected: false },
             eventBus,
@@ -31,8 +46,7 @@ describe('queue-browser/ui-table', () => {
             loadSelf: vi.fn(),
             sempFetch: vi.fn(),
             copyToClipboard: vi.fn(),
-            config: {}
-        };
+        });
 
         initDetails(ctx);
         initTable(eventBus);
@@ -48,7 +62,7 @@ describe('queue-browser/ui-table', () => {
             const checkbox = document.querySelector('.msg-check') as HTMLInputElement;
             checkbox.checked = true;
             const ids = ui.getSelectedMessageIds();
-            expect(ids).toContain('1');
+            expect(ids).toEqual(['1']);
         });
 
         it('returns empty when nothing checked', () => {
@@ -76,7 +90,7 @@ describe('queue-browser/ui-table', () => {
         });
 
         it('renderList omits delete button on READ_ONLY queue but still wires the rest of the row', () => {
-            // Covers the falsy branch of `if (btnDel)` at ui-table.ts:73.
+            // Covers the falsy branch of `if (btnDel)` in attachRowListeners.
             // Read-only queue bindings must NOT show a delete button, AND the
             // rest of attachRowListeners must still wire the remaining actions
             // (download, forward, checkbox). A regression that skipped the full
@@ -117,6 +131,22 @@ describe('queue-browser/ui-table', () => {
 
             const rows = ui.getElements().msgList.querySelectorAll('tr');
             expect(rows.length).toBe(2);
+        });
+
+        it('shows a message id and date as text, never as markup', () => {
+            const id = '"><img src=x onerror="alert(1)">';
+            const date = '<b>2026</b>';
+            state.displayedMessages = [{ id, date, size: 0, type: 'Text', content: '' }];
+            state.allMessages = state.displayedMessages;
+
+            ui.renderList();
+
+            const row = ui.getElements().msgList.querySelector('tr') as HTMLElement;
+            expect(row.querySelector('img, b')).toBeNull();
+            expect(row.dataset.id).toBe(id);
+            const cells = row.querySelectorAll('td');
+            expect(cells[1].textContent).toBe(id);
+            expect(cells[2].textContent).toBe(date);
         });
 
         it('resets check-all checkbox', () => {
@@ -167,8 +197,10 @@ describe('queue-browser/ui-table', () => {
 
             ui.addMessageRow(msg);
 
-            const row = ui.getElements().msgList.querySelector('tr[data-id="new-1"]');
+            const row = ui.getElements().msgList.querySelector('tr[data-id="new-1"]') as HTMLElement;
             expect(row).toBeTruthy();
+            expect(row.style.animation).toBe('highlight-fade 2s');
+            expect(ui.getElements().countTotal.textContent).toBe('1');
         });
 
     });
@@ -190,6 +222,7 @@ describe('queue-browser/ui-table', () => {
             ui.getElements().detailId.textContent = '1';
 
             ui.removeMessageRow('1');
+            expect(ui.getElements().detailId.textContent).toBe('');
         });
 
         it('does not clear details when removing non-selected message', () => {
@@ -238,6 +271,8 @@ describe('queue-browser/ui-table', () => {
             ui.updateCounts();
 
             expect(ui.getElements().btnBrowserForward.disabled).toBe(false);
+            expect(ui.getElements().btnBrowserDownloadContent.disabled).toBe(false);
+            expect(ui.getElements().btnBrowserDownloadFull.disabled).toBe(false);
         });
 
         it('hides delete button when read-only', () => {
@@ -255,6 +290,9 @@ describe('queue-browser/ui-table', () => {
             ui.updateCounts();
             expect(ui.getElements().btnBrowserDelete.classList.contains('hidden')).toBe(false);
             expect(ui.getElements().btnBrowserDelete.disabled).toBe(true);
+            // The ZIP downloads wait for a selection too.
+            expect(ui.getElements().btnBrowserDownloadContent.disabled).toBe(true);
+            expect(ui.getElements().btnBrowserDownloadFull.disabled).toBe(true);
         });
     });
 
@@ -310,19 +348,71 @@ describe('queue-browser/ui-table', () => {
         });
     });
 
-    describe('downloadMessagesZip()', () => {
-        it('alerts when JSZip not loaded', async () => {
-            (window as any).JSZip = undefined;
-            await ui.downloadMessagesZip('content');
-            expect(globalThis.alert).toHaveBeenCalledWith(expect.stringContaining('JSZip'));
+    // A managed session's read-only rows only ever downgrade what the broker
+    // grants; they never upgrade a queue the broker keeps read-only.
+    describe('updatePermissionUI() in a managed session', () => {
+        const managed = (rows: 'operate' | 'readOnly'): AppState => ({
+            activeModuleId: null, isConnected: true, selectedVpn: 'v1', solaceConnection: null, sempCredentials: null, isSempConnected: true,
+            managed: {
+                admin: false, username: 'u', broker: 'b1', vpns: ['v1'], modules: [],
+                operate: rows === 'operate' ? [{ brokers: '*', msgVpns: '*', queues: '*' }] : [],
+                readOnly: rows === 'readOnly' ? [{ brokers: '*', msgVpns: '*', queues: '*' }] : [],
+            },
         });
 
-        it('alerts when no messages selected', async () => {
-            (window as any).JSZip = vi.fn();
+        it.each([
+            ['the broker allows writing, a read-only row', 'READ_WRITE', 'readOnly', true],
+            ['the broker keeps it read-only, an operate row', 'READ_ONLY', 'operate', true],
+            ['the broker allows writing, an operate row', 'READ_WRITE', 'operate', false],
+        ] as const)('%s: read-only %s', (_case, sdk, rows, readOnly) => {
+            initTable(eventBus, { appState: managed(rows) });
+            setBrowser('q1', { _messageConsumer: { _permissions: sdk } });
             state.displayedMessages = [];
+            state.allMessages = [];
 
+            ui.updatePermissionUI('q1');
+
+            expect(state.currentQueuePermissions).toEqual({ READ_ONLY: readOnly });
+            expect(ui.getElements().hdrPermissions.textContent).toBe(readOnly ? 'Read-Only' : 'Read-Write');
+            expect(ui.getElements().btnBrowserDelete.classList.contains('hidden')).toBe(readOnly);
+        });
+
+        it('shows a read-only row even when the SDK exposes no permission, and with no VPN selected yet', () => {
+            const appState = managed('readOnly');
+            appState.selectedVpn = null;
+            initTable(eventBus, { appState });
+            setBrowser('q1', { _messageConsumer: null });
+            state.displayedMessages = [];
+            state.allMessages = [];
+
+            ui.updatePermissionUI('q1');
+
+            expect(ui.getElements().hdrPermissions.classList.contains('hidden')).toBe(false);
+            expect(ui.getElements().hdrPermissions.textContent).toBe('Read-Only');
+            expect(state.currentQueuePermissions).toEqual({ READ_ONLY: true });
+        });
+
+        it('a Direct session (no managed) is the broker\'s word alone', () => {
+            const appState = managed('readOnly');
+            appState.managed = null;
+            initTable(eventBus, { appState });
+            setBrowser('q1', { _messageConsumer: { _permissions: 'READ_WRITE' } });
+            state.displayedMessages = [];
+            state.allMessages = [];
+
+            ui.updatePermissionUI('q1');
+
+            expect(state.currentQueuePermissions).toEqual({ READ_ONLY: false });
+        });
+    });
+
+    describe('downloadMessagesZip()', () => {
+        it('reports a missing JSZip in an error toast', async () => {
+            const toasts = freshToasts();
+            (window as any).JSZip = undefined;
             await ui.downloadMessagesZip('content');
-            expect(globalThis.alert).toHaveBeenCalledWith(expect.stringContaining('No messages'));
+            expect(toasts.querySelector('.toast--error')!.textContent)
+                .toBe('Cannot create the ZIP: the JSZip library is not loaded.');
         });
 
         it('creates content ZIP for selected messages', async () => {
@@ -335,7 +425,7 @@ describe('queue-browser/ui-table', () => {
             });
 
             state.displayedMessages = [
-                { id: '1', content: 'Hello', date: '', size: 0, type: 'Text' }
+                { id: '1', content: 'Hello', binary: false, msgProperties: {}, date: '', size: 0, type: 'Text' }
             ];
             state.allMessages = state.displayedMessages;
             ui.renderList();
@@ -344,10 +434,64 @@ describe('queue-browser/ui-table', () => {
             const checkbox = document.querySelector('.msg-check') as HTMLInputElement;
             checkbox.checked = true;
 
+            const blobSpy = vi.spyOn(ui, 'triggerDownloadBlob').mockImplementation(() => {});
+
             await ui.downloadMessagesZip('content');
 
-            expect(fileFn).toHaveBeenCalled();
+            expect(fileFn).toHaveBeenCalledWith('solace-message-1.txt', 'Hello');
             expect(generateAsyncFn).toHaveBeenCalledWith({ type: 'blob' });
+            expect(blobSpy).toHaveBeenCalledTimes(1);
+            expect(blobSpy.mock.calls[0][1]).toMatch(/^solace-messages-content-.*\.zip$/);
+            blobSpy.mockRestore();
+        });
+
+        it('puts a binary attachment in the content ZIP as its original bytes, named by its kind', async () => {
+            const fileFn = vi.fn();
+            (window as any).JSZip = vi.fn(function(this: any) {
+                this.file = fileFn;
+                this.generateAsync = vi.fn().mockResolvedValue(new Blob(['zip']));
+            });
+            const bytes = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+            state.displayedMessages = [
+                { id: '7', content: '[Binary payload, looks like PNG image: 8 bytes]', bytes, binary: true, date: '', size: 0, type: 'Binary' }
+            ];
+            state.allMessages = state.displayedMessages;
+            ui.renderList();
+            (document.querySelector('.msg-check') as HTMLInputElement).checked = true;
+
+            await ui.downloadMessagesZip('content');
+
+            expect(fileFn).toHaveBeenCalledTimes(1);
+            expect(fileFn.mock.calls[0][0]).toBe('solace-message-7.png');
+            expect(fileFn.mock.calls[0][1]).toBe(bytes);
+        });
+
+        it('names each content entry by its payload: JSON text, a map\'s wire bytes, an unrecognised binary, and a sanitised id', async () => {
+            const fileFn = vi.fn();
+            (window as any).JSZip = vi.fn(function(this: any) {
+                this.file = fileFn;
+                this.generateAsync = vi.fn().mockResolvedValue(new Blob(['zip']));
+            });
+            const wire = new Uint8Array([0x2B, 0x10, 0x00]);
+            const unknown = new Uint8Array([0x01, 0x02]);
+            state.displayedMessages = [
+                { id: '1', content: '{"a":1}', binary: false, msgProperties: {}, date: '', size: 0, type: 'Text' },
+                { id: '2', content: 'a: 1', bytes: wire, binary: false, sdt: { type: 'map', entries: [] }, msgProperties: {}, date: '', size: 0, type: 'Map' },
+                { id: '3', content: '[Binary payload: 2 bytes]', bytes: unknown, binary: true, msgProperties: {}, date: '', size: 0, type: 'Binary' },
+                { id: 'a/b:4', content: 'plain', binary: false, msgProperties: { 'HTTP Type': 'text/csv' }, date: '', size: 0, type: 'Text' },
+            ];
+            state.allMessages = state.displayedMessages;
+            ui.renderList();
+            document.querySelectorAll<HTMLInputElement>('.msg-check').forEach(c => { c.checked = true; });
+
+            await ui.downloadMessagesZip('content');
+
+            expect(fileFn.mock.calls.map((c: unknown[]) => c[0])).toEqual([
+                'solace-message-1.json', 'solace-message-2.bin', 'solace-message-3.bin', 'solace-message-ab4.csv',
+            ]);
+            expect(fileFn.mock.calls[1][1]).toBe(wire);
+            expect(fileFn.mock.calls[2][1]).toBe(unknown);
+            expect(fileFn.mock.calls[3][1]).toBe('plain');
         });
 
         it('creates full JSON ZIP for selected messages', async () => {
@@ -360,7 +504,7 @@ describe('queue-browser/ui-table', () => {
             });
 
             state.displayedMessages = [
-                { id: '1', content: 'Hello', date: '', size: 0, type: 'Text', msgProperties: {}, appProperties: {} }
+                { id: '1', content: 'Hello', date: '', size: 0, type: 'Text', msgProperties: { key: 'val' }, appProperties: {} }
             ];
             state.allMessages = state.displayedMessages;
             ui.renderList();
@@ -370,18 +514,23 @@ describe('queue-browser/ui-table', () => {
 
             await ui.downloadMessagesZip('full');
 
-            expect(fileFn).toHaveBeenCalledWith(expect.stringContaining('-full.json'), expect.any(String));
+            expect(fileFn).toHaveBeenCalledTimes(1);
+            expect(fileFn.mock.calls[0][0]).toBe('solace-message-1-full.json');
+            const parsed = JSON.parse(fileFn.mock.calls[0][1]);
+            expect(parsed.payload).toBe('Hello');
+            expect(parsed.messageProperties.key).toBe('val');
         });
 
         it('handles ZIP generation error', async () => {
             const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+            const toasts = freshToasts();
 
             (window as any).JSZip = vi.fn(function(this: any) {
                 this.file = vi.fn();
                 this.generateAsync = vi.fn().mockRejectedValue(new Error('zip error'));
             });
 
-            state.displayedMessages = [{ id: '1', content: 'test' }];
+            state.displayedMessages = [{ id: '1', content: 'test', binary: false, msgProperties: {} }];
             state.allMessages = state.displayedMessages;
             ui.renderList();
 
@@ -390,12 +539,15 @@ describe('queue-browser/ui-table', () => {
 
             await ui.downloadMessagesZip('content');
             expect(consoleSpy).toHaveBeenCalled();
+            expect(toasts.querySelector('.toast--error')!.textContent).toBe('Could not create the ZIP: zip error');
         });
 
         it('returns early if no matching messages after filter', async () => {
-            (window as any).JSZip = vi.fn();
+            const zipCtor = vi.fn();
+            (window as any).JSZip = zipCtor;
+            const toasts = freshToasts();
 
-            state.displayedMessages = [{ id: '1', content: 'test' }];
+            state.displayedMessages = [{ id: '1', content: 'test', binary: false, msgProperties: {} }];
             state.allMessages = state.displayedMessages;
             ui.renderList();
 
@@ -406,6 +558,8 @@ describe('queue-browser/ui-table', () => {
             // Swap displayedMessages to have different IDs so filter returns 0
             state.displayedMessages = [{ id: '999', content: 'other' }];
             await ui.downloadMessagesZip('content');
+            expect(zipCtor).not.toHaveBeenCalled();
+            expect(toasts.children.length).toBe(0);
         });
     });
 
@@ -463,23 +617,26 @@ describe('queue-browser/ui-table', () => {
             expect(ui.getElements().detailId.textContent).toBe('');
         });
 
-        it('download content button triggers download', () => {
-            state.displayedMessages = [
-                { id: '1', date: '', size: 0, type: 'Text', content: 'payload' }
-            ];
-            state.allMessages = state.displayedMessages;
-            ui.renderList();
+        it('download content button saves that row\'s content under its name', async () => {
+            const picker = stubSavePicker();
+            try {
+                state.displayedMessages = [
+                    { id: '1', date: '', size: 0, type: 'Text', content: 'payload', binary: false, msgProperties: {} }
+                ];
+                state.allMessages = state.displayedMessages;
+                ui.renderList();
 
-            const triggerSpy = vi.spyOn(ui, 'triggerDownload');
-            const btn = document.querySelector('.btn-download-content') as HTMLElement;
-            btn.click();
+                const btn = document.querySelector('.btn-download-content') as HTMLElement;
+                btn.click();
 
-            // Verify both filename sanitization AND payload routing — a regression
-            // that swapped `msg.content` for `msg.id` would still call createObjectURL.
-            expect(triggerSpy).toHaveBeenCalledTimes(1);
-            expect(triggerSpy.mock.calls[0][0]).toBe('solace-message-1');
-            expect(triggerSpy.mock.calls[0][1]).toBe('payload');
-            triggerSpy.mockRestore();
+                // Both the name and the bytes: a regression that saved `msg.id`
+                // instead of `msg.content` would still save a file.
+                await vi.waitFor(() => expect(picker.blobs).toHaveLength(1));
+                expect(picker.names).toEqual(['solace-message-1.txt']);
+                expect(await blobBytes(picker.blobs[0])).toEqual(Array.from(new TextEncoder().encode('payload')));
+            } finally {
+                picker.restore();
+            }
         });
 
         it('download full button triggers download', () => {
@@ -497,30 +654,12 @@ describe('queue-browser/ui-table', () => {
             // Filename: full JSON downloads end in -full.json.
             expect(triggerSpy.mock.calls[0][0]).toMatch(/-full\.json$/);
             // Content: parses as JSON and contains the expected top-level keys.
-            const parsed = JSON.parse(triggerSpy.mock.calls[0][1]);
+            const parsed = JSON.parse(triggerSpy.mock.calls[0][1] as string);
             expect(parsed).toHaveProperty('payload', 'payload');
             expect(parsed).toHaveProperty('messageProperties');
             expect(parsed).toHaveProperty('applicationProperties');
             expect(triggerSpy.mock.calls[0][2]).toBe('application/json');
             triggerSpy.mockRestore();
-        });
-
-        it('downloadMessagesZip with full type includes properties', async () => {
-            (window as any).JSZip = vi.fn(function(this: any) {
-                this.file = vi.fn();
-                this.generateAsync = vi.fn().mockResolvedValue(new Blob(['zip']));
-            });
-
-            state.displayedMessages = [
-                { id: '1', date: '', size: 0, type: 'Text', content: 'payload', msgProperties: { key: 'val' }, appProperties: {} }
-            ];
-            state.allMessages = state.displayedMessages;
-            ui.renderList();
-
-            const checkbox = document.querySelector('.msg-check') as HTMLInputElement;
-            checkbox.checked = true;
-
-            await ui.downloadMessagesZip('full');
         });
 
         it('forward button opens modal', () => {
@@ -530,13 +669,15 @@ describe('queue-browser/ui-table', () => {
             state.allMessages = state.displayedMessages;
             ui.renderList();
 
-            // Need to import ui-forward first
-            ui.generateUuid = () => 'test-uuid';
+            const uuidSpy = vi.spyOn(ui, 'generateUuid').mockImplementation(() => 'test-uuid');
 
             const btn = document.querySelector('.btn-forward-row') as HTMLElement;
             btn.click();
 
+            expect(ui.getElements().modalForward.open).toBe(true);
             expect(state.forwardQueue.length).toBe(1);
+            expect(state.forwardQueue[0].id).toBe('1');
+            uuidSpy.mockRestore();
         });
     });
 });

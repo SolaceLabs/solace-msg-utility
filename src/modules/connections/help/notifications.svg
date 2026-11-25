@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 330" width="640" height="330" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="640" height="330" fill="#f8fafc" rx="8"/>
+    <rect x="20" y="16" width="600" height="40" fill="#ffffff" rx="6" stroke="#e2e8f0"/>
+    <text x="36" y="41" font-size="15" font-weight="700">Connections</text>
+    <path d="M563 34 a7 7 0 0 1 14 0 c0 8 3 10 3 10 h-20 s3 -2 3 -10 M568 47 a2.5 2.5 0 0 0 4 0" fill="none" stroke="#334155" stroke-width="1.6"/>
+    <circle cx="580" cy="28" r="8" fill="#ef4444"/>
+    <text x="580" y="31.5" font-size="10" fill="#ffffff" font-weight="700" text-anchor="middle">3</text>
+    <circle cx="520" cy="36" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="520" y="40" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <rect x="20" y="70" width="600" height="240" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="40" y="100" font-size="15" font-weight="700">Notifications</text>
+    <rect x="440" y="84" width="80" height="24" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="480" y="99.6667" font-size="11" font-weight="700" text-anchor="middle">Clear all</text>
+    <rect x="528" y="84" width="68" height="24" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="562" y="99.6667" font-size="11" font-weight="700" text-anchor="middle">Close</text>
+    <circle cx="412" cy="96" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="412" y="100" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <rect x="40" y="122" width="560" height="46" fill="#f8fafc" rx="6" stroke="#e2e8f0"/>
+    <rect x="40" y="122" width="4" height="46" fill="#2563eb" rx="2"/>
+    <text x="58" y="141" font-size="11" fill="#64748b" font-family="Consolas, Menlo, monospace">09:41:07</text>
+    <rect x="130" y="129" width="40" height="18" fill="#ffffff" rx="9" stroke="#2563eb"/>
+    <text x="150" y="141.5" font-size="10" fill="#2563eb" font-weight="700" text-anchor="middle">info</text>
+    <text x="176" y="141" font-size="11" font-weight="700">Connections</text>
+    <text x="58" y="159" font-size="11">Connected to broker &quot;broker.example.com&quot;, VPN &quot;default&quot;.</text>
+    <rect x="40" y="178" width="560" height="46" fill="#f8fafc" rx="6" stroke="#e2e8f0"/>
+    <rect x="40" y="178" width="4" height="46" fill="#2563eb" rx="2"/>
+    <text x="58" y="197" font-size="11" fill="#64748b" font-family="Consolas, Menlo, monospace">09:41:09</text>
+    <rect x="130" y="185" width="40" height="18" fill="#ffffff" rx="9" stroke="#2563eb"/>
+    <text x="150" y="197.5" font-size="10" fill="#2563eb" font-weight="700" text-anchor="middle">info</text>
+    <text x="176" y="197" font-size="11" font-weight="700">Connections</text>
+    <text x="58" y="215" font-size="11">SEMP connected to &quot;broker.example.com&quot;.</text>
+    <rect x="40" y="234" width="560" height="46" fill="#f8fafc" rx="6" stroke="#e2e8f0"/>
+    <rect x="40" y="234" width="4" height="46" fill="#009193" rx="2"/>
+    <text x="58" y="253" font-size="11" fill="#64748b" font-family="Consolas, Menlo, monospace">09:44:52</text>
+    <rect x="130" y="241" width="28" height="18" fill="#ffffff" rx="9" stroke="#009193"/>
+    <text x="144" y="253.5" font-size="10" fill="#009193" font-weight="700" text-anchor="middle">ok</text>
+    <text x="176" y="253" font-size="11" font-weight="700">Connections</text>
+    <text x="58" y="271" font-size="11">Configuration saved</text>
+    <circle cx="612" cy="145" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="612" y="149" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+</svg>

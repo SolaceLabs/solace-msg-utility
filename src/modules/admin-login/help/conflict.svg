@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 220" width="640" height="220" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" fill="#334155" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="640" height="220" fill="#f8fafc" rx="8"/>
+    <rect x="80" y="30" width="480" height="130" fill="#ffffff" rx="8" stroke="#e2e8f0"/>
+    <text x="104" y="76">This user was changed by someone else since you opened it.</text>
+    <rect x="366" y="112" width="80" height="30" fill="#ffffff" rx="5" stroke="#cbd5e1"/>
+    <text x="406" y="131" font-weight="700" text-anchor="middle">Cancel</text>
+    <rect x="456" y="112" width="80" height="30" fill="#00C895" rx="5"/>
+    <text x="496" y="131" fill="#ffffff" font-weight="700" text-anchor="middle">Reload</text>
+    <circle cx="590" cy="72" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="590" y="76" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <circle cx="406" cy="186" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="406" y="190" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <circle cx="496" cy="186" r="11" fill="#093B5F" stroke="#ffffff" stroke-width="2"/>
+    <text x="496" y="190" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+</svg>

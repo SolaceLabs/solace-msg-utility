@@ -136,8 +136,12 @@ describe('core/services/solace-publisher', () => {
 
             const promise = publisher.send(createMessageMock(), queueDest, { beforeSend });
             expect(sendCallOrder).toEqual(['beforeSend', 'session.send']);
-            // setCorrelationKey was already invoked before beforeSend ran.
-            expect(cloned.setCorrelationKey).toHaveBeenCalled();
+            // Global call order: destination and correlation key are stamped
+            // before beforeSend runs, and beforeSend runs before session.send.
+            const orderOf = (fn: any) => fn.mock.invocationCallOrder[0];
+            expect(orderOf(cloned.setDestination)).toBeLessThan(orderOf(beforeSend));
+            expect(orderOf(cloned.setCorrelationKey)).toBeLessThan(orderOf(beforeSend));
+            expect(orderOf(beforeSend)).toBeLessThan(orderOf(session.send));
 
             fireAck(getKeyFromMsg(cloned));
             await promise;
@@ -221,11 +225,16 @@ describe('core/services/solace-publisher', () => {
         it('honors per-publish ackTimeoutMs override', async () => {
             vi.useFakeTimers();
             const publisher = createSolacePublisher(session);
-            const promise = publisher.send(createMessageMock(), queueDest, { ackTimeoutMs: 500 });
-            // Advancing under the override does NOT yet time out.
-            await vi.advanceTimersByTimeAsync(400);
-            // Then crossing the override fires.
-            await vi.advanceTimersByTimeAsync(200);
+            const onTimeout = vi.fn();
+            const promise = publisher.send(createMessageMock(), queueDest, { ackTimeoutMs: 500, correlationKey: 'k-override', onTimeout });
+            // One millisecond before the override's deadline: still pending.
+            await vi.advanceTimersByTimeAsync(499);
+            expect(onTimeout).not.toHaveBeenCalled();
+            expect(publisher.isPending('k-override')).toBe(true);
+            // At the deadline it times out.
+            await vi.advanceTimersByTimeAsync(1);
+            expect(onTimeout).toHaveBeenCalledTimes(1);
+            expect(publisher.isPending('k-override')).toBe(false);
             await expect(promise).resolves.toEqual({
                 ok: false,
                 error: 'Timed out waiting for broker acknowledgement.',
@@ -244,16 +253,25 @@ describe('core/services/solace-publisher', () => {
     });
 
     describe('send() — sync send failure', () => {
-        it('resolves {ok:false} when session.send throws, with the thrown message', async () => {
-            (session.send as any).mockImplementation(() => { throw new Error('Send blew up'); });
-            const publisher = createSolacePublisher(session);
+        it('resolves {ok:false} when session.send throws, with the thrown message, and leaves no pending entry or timer', async () => {
+            vi.useFakeTimers();
+            const publisher = createSolacePublisher(session, { ackTimeoutMs: 100 });
+            let pendingDuringSend: boolean | undefined;
+            (session.send as any).mockImplementation(() => {
+                pendingDuringSend = publisher.isPending('k-sync');
+                throw new Error('Send blew up');
+            });
             const onReject = vi.fn();
+            const onTimeout = vi.fn();
 
-            const result = await publisher.send(createMessageMock(), queueDest, { onReject });
+            const result = await publisher.send(createMessageMock(), queueDest, { correlationKey: 'k-sync', onReject, onTimeout });
             expect(result).toEqual({ ok: false, error: 'Send blew up' });
             expect(onReject).toHaveBeenCalledWith('Send blew up');
-            // Pending map was cleaned up — no orphan timer entry.
-            expect(publisher.isPending('does-not-matter')).toBe(false);
+            expect(pendingDuringSend).toBe(true);
+            expect(publisher.isPending('k-sync')).toBe(false);
+            await vi.advanceTimersByTimeAsync(200);
+            expect(onTimeout).not.toHaveBeenCalled();
+            vi.useRealTimers();
         });
 
         it('falls back to a generic error when the thrown value has no message', async () => {
@@ -262,6 +280,31 @@ describe('core/services/solace-publisher', () => {
 
             const result = await publisher.send(createMessageMock(), queueDest);
             expect(result).toEqual({ ok: false, error: 'Send failed' });
+        });
+    });
+
+    describe('send() -- a destination the SDK refuses', () => {
+        it('settles {ok:false} with the SDK reason instead of throwing, and never sends', async () => {
+            const reason = "Invalid TOPIC: Empty level(s) in 'a//b'@1.";
+            solaceMock.SolclientFactory.createTopicDestination.mockImplementation(() => { throw new Error(reason); });
+            const publisher = createSolacePublisher(session);
+            const onReject = vi.fn();
+
+            const result = await publisher.send(createMessageMock(), { type: 'topic', name: 'a//b' }, { onReject, correlationKey: 'k1' });
+
+            expect(result).toEqual({ ok: false, error: reason });
+            expect(onReject).toHaveBeenCalledWith(reason);
+            expect(session.send).not.toHaveBeenCalled();
+            expect(publisher.isPending('k1')).toBe(false);
+        });
+
+        it('a throwing beforeSend settles too, naming the destination when the throw carries no text', async () => {
+            const publisher = createSolacePublisher(session);
+            const result = await publisher.send(createMessageMock(), queueDest, {
+                beforeSend: () => { throw {}; },
+            });
+            expect(result).toEqual({ ok: false, error: 'Cannot send to queue "my-queue".' });
+            expect(session.send).not.toHaveBeenCalled();
         });
     });
 
@@ -301,6 +344,27 @@ describe('core/services/solace-publisher', () => {
             await promise;
         });
 
+        it('a throwing content setter falls through to the next content source', async () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { });
+            const publisher = createSolacePublisher(session);
+            const original = createMessageMock();
+            (original.getSdtContainer as any).mockReturnValue({ kind: 'sdt' });
+            (original.getXmlContent as any).mockReturnValue('<x/>');
+            const cloned = createMessageMock();
+            (cloned.setSdtContainer as any).mockImplementation(() => { throw new Error('bad container'); });
+            solaceMock.SolclientFactory.createMessage.mockReturnValueOnce(cloned);
+
+            const promise = publisher.send(original, queueDest);
+
+            expect(warnSpy).toHaveBeenCalledWith('Failed to set setSdtContainer', expect.any(Error));
+            expect(cloned.setXmlContent).toHaveBeenCalledWith('<x/>');
+            expect(cloned.setBinaryAttachment).not.toHaveBeenCalled();
+
+            fireAck(getKeyFromMsg(cloned));
+            await promise;
+            warnSpy.mockRestore();
+        });
+
         it('content priority: XML fires when SDT is null and short-circuits Binary', async () => {
             const publisher = createSolacePublisher(session);
             const original = createMessageMock();
@@ -331,7 +395,9 @@ describe('core/services/solace-publisher', () => {
             solaceMock.SolclientFactory.createMessage.mockReturnValueOnce(cloned);
 
             const promise = publisher.send(original, queueDest);
-            expect(cloned.setBinaryAttachment).toHaveBeenCalled();
+            expect(cloned.setBinaryAttachment).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]));
+            expect(cloned.setSdtContainer).not.toHaveBeenCalled();
+            expect(cloned.setXmlContent).not.toHaveBeenCalled();
 
             fireAck(getKeyFromMsg(cloned));
             await promise;
@@ -408,6 +474,7 @@ describe('core/services/solace-publisher', () => {
             await expect(publisher.send(createMessageMock(), queueDest, { onReject })).resolves.toEqual({
                 ok: false, error: 'Publisher disposed',
             });
+            expect(session.send).not.toHaveBeenCalled();
             expect(onReject).toHaveBeenCalledWith('Publisher disposed');
         });
     });

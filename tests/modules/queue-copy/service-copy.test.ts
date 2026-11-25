@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
     runCopyJob,
+    selectPublisher,
     IDLE_TIMEOUT_MS,
     PUBLISH_CONCURRENCY_HIGH,
     PUBLISH_CONCURRENCY_LOW,
 } from '../../../src/modules/queue-copy/service-copy';
-import { createInitialState } from '../../../src/modules/queue-copy/state';
+import { createInitialState, destTargetKey } from '../../../src/modules/queue-copy/state';
 import type { VerifyResult } from '../../../src/modules/queue-copy/state';
 import { createSolacePublisher } from '../../../src/core/services/solace-publisher';
 import { createSessionMock, createBrowserMock, createMessageMock } from '../../setup';
@@ -100,31 +101,11 @@ describe('queue-copy/service-copy', () => {
         (window as any).solace.SolclientFactory.createMessage.mockImplementation(() => createMessageMock());
     });
 
-    describe('configuration constants', () => {
-        // Source of truth lives in [src/modules/queue-copy/constants.ts](../../../src/modules/queue-copy/constants.ts).
-        // Pinning the exact value here just duplicates the constant — sanity-
-        // check the shape instead: a positive integer in a reasonable range
-        // for an "idle queue → declare done" timeout. Any value outside this
-        // range would indicate a typo (a sub-second timeout would fire during
-        // normal SDK transport-window pauses; a multi-hour timeout would
-        // hang the modal on a drained queue).
-        it('IDLE_TIMEOUT_MS is a positive integer in a sane range (1s..10min)', () => {
-            expect(Number.isInteger(IDLE_TIMEOUT_MS)).toBe(true);
-            expect(IDLE_TIMEOUT_MS).toBeGreaterThanOrEqual(1_000);
-            expect(IDLE_TIMEOUT_MS).toBeLessThanOrEqual(600_000);
-        });
-
-        it('PUBLISH_CONCURRENCY_HIGH > PUBLISH_CONCURRENCY_LOW (hysteresis invariant)', () => {
-            expect(PUBLISH_CONCURRENCY_HIGH).toBeGreaterThan(PUBLISH_CONCURRENCY_LOW);
-            expect(PUBLISH_CONCURRENCY_LOW).toBeGreaterThan(0);
-        });
-    });
-
     describe('engine entry fast-paths', () => {
         it('null publisher → onComplete with status=error and "Publisher unavailable"', async () => {
             const { state, session, onComplete } = setup();
             state.primaryPublisher = null;
-            state.verify = { inProgress: false, abort: null, result: verifyResult({ messageCount: 5 }) };
+            state.verify = { inProgress: false, abort: new AbortController(), result: verifyResult({ messageCount: 5 }) };
 
             await runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
 
@@ -138,7 +119,7 @@ describe('queue-copy/service-copy', () => {
 
         it('total=0 → onComplete with status=completed without binding the browser', async () => {
             const { state, session, onComplete } = setup();
-            state.verify = { inProgress: false, abort: null, result: verifyResult({ messageCount: 0 }) };
+            state.verify = { inProgress: false, abort: new AbortController(), result: verifyResult({ messageCount: 0 }) };
 
             await runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
 
@@ -152,10 +133,10 @@ describe('queue-copy/service-copy', () => {
 
     describe('Phase 1 — stop reasons', () => {
         describe('reached-max', () => {
-            it('processes the maxMsgId message itself, disconnects the browser, then completes cleanly', async () => {
+            it('processes the maxMsgId message itself, disconnects the browser, then completes cleanly, leaving the source messages in copy mode', async () => {
                 const { state, session, browser, onComplete, onProgress, fireUp, fireMessage, ackLast } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 2, oldestMsgId: '100', newestMsgId: '101' }),
                 };
 
@@ -173,7 +154,7 @@ describe('queue-copy/service-copy', () => {
                 await flush();
                 await job;
 
-                // triggerStop now goes straight to disconnect (not stop) so no
+                // triggerStop goes straight to disconnect (not stop) so no
                 // further MESSAGE events can race the in-flight ACK drain.
                 expect(browser.disconnect).toHaveBeenCalled();
                 expect(onProgress).toHaveBeenCalledTimes(2);
@@ -182,6 +163,8 @@ describe('queue-copy/service-copy', () => {
                 expect(final.status).toBe('completed');
                 expect(final.copied).toBe(2);
                 expect(final.lastError).toBeNull();
+                expect(session.send).toHaveBeenCalledTimes(2);
+                expect(browser.removeMessageFromQueue).not.toHaveBeenCalled();
             });
         });
 
@@ -194,7 +177,7 @@ describe('queue-copy/service-copy', () => {
                 // see seenMaxMsgId=true and drop 200, NOT fatal.
                 const { state, session, browser, onComplete, onProgress, fireUp, fireMessage, ackLast } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 2, oldestMsgId: '100', newestMsgId: '101' }),
                 };
 
@@ -237,7 +220,7 @@ describe('queue-copy/service-copy', () => {
                 // never saw 103. Pre-process gate fires max-consumed.
                 const { state, session, onComplete, fireUp, fireMessage, ackLast } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 4, oldestMsgId: '100', newestMsgId: '103' }),
                 };
 
@@ -262,17 +245,17 @@ describe('queue-copy/service-copy', () => {
             });
 
             it('max-consumed with in-flight publishes — ACKs after stop STILL increment copied', async () => {
-                // Scenario from the user's bug report: 4 originals (with ids
+                // Scenario: 4 originals (with ids
                 // ≤ max) are queued for publish concurrently — their publish
                 // promises haven't resolved yet. Then a brand-new message
                 // with id > max arrives, triggering max-consumed. The
                 // in-flight publishes finish successfully at the destination
-                // AFTER the stop. Pre-fix, those ACKs hit the "settled after
-                // stop — discard result" branch and `copied` stayed 0. The
-                // fix: count successful in-flight ACKs regardless of stop.
+                // AFTER the stop. Those ACKs must not be discarded as "settled
+                // after stop": successful in-flight ACKs count toward `copied`
+                // regardless of stop.
                 const { state, session, onComplete, fireUp, fireMessage, ackAt } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 8, oldestMsgId: '1', newestMsgId: '100' }),
                 };
 
@@ -318,7 +301,7 @@ describe('queue-copy/service-copy', () => {
             it('first msg id mismatch terminates without sending', async () => {
                 const { state, session, browser, onComplete, fireUp, fireMessage } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
                 };
 
@@ -344,7 +327,7 @@ describe('queue-copy/service-copy', () => {
                 vi.useFakeTimers();
                 const { state, session, onComplete, fireUp, fireMessage, ackLast } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 1, oldestMsgId: '100', newestMsgId: '999' }),
                 };
 
@@ -372,7 +355,7 @@ describe('queue-copy/service-copy', () => {
                 vi.useFakeTimers();
                 const { state, session, onComplete, fireUp, fireMessage, ackLast } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '999' }),
                 };
 
@@ -396,11 +379,44 @@ describe('queue-copy/service-copy', () => {
                 vi.useRealTimers();
             });
 
+            it('idle waits for in-flight acks: a late ACK still removes its message in move mode', async () => {
+                vi.useFakeTimers();
+                const { state, session, browser, onComplete, fireUp, fireMessage, ackLast } = setup({ mode: 'move' });
+                // An ack slower than the idle window, still inside its own timeout.
+                state.primaryPublisher = createSolacePublisher(session, { ackTimeoutMs: IDLE_TIMEOUT_MS * 2 });
+                state.verify = {
+                    inProgress: false, abort: new AbortController(),
+                    result: verifyResult({ messageCount: 2, oldestMsgId: '1', newestMsgId: '2' }),
+                };
+
+                const job = runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+                await flush();
+                fireUp();
+                fireMessage(msg('1'));
+                await flush();
+
+                // The source is quiet, but the publish is pending: the run keeps its browser.
+                await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS + 1_000);
+                expect(browser.disconnect).not.toHaveBeenCalled();
+                expect(onComplete).not.toHaveBeenCalled();
+
+                ackLast();
+                await flush();
+                expect(browser.removeMessageFromQueue).toHaveBeenCalledTimes(1);
+
+                // Nothing in flight now: the re-armed idle window ends the run.
+                await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS + 10);
+                await flush();
+                await job;
+                expect(onComplete.mock.calls[0][0].copied).toBe(1);
+                vi.useRealTimers();
+            });
+
             it('idle timer fires before any MESSAGE → count-mismatch error (copied=0)', async () => {
                 vi.useFakeTimers();
                 const { state, session, onComplete, fireUp } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
                 };
 
@@ -422,7 +438,7 @@ describe('queue-copy/service-copy', () => {
             it('publish reject → error status with the publisher reason', async () => {
                 const { state, session, onComplete, fireUp, fireMessage, rejectLast } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
                 };
 
@@ -440,13 +456,44 @@ describe('queue-copy/service-copy', () => {
                 expect(final.status).toBe('error');
                 expect(final.lastError).toBe('broker rejected');
             });
+
+            it('move mode removes only the messages the destination accepted: a rejected one stays on the source', async () => {
+                const { state, session, browser, onComplete, fireUp, fireMessage, ackLast, rejectLast } = setup({ mode: 'move' });
+                state.verify = {
+                    inProgress: false, abort: new AbortController(),
+                    result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
+                };
+                const accepted = msg('100');
+                const rejected = msg('101');
+
+                const job = runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+                await flush();
+                fireUp();
+                await flush();
+                fireMessage(accepted);
+                await flush();
+                ackLast();
+                await flush();
+                fireMessage(rejected);
+                await flush();
+                rejectLast('broker rejected');
+                await flush();
+                await job;
+
+                expect(browser.removeMessageFromQueue).toHaveBeenCalledTimes(1);
+                expect(browser.removeMessageFromQueue).toHaveBeenCalledWith(accepted);
+                const final = onComplete.mock.calls[0][0];
+                expect(final.status).toBe('error');
+                expect(final.copied).toBe(1);
+                expect(final.lastError).toBe('broker rejected');
+            });
         });
 
         describe('browser-error', () => {
             it('DOWN_ERROR with infoStr → error status carrying infoStr', async () => {
                 const { state, session, onComplete, fireUp, fireDown } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
                 };
 
@@ -466,7 +513,7 @@ describe('queue-copy/service-copy', () => {
             it('DOWN_ERROR without infoStr falls back to default message', async () => {
                 const { state, session, onComplete, fireUp } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
                 };
 
@@ -474,7 +521,6 @@ describe('queue-copy/service-copy', () => {
                 await flush();
                 fireUp();
                 await flush();
-                (state as any); // no-op anchor for readability
                 // DOWN_ERROR with no infoStr field at all.
                 ((session.createQueueBrowser as any).mock.results.at(-1)!.value as any)._handlers.DOWN_ERROR({});
                 await flush();
@@ -487,7 +533,7 @@ describe('queue-copy/service-copy', () => {
             it('CONNECT_FAILED_ERROR before UP → error', async () => {
                 const { state, session, onComplete, fireConnectFailed } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
                 };
 
@@ -504,7 +550,7 @@ describe('queue-copy/service-copy', () => {
             it('CONNECT_FAILED_ERROR without infoStr falls back to default message', async () => {
                 const { state, session, onComplete } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
                 };
 
@@ -517,6 +563,51 @@ describe('queue-copy/service-copy', () => {
                 expect(final.lastError).toBe('Browser connect failed');
             });
 
+            it('surfaces the reason from a real OperationError, which carries .message', async () => {
+                // The SDK emits an OperationError for this event (verified against
+                // dist/solclient.js): an Error subclass with `.message` and NO
+                // `infoStr`. The engine must read `.message`: reading only `infoStr`
+                // would discard the reason against a live broker and show the
+                // generic fallback. The other fixtures here pass `{ infoStr }`,
+                // which is the shape the SDK never sends.
+                const { state, session, onComplete } = setup();
+                state.verify = {
+                    inProgress: false, abort: new AbortController(),
+                    result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
+                };
+
+                const job = runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+                await flush();
+                const operationError = Object.assign(
+                    new Error('Permission Denied - not authorized to bind'), { subcode: 20 });
+                ((session.createQueueBrowser as any).mock.results.at(-1)!.value as any)
+                    ._handlers.CONNECT_FAILED_ERROR(operationError);
+                await flush();
+                await job;
+
+                expect(onComplete.mock.calls[0][0].lastError)
+                    .toBe('Permission Denied - not authorized to bind');
+            });
+
+            it('a createQueueBrowser throw completes the run with status=error and the reason', async () => {
+                const { state, session, onComplete } = setup();
+                (session.createQueueBrowser as any).mockImplementation(() => {
+                    throw new Error('You are not entitled to browse queue "src-q".');
+                });
+                state.verify = {
+                    inProgress: false, abort: new AbortController(),
+                    result: verifyResult({ messageCount: 1, oldestMsgId: '100', newestMsgId: '100' }),
+                };
+
+                await runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+
+                expect(onComplete).toHaveBeenCalledTimes(1);
+                const final = onComplete.mock.calls[0][0];
+                expect(final.status).toBe('error');
+                expect(final.lastError).toBe('You are not entitled to browse queue "src-q".');
+                expect(session.send).not.toHaveBeenCalled();
+            });
+
             it('synchronous browser.connect throw → browser-error', async () => {
                 const { state, session, onComplete } = setup();
                 ((session.createQueueBrowser as any).mock.results); // prime
@@ -524,7 +615,7 @@ describe('queue-copy/service-copy', () => {
                 (browser.connect as any).mockImplementation(() => { throw new Error('sync fail'); });
                 (session.createQueueBrowser as any).mockReturnValueOnce(browser);
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 1, oldestMsgId: '100', newestMsgId: '100' }),
                 };
 
@@ -540,7 +631,7 @@ describe('queue-copy/service-copy', () => {
                 (browser.connect as any).mockImplementation(() => { throw {}; });
                 (session.createQueueBrowser as any).mockReturnValueOnce(browser);
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 1, oldestMsgId: '100', newestMsgId: '100' }),
                 };
 
@@ -550,11 +641,38 @@ describe('queue-copy/service-copy', () => {
             });
         });
 
+        describe('a destination the SDK refuses', () => {
+            it('stops the run with the SDK reason at the first message, not a count mismatch after a full browse', async () => {
+                const reason = "Invalid QUEUE: Empty level(s) in 'a//b'@2.";
+                (window as any).solace.SolclientFactory.createDurableQueueDestination
+                    .mockImplementation(() => { throw new Error(reason); });
+                const { state, session, browser, onComplete, fireUp } = setup();
+                state.dest = { type: 'queue', name: 'a//b' };
+                state.verify = {
+                    inProgress: false, abort: new AbortController(),
+                    result: verifyResult({ messageCount: 3, oldestMsgId: '100', newestMsgId: '102' }),
+                };
+
+                const job = runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+                await flush();
+                fireUp();
+                (browser as any)._handlers.MESSAGE(msg('100'));
+                await flush();
+                await job;
+
+                const final = onComplete.mock.calls[0][0];
+                expect(final.status).toBe('error');
+                expect(final.lastError).toBe(reason);
+                expect(browser.disconnect).toHaveBeenCalled();
+                expect(session.send).not.toHaveBeenCalled();
+            });
+        });
+
         describe('cancel', () => {
             it('cancel before first MESSAGE → status=cancelled, copied=0', async () => {
                 const { state, session, onComplete, fireUp } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
                 };
 
@@ -576,7 +694,7 @@ describe('queue-copy/service-copy', () => {
             it('cancel during in-flight publish: rejectAllPending fires, status=cancelled', async () => {
                 const { state, session, onComplete, fireUp, fireMessage } = setup();
                 state.verify = {
-                    inProgress: false, abort: null,
+                    inProgress: false, abort: new AbortController(),
                     result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
                 };
 
@@ -606,7 +724,7 @@ describe('queue-copy/service-copy', () => {
             // triggers reached-max. copied=1, total=5 → mismatch.
             const { state, session, onComplete, fireUp, fireMessage, ackLast } = setup();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 5, oldestMsgId: '105', newestMsgId: '105' }),
             };
 
@@ -632,7 +750,7 @@ describe('queue-copy/service-copy', () => {
             // poll waits. evaluateAndFinish should report status=cancelled.
             const { state, session, onComplete, fireUp, fireMessage, ackLast } = setup();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 1, oldestMsgId: '100', newestMsgId: '100' }),
             };
 
@@ -661,7 +779,7 @@ describe('queue-copy/service-copy', () => {
             const total = PUBLISH_CONCURRENCY_HIGH + 5;
             const { state, session, browser, onComplete, fireUp, fireMessage } = setup();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({
                     messageCount: total,
                     oldestMsgId: '1',
@@ -688,7 +806,7 @@ describe('queue-copy/service-copy', () => {
             const total = PUBLISH_CONCURRENCY_HIGH + 5;
             const { state, session, browser, onComplete, fireUp, fireMessage, ackAt } = setup();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({
                     messageCount: total,
                     oldestMsgId: '1',
@@ -738,7 +856,7 @@ describe('queue-copy/service-copy', () => {
             } as any;
 
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({
                     messageCount: total,
                     oldestMsgId: '1',
@@ -773,7 +891,7 @@ describe('queue-copy/service-copy', () => {
             const total = PUBLISH_CONCURRENCY_HIGH + 5;
             const { state, session, browser, onComplete, fireUp, fireMessage, ackAt } = setup();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({
                     messageCount: total,
                     oldestMsgId: '1',
@@ -825,7 +943,7 @@ describe('queue-copy/service-copy', () => {
             const { state, session, browser, onComplete, fireUp, fireMessage, ackAt } =
                 setup({ mode: 'move' });
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 8, oldestMsgId: '1', newestMsgId: '100' }),
             };
 
@@ -868,7 +986,7 @@ describe('queue-copy/service-copy', () => {
                 throw new Error('remove boom');
             });
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 1, oldestMsgId: '100', newestMsgId: '100' }),
             };
 
@@ -891,56 +1009,58 @@ describe('queue-copy/service-copy', () => {
     });
 
     describe('Move mode — per-message remove', () => {
-        it('calls browser.removeMessageFromQueue immediately after each ACK, in order', async () => {
+        it('removes each message from the source only once its publish is acknowledged, in order', async () => {
             const { state, session, browser, onComplete, fireUp, fireMessage, ackLast } = setup({ mode: 'move' });
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 2, oldestMsgId: '100', newestMsgId: '101' }),
             };
-
-            const sentBefore: number[] = [];
-            const removedAfter: number[] = [];
-            (browser.removeMessageFromQueue as any).mockImplementation(() => {
-                removedAfter.push(removedAfter.length + 1);
-            });
+            const remove = browser.removeMessageFromQueue;
 
             const job = runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
             await flush();
             fireUp();
             await flush();
 
+            // While a publish is unacknowledged, its message stays on the source.
             const m1 = msg('100');
             fireMessage(m1);
             await flush();
-            sentBefore.push(1);
+            expect(remove).not.toHaveBeenCalled();
             ackLast();
             await flush();
+            expect(remove.mock.calls).toEqual([[m1]]);
 
             const m2 = msg('101');
             fireMessage(m2);
             await flush();
-            sentBefore.push(2);
+            expect(remove).toHaveBeenCalledTimes(1);
             ackLast();
             await flush();
             await job;
-
-            // Each ACK triggered a removeMessageFromQueue. Ordering: send #1
-            // resolved → remove #1; then send #2 resolved → remove #2.
-            expect(browser.removeMessageFromQueue).toHaveBeenCalledTimes(2);
-            expect(browser.removeMessageFromQueue).toHaveBeenNthCalledWith(1, m1);
-            expect(browser.removeMessageFromQueue).toHaveBeenNthCalledWith(2, m2);
-            expect(removedAfter).toEqual([1, 2]);
+            expect(remove.mock.calls).toEqual([[m1], [m2]]);
         });
     });
 
     describe('session selection', () => {
-        it('uses state.destPublisher for publish when set; primarySession only for the source browser', async () => {
-            const { state, session, onComplete, fireUp, fireMessage } = setup();
+        /** A destination session connected for the provisioned b1/v1. */
+        function connectedDest(state: ReturnType<typeof createInitialState>) {
+            state.destForm.sameBroker = false;
+            state.destForm.sameVpn = false;
+            state.destForm.credMode = 'provisioned';
+            state.destForm.provisioned = { broker: 'b1', vpn: 'v1' };
             const destSession = createSessionMock();
             state.destSession = destSession;
+            state.destSessionTarget = destTargetKey(state.destForm);
             state.destPublisher = createSolacePublisher(destSession);
+            return destSession;
+        }
+
+        it('uses state.destPublisher for publish when set; primarySession only for the source browser', async () => {
+            const { state, session, onComplete, fireUp, fireMessage } = setup();
+            const destSession = connectedDest(state);
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 1, oldestMsgId: '100', newestMsgId: '100' }),
             };
 
@@ -960,6 +1080,34 @@ describe('queue-copy/service-copy', () => {
             expect(destSession.send).toHaveBeenCalledTimes(1);
             expect(session.send).not.toHaveBeenCalled();
         });
+
+        it('This VPN publishes through the primary even while a destination session exists', () => {
+            const { state } = setup();
+            connectedDest(state);
+            state.destForm.sameBroker = true;
+            state.destForm.sameVpn = true;
+            expect(selectPublisher(state)).toBe(state.primaryPublisher);
+        });
+
+        it('no publisher when the destination session was connected for another VPN than the form names', () => {
+            const { state } = setup();
+            connectedDest(state);
+            state.destForm.provisioned.vpn = 'v2';
+            expect(selectPublisher(state)).toBeNull();
+        });
+
+        it('a run whose form no longer matches the destination session publishes nothing', async () => {
+            const { state, session, onComplete } = setup();
+            const destSession = connectedDest(state);
+            state.destForm.provisioned.vpn = 'v2';
+            state.verify = { inProgress: false, abort: new AbortController(), result: verifyResult({ messageCount: 1 }) };
+
+            await runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
+
+            expect(onComplete.mock.calls[0][0].status).toBe('error');
+            expect(session.createQueueBrowser).not.toHaveBeenCalled();
+            expect(destSession.send).not.toHaveBeenCalled();
+        });
     });
 
     describe('first-wins triggerStop', () => {
@@ -968,7 +1116,7 @@ describe('queue-copy/service-copy', () => {
             // outcome upgrades to cancelled but no extra send happens.
             const { state, session, onComplete, fireUp, fireDown } = setup();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
             };
 
@@ -982,24 +1130,20 @@ describe('queue-copy/service-copy', () => {
             await job;
 
             const final = onComplete.mock.calls[0][0];
-            // Cancel upgrades status, but the original lastError is preserved
-            // (cancel path clears it). Either way no publishes happened.
+            // Cancel upgrades status and the cancel branch clears the browser
+            // error. No publishes happened.
             expect(session.send).not.toHaveBeenCalled();
             expect(final.status).toBe('cancelled');
+            expect(final.lastError).toBeNull();
         });
 
         it('a second browser-event triggerStop hits the early-return; final lastError is the first reason', async () => {
             // Both DOWN_ERROR and CONNECT_FAILED_ERROR call triggerStop with
-            // 'browser-error', each setting state.job.lastError to their own
-            // infoStr beforehand. triggerStop's first-wins guard must keep
-            // stopReason fixed at the first call and not re-fire the drain.
-            // The browser-event lastError writes happen BEFORE triggerStop,
-            // so both will overwrite state.job.lastError — but the second
-            // triggerStop returns early so the drainAndFinish + onComplete
-            // pipeline runs exactly once.
+            // 'browser-error'. The first stop reason wins: the second handler
+            // must neither re-fire the drain nor overwrite lastError.
             const { state, session, browser, onComplete, fireUp, fireDown, fireConnectFailed } = setup();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
             };
 
@@ -1023,33 +1167,27 @@ describe('queue-copy/service-copy', () => {
             expect(browser.disconnect).toHaveBeenCalledTimes(1);
             const final = onComplete.mock.calls[0][0];
             expect(final.status).toBe('error');
-            // The second handler still wrote lastError before its (now-ignored)
-            // triggerStop call. The first-wins guard protects the run from
-            // double-processing, not the SDK from overwriting an error string.
-            // What matters: status stays 'error' and the run terminated cleanly.
+            expect(final.lastError).toBe('first failure');
         });
-    });
 
-    describe('GM_DISABLED is a no-op', () => {
-        it('does not crash and does not affect run progress', async () => {
-            const { state, session, browser, onComplete, fireUp, fireMessage, ackLast } = setup();
+        it('a DOWN_ERROR after a connect failure keeps the connect failure as lastError', async () => {
+            const { state, session, onComplete, fireUp, fireDown, fireConnectFailed } = setup();
             state.verify = {
-                inProgress: false, abort: null,
-                result: verifyResult({ messageCount: 1, oldestMsgId: '100', newestMsgId: '100' }),
+                inProgress: false, abort: new AbortController(),
+                result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '105' }),
             };
 
             const job = runCopyJob(state, session, { onProgress: vi.fn(), onComplete });
             await flush();
             fireUp();
-            (browser as any)._handlers.GM_DISABLED();
             await flush();
-            fireMessage(msg('100'));
-            await flush();
-            ackLast();
+            fireConnectFailed('first failure');
+            fireDown('second failure');
             await flush();
             await job;
 
-            expect(onComplete.mock.calls[0][0].status).toBe('completed');
+            expect(onComplete).toHaveBeenCalledTimes(1);
+            expect(onComplete.mock.calls[0][0].lastError).toBe('first failure');
         });
     });
 
@@ -1058,7 +1196,7 @@ describe('queue-copy/service-copy', () => {
             const { state, session, browser, onComplete, fireUp, fireMessage, ackLast } = setup();
             (browser.disconnect as any).mockImplementation(() => { throw new Error('cleanup boom'); });
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 1, oldestMsgId: '100', newestMsgId: '100' }),
             };
 
@@ -1099,7 +1237,7 @@ describe('queue-copy/service-copy', () => {
             const { state, session, onComplete, fireUp, fireMessage, fireDown } = setup();
             state.primaryPublisher = customPublisher as any;
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '500' }),
             };
 
@@ -1142,7 +1280,7 @@ describe('queue-copy/service-copy', () => {
             vi.useFakeTimers();
             const { state, session, onComplete, fireUp, fireMessage, fireDown, ackLast } = setup();
             state.verify = {
-                inProgress: false, abort: null,
+                inProgress: false, abort: new AbortController(),
                 result: verifyResult({ messageCount: 5, oldestMsgId: '100', newestMsgId: '500' }),
             };
 

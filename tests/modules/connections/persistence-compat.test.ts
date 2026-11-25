@@ -1,0 +1,90 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { config } from '../../../src/modules/connections/config.js';
+import type { ConnectionConfig } from '../../../src/core/connections/types';
+
+/**
+ * Persistence compatibility test.
+ *
+ * Ensures blobs persisted by the connections module's config.js deserialize
+ * into a shape that satisfies the `ConnectionConfig` type. This is the
+ * contract that lets queue-copy (and any other future consumer) safely treat
+ * a loaded config as `ConnectionConfig` without defensive re-validation of
+ * every field.
+ *
+ * Also guards against the "older version saved a shorter shape" case — if a
+ * user upgrades from a build that saved the shorter shape, `load()` must still succeed and
+ * return usable data rather than throw or silently corrupt.
+ *
+ * These are structural (runtime) checks; TypeScript type assertions are
+ * compile-time only and wouldn't catch a mismatch between the persisted JSON
+ * and the declared interface shape.
+ */
+describe('modules/connections -- persistence compat with connections module', () => {
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
+    it('a complete ConnectionConfig round-trips through save/load unchanged', () => {
+        const cfg: ConnectionConfig = {
+            host: 'broker.example.com',
+            solace: {
+                protocol: 'wss',
+                port: '8008',
+                urlPath: '/v2',
+                vpn: 'my-vpn',
+                user: 'admin',
+                authMode: 'basic',
+                connectRetries: 3,
+                connectTimeout: 5000,
+                reconnectRetries: -1,
+                reconnectWait: 2000,
+                maxMessagesPerQueue: 500,
+                clientNameId: 'my-client-id-42',
+            },
+            semp: {
+                protocol: 'https',
+                port: '1943',
+                urlPath: '/semp',
+                user: 'admin',
+            },
+        };
+
+        expect(config.save(cfg)).toBe(true);
+        const stored = (localStorage.setItem as any).mock.calls.at(-1)[1];
+        (localStorage.getItem as any).mockReturnValue(stored);
+
+        const loaded = config.load();
+        expect(loaded).toEqual(cfg);
+    });
+
+    it('a legacy-shaped blob missing newer fields still loads without throwing', () => {
+        // Simulates a save from an older version of the app that didn't yet
+        // have `maxMessagesPerQueue` or `authMode`. applyConfig in module.ts
+        // already guards every field with a truthy check — the loaded partial
+        // shape is handled by the consumer, not by load() itself.
+        const legacy = {
+            host: 'old.broker',
+            solace: {
+                protocol: 'ws',
+                port: '8000',
+                vpn: 'default',
+                user: 'admin',
+                // no authMode, no connectRetries, no maxMessagesPerQueue, etc.
+            },
+            semp: {
+                protocol: 'http',
+                port: '8080',
+                user: 'admin',
+            },
+        };
+
+        // Use the real save path to produce a properly-obfuscated blob.
+        expect(config.save(legacy as any)).toBe(true);
+        const stored = (localStorage.setItem as any).mock.calls.at(-1)[1];
+        (localStorage.getItem as any).mockReturnValue(stored);
+
+        // Must not throw, must return the same partial shape the caller saved.
+        const loaded = config.load();
+        expect(loaded).toEqual(legacy);
+    });
+});

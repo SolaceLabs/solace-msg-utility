@@ -17,7 +17,15 @@ export const EMPTY_MESSAGES = {
 } as const;
 
 /**
- * Render `rows` into `tbody`. When `rows` is empty, render a single
+ * The most rows the table draws at once: a broad filter on a large broker
+ * matches tens of thousands, and drawing them all freezes the tab. The counter
+ * still counts every match.
+ */
+export const MAX_RENDERED_ROWS = 500;
+
+/**
+ * Render `rows` into `tbody`, the first `MAX_RENDERED_ROWS` of them, with a
+ * last row saying how many more matched. When `rows` is empty, render a single
  * full-width "empty" row using `emptyHtml` (HTML, not text — callers pass
  * `EMPTY_MESSAGES.*` which embed `<strong>`).
  */
@@ -29,32 +37,17 @@ export function renderRows(tbody: HTMLElement, rows: SubscriptionRow[], emptyHtm
     }
     // Bulk-build via innerHTML — simpler than createElement in a hot loop and
     // safe because every interpolated value is escaped.
-    const html = rows.map(r =>
+    const more = rows.length > MAX_RENDERED_ROWS
+        ? `<tr class="subexp-empty-row subexp-more-row"><td colspan="3">Showing the first ${MAX_RENDERED_ROWS} of ${rows.length} matches. Narrow the filters to see the rest.</td></tr>`
+        : '';
+    const html = rows.slice(0, MAX_RENDERED_ROWS).map(r =>
         `<tr class="subexp-row">` +
         `<td>${escapeHtml(r.vpn)}</td>` +
         `<td>${escapeHtml(r.queue)}</td>` +
         `<td><code>${escapeHtml(r.topic)}</code></td>` +
         `</tr>`
-    ).join('');
+    ).join('') + more;
     tbody.innerHTML = html;
-}
-
-/** Toggle the SEMP-warning + content cards based on the connection flag. */
-export function updateVisibility(
-    elWarning: HTMLElement,
-    elAbout: HTMLElement,
-    elTable: HTMLElement,
-    isSempConnected: boolean,
-): void {
-    if (!isSempConnected) {
-        elWarning.classList.remove('hidden');
-        elAbout.classList.add('hidden');
-        elTable.classList.add('hidden');
-    } else {
-        elWarning.classList.add('hidden');
-        elAbout.classList.remove('hidden');
-        elTable.classList.remove('hidden');
-    }
 }
 
 /**
