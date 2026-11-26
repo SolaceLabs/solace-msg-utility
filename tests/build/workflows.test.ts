@@ -128,4 +128,11 @@ describe('workflows -- pins', () => {
         expect(sca).toMatch(/^permissions:\n {2}contents: read\n\n/m);
         expect(sca).toMatch(/^ {2}sca_scan:\n(?: {4}#.*\n)* {4}permissions:\n(?: {6}[\w-]+: \w+\n)* {6}id-token: write\n/m);
     });
+
+    it('keeps the CodeQL workflow token read-only, its one write right the upload of results', () => {
+        const codeql = read('.github/workflows/codeql.yml');
+        expect(codeql).toMatch(/^permissions:\n {2}contents: read\n\n/m);
+        expect(codeql).toMatch(/^ {4}permissions:\n {6}contents: read\n {6}security-events: write[^\n]*\n {4}strategy:\n/m);
+        expect(codeql.match(/^ +[\w-]+: write\b/gm)).toHaveLength(1);
+    });
 });

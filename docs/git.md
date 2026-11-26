@@ -8,7 +8,7 @@ This project ships in three forms:
 2. A **public PWA** hosted on GitHub Pages at `https://solacelabs.github.io/solace-msg-utility/`.
 3. The **PWA bundles** (`index.html` and its Direct-only variants, plus the offline `provisioned-demo.html`) attached to the GitHub Release. The Provisioned sign-in ships inside the image; the demo runs it against a fake gateway in the page.
 
-All three are produced by [`.github/workflows/tag.yml`](../.github/workflows/tag.yml), which fires when you **push a `v*` tag**. Nothing is built or pushed on an ordinary branch push or pull request (the only automatic runs are listed under [Day-to-day branching](#day-to-day-branching): the narrow CI trigger and the SCA scan).
+All three are produced by [`.github/workflows/tag.yml`](../.github/workflows/tag.yml), which fires when you **push a `v*` tag**. Nothing is built or pushed on an ordinary branch push or pull request (the only automatic runs are listed under [Day-to-day branching](#day-to-day-branching): the narrow CI trigger and the two scans).
 
 The tag itself is the single source of version truth. There is no version field to bump: the gateway reports the tag as-is (`v3.4.0`), the image tags and the PWA's `__APP_VERSION__` take it with the leading `v` stripped (`3.4.0`), and `package.json` carries the deliberately implausible placeholder `0.0.0-dev` so a build that lost the injection looks wrong rather than merely out of date.
 
@@ -44,7 +44,7 @@ The tag itself is the single source of version truth. There is no version field 
 
 There is **no** `develop`, `release/*`, or long-lived staging branch. The tag workflow runs only against the commit the tag points at, so whatever is on `main` at tag time is what ships.
 
-**No gate runs on push or PR by design**, with two exceptions. A PR that touches `.github/workflows/**`, `.github/dependabot.yml`, or the dev scripts gets the full gate, so Dependabot's action bumps are verified before merging. And [`sca-scan-and-guard.yml`](../.github/workflows/sca-scan-and-guard.yml) (the organisation's FOSSA SCA scan, configured by `.fossa.yml`) runs on every PR to and push to `main`; a push also records the commit in the organisation's release manifest. This means `main` can sit broken between releases, which is exactly why the pre-tag sweep below matters.
+**No gate runs on push or PR by design**, with three exceptions. A PR that touches `.github/workflows/**`, `.github/dependabot.yml`, or the dev scripts gets the full gate, so Dependabot's action bumps are verified before merging. And [`sca-scan-and-guard.yml`](../.github/workflows/sca-scan-and-guard.yml) (the organisation's FOSSA SCA scan, configured by `.fossa.yml`) runs on every PR to and push to `main`; a push also records the commit in the organisation's release manifest. So does [`codeql.yml`](../.github/workflows/codeql.yml): CodeQL code scanning of the Go, JavaScript and TypeScript code and of the workflows, with GitHub's default query suite, which also runs once a week. Its findings are under *Security -> Code scanning*; the workflow is written out because the organisation's policy leaves GitHub's default setup unavailable. This means `main` can sit broken between releases, which is exactly why the pre-tag sweep below matters.
 
 ---
 
@@ -244,6 +244,7 @@ Do **not** retag an existing version. Image consumers cache by digest, so retagg
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | Workflow does not fire at all | The tag doesn't match `v*`, or `tag.yml` isn't on the default branch yet. | Workflows must be merged to `main` before they can be relied on. Check the tag name. |
+| Every job of a workflow fails at *Set up job* with `all actions must be pinned to a full-length commit SHA` | The workflow uses an action by tag (`@v4`), which the organisation refuses. | Pin it by commit SHA with its `# <tag>` comment (see [Keeping the workflow pins current](#keeping-the-workflow-pins-current)). `tests/build/workflows.test.ts` fails on the same file locally. |
 | `plan` fails with `the tag must be vX.Y.Z` | A pre-release (`v3.5.0-rc.1`) or malformed (`v3.5`) tag. Nothing was built. | Delete the tag (`git push origin :refs/tags/<tag>`, `git tag -d <tag>`) and push a `vX.Y.Z` tag. |
 | `plan` fails with `BUILD_TARGETS must be a non-empty JSON array` | The repo variable is malformed. | `gh variable set BUILD_TARGETS --body '[{"os":"linux","arch":"amd64"}]'` -- mind the quoting. |
 | `gates` fails on the npm audit gate (`FATAL:` lines in `scan.log`) | A transitive npm dep has a new fixable HIGH/CRITICAL advisory: a release outside its range exists. Unfixable ones only print `WARN unfixable`. | `npm update <pkg>` for an in-range fix, else bump the direct dependency or add an `overrides` entry -- never `npm audit fix --force`. Re-run `./scripts/dev.sh scan`, commit, re-tag. |
