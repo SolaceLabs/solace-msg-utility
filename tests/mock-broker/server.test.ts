@@ -184,6 +184,14 @@ describe('mock-broker/server — SEMP v1 RPC', () => {
         expect(xml).toContain('code="fail"');
     });
 
+    it('keeps the failure well-formed when the queue name holds a double quote', async () => {
+        const xml = await text(await post(
+            '<rpc><show><queue><name>no"such</name><vpn-name>*</vpn-name><detail/></queue></show></rpc>'));
+        const doc = new DOMParser().parseFromString(xml, 'application/xml');
+        expect(doc.getElementsByTagName('parsererror')).toHaveLength(0);
+        expect(doc.querySelector('execute-result')?.getAttribute('reason')).toBe(`Unknown Queue 'no"such'`);
+    });
+
     it('pages subscriptions through more-cookie', async () => {
         const first = await text(await post(
             '<rpc><show><queue><name>*</name><vpn-name>*</vpn-name><subscriptions/><count/><num-elements>100</num-elements></queue></show></rpc>'));
