@@ -15,8 +15,9 @@
 import { allQueues, findQueueAnyVpn, getQueue, spoolUsage, vpnOn, type MockQueue } from '../broker/store';
 import { DIRECT_BROKER, QUEUE_STATE, queueStateOf } from '../fixtures';
 
+/** Text for an element or a double-quoted attribute value. */
 function esc(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function textOf(xml: string, tag: string): string | null {

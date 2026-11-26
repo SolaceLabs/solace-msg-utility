@@ -78,7 +78,7 @@ function routeKeys(source: string): string[] {
     const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
     const helpers = new Map(Array.from(code.matchAll(/const (\w+) = \(\w+: string\) => `(\/managed\/[^`]*)`/g), m => [m[1], m[2]] as [string, string]));
     const keys: string[] = [];
-    const call = /managedRequest(?:<(?:[^<>()]|\{[^}]*\})*>)?\(\s*'(GET|PUT|POST|DELETE)'\s*,\s*(?:(['`])([^'`]*)\2|(\w+)\()/g;
+    const call = /managedRequest(?:<(?:[^<>(){]|\{[^}]*\})*>)?\(\s*'(GET|PUT|POST|DELETE)'\s*,\s*(?:(['`])([^'`]*)\2|(\w+)\()/g;
     let matched = 0;
     for (const m of code.matchAll(call)) {
         matched++;
