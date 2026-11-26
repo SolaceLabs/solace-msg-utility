@@ -1,0 +1,55 @@
+name: CodeQL
+
+# Code scanning, written out because the organisation's policy leaves GitHub's
+# default setup unavailable here. It does what default setup does: the default
+# query suite over every language in the repository, on a PR to main, on a push
+# to main, and once a week so new queries reach code that has not moved.
+# Findings appear under Security -> Code scanning.
+#
+# Not a task of scripts/dev.sh: CodeQL has to watch the Go build itself, so
+# this is runner-only machinery, like the checkout in ci.yml.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 2 * * 6" # Saturdays, 02:23 UTC
+
+# Read-only by default; the one job asks for what it needs.
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04 # pinned; see ci.yml
+    permissions:
+      contents: read
+      security-events: write # uploads the results
+    strategy:
+      fail-fast: false # one language failing must not hide the others' results
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+          # Go is traced while it compiles: autobuild finds go-web-proxy/go.mod,
+          # and the runner's Go fetches the toolchain it pins.
+          - language: go
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # The category default setup uses, so each upload replaces that
+      # language's last results and a finding that is gone closes.
+      - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
+        with:
+          category: "/language:${{ matrix.language }}"
